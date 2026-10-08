@@ -10,6 +10,8 @@ import android.util.Log
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -50,8 +52,27 @@ class NcmUsbBridge internal constructor(
     private val directReadBuffer = ByteBuffer.allocateDirect(READ_CHUNK_BYTES)
     private var readRequest: UsbRequest? = null
     private var readQueued = false
-    private val readQueuePolicy = UsbReadQueuePolicy()
+    // API 17 迁移：API 17-20 的 UsbRequest.queue 行为不同，使用更保守的 8KB 兼容回退
+    private val readQueuePolicy = UsbReadQueuePolicy(
+        compatibilityBytes = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            LEGACY_COMPATIBILITY_BYTES
+        } else {
+            DEFAULT_COMPATIBILITY_BYTES
+        },
+    )
+    // API 17 迁移：requestWait(timeout) 是 API 26 新增重载。API 26+ 直接调用；
+    // API 17-25 由守护线程调用阻塞式 requestWait()（API 12+），完成的请求经队列交给读者，
+    // poll 超时即模拟原有的超时返回 null 行为。
+    private val legacyRequestWait = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+    private val completedRequests = LinkedBlockingQueue<UsbRequest>()
+    private val waitThreadExited = UsbRequest() // 哨兵：requestWait() 返回 null，连接已错误/关闭
     private val statusRunning = AtomicBoolean(statusEndpoint != null)
+    private val requestWaitThread = if (legacyRequestWait) {
+        Thread({ drainCompletedRequests() }, "ncm-request-wait").apply {
+            isDaemon = true
+            start()
+        }
+    } else null
     private val statusThread = statusEndpoint?.let { endpoint ->
         Thread({ drainStatus(endpoint) }, "ncm-status-in").apply {
             isDaemon = true
@@ -139,6 +160,24 @@ class NcmUsbBridge internal constructor(
         }
         connection.close()
         runCatching { requestToClose?.close() }
+    }
+
+    /**
+     * API 17 迁移：唯一的 requestWait() 使用者移到守护线程。阻塞式 requestWait()（API 12+）
+     * 返回完成的请求后放入队列；返回 null 表示连接错误/关闭，放入哨兵唤醒读者。
+     * 线程本身随 JVM 退出（daemon），close() 中 connection.close() 会使 requestWait() 返回。
+     */
+    private fun drainCompletedRequests() {
+        while (true) {
+            val completed = try {
+                connection.requestWait()
+            } catch (_: RuntimeException) {
+                break
+            }
+            if (completed == null) break
+            completedRequests.offer(completed)
+        }
+        completedRequests.offer(waitThreadExited)
     }
 
     private fun drainStatus(endpoint: UsbEndpoint) {
@@ -261,13 +300,27 @@ class NcmUsbBridge internal constructor(
             }
         }
         try {
-            val completed = try {
-                connection.requestWait(timeoutMillis.coerceAtLeast(1))
-            } catch (_: TimeoutException) {
+            val completed = if (legacyRequestWait) {
+                // API 17 迁移：API 17-25 由守护线程阻塞 requestWait()，这里按剩余时间从队列取完成的请求
+                val polled = try {
+                    completedRequests.poll(timeoutMillis.coerceAtLeast(1), TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    null
+                }
                 // Nothing arrived yet; the request stays queued for the next call. USBMUX owns
                 // authoritative detach/failure detection for the same phone.
-                return null
-            } ?: throw failSession("Android returned no NCM read request")
+                if (polled == null) return null
+                polled
+            } else {
+                // API 26+ 保持原调用：requestWait(long) 超时抛 TimeoutException
+                try {
+                    connection.requestWait(timeoutMillis.coerceAtLeast(1))
+                } catch (_: TimeoutException) {
+                    return null
+                } ?: throw failSession("Android returned no NCM read request")
+            }
+            if (completed === waitThreadExited) throw failSession("Android returned no NCM read request")
             if (completed !== request) throw failSession("Android completed an unexpected NCM request")
             readQueued = false
             val transferred = directReadBuffer.position()
@@ -310,6 +363,9 @@ class NcmUsbBridge internal constructor(
 
     companion object {
         private const val READ_CHUNK_BYTES = 32 * 1024
+        // API 17 迁移：兼容回退大小按系统版本选择（API 21+ 16KB，API 17-20 8KB）
+        private const val DEFAULT_COMPATIBILITY_BYTES = 16 * 1024
+        private const val LEGACY_COMPATIBILITY_BYTES = 8 * 1024
         private const val USB_PACKET_SIZE = 512
         private const val STATUS_POLL_TIMEOUT_MILLIS = 20
         private const val STATUS_POLL_INTERVAL_MILLIS = 500L

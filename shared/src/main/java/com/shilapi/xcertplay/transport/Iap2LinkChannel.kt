@@ -139,7 +139,8 @@ class Iap2LinkChannel private constructor(
         synchronized(lock) {
             failure = combineFailures(failure, terminalFailure)
         }
-        if (failure != null) throw failure
+        // Kotlin 1.9：failure 被 lambda 捕获，无法 smart cast，改用 ?.let
+        failure?.let { throw it }
     }
 
     private fun runPump() {

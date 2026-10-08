@@ -2,21 +2,27 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- API 17 迁移：androidx.car.app（minSdk 23）与 media3（minSdk 21）仅在高版本设备
+         上启用，相关代码路径都有 Build.VERSION 运行时保护；低版本设备强制通过清单合并，
+         不会调用到这些库的 API。 -->
+    <uses-sdk
+        tools:overrideLibrary="androidx.car.app,androidx.car.app.projected,androidx.media3.common,androidx.media3.exoplayer,androidx.media3.exoplayer_hls,androidx.media3.ui,androidx.media3.container" />
+
     <application
+        android:name="com.shilapi.xcertplay.DiPlayApplication"
         android:allowBackup="false"
-        android:fullBackupContent="@xml/backup_rules"
-        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@drawable/ic_carplay"
         android:label="@string/app_name"
-        android:localeConfig="@xml/locales_config"
         android:roundIcon="@drawable/ic_carplay"
         android:supportsRtl="true"
-        android:resizeableActivity="true"
         android:theme="@style/Theme.Xcertplay">
-
-        <meta-data
+        <!-- API 17 迁移：移除高版本属性（低版本系统会忽略，但保持清单干净）
+             fullBackupContent 为 API 23+；dataExtractionRules 为 API 31+；
+             localeConfig 为 API 33+；resizeableActivity 为 API 24+；
+             allow_multiple_resumed_activities 元数据为 API 31+ -->
+        <!-- <meta-data
             android:name="android.allow_multiple_resumed_activities"
-            android:value="true" />
+            android:value="true" /> -->
 
         <receiver
             android:name="com.shilapi.xcertplay.BootReceiver"

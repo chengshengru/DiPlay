@@ -6,16 +6,17 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- API 17 迁移：移除 API 29+ 的细分类型权限与 API 33 的通知权限 -->
+    <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" /> -->
+    <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" /> -->
+    <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" /> -->
+    <!-- <uses-permission android:name="android.permission.POST_NOTIFICATIONS" /> -->
     <!-- Optional: the dashboard map as a card over the home screen. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Optional, owner-enabled Usage Access for the verified DiLink 5.1 cluster profile. -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
-    <!-- The centre card also follows whichever launcher is the default home. -->
-    <queries>
+    <!-- API 17 迁移：移除 <queries>（API 30+ 包可见性），targetSdk 28 下不需要 -->
+    <!-- <queries>
         <package android:name="com.byd.carsettings" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -25,7 +26,7 @@
             <action android:name="android.intent.action.OPEN_DOCUMENT" />
             <data android:mimeType="*/*" />
         </intent>
-    </queries>
+    </queries> -->
     <application>
         <provider
             android:name="com.shilapi.xcertplay.DiagnosticReportProvider"
@@ -46,8 +47,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- API 17 迁移：移除 foregroundServiceType（API 29+），低版本忽略该属性 -->
         <service android:name="com.shilapi.xcertplay.DiPlaySessionService"
-            android:exported="false" android:foregroundServiceType="connectedDevice|microphone|location" />
+            android:exported="false" />
 
         <activity
             android:name="com.shilapi.xcertplay.CarPlayHostActivity"

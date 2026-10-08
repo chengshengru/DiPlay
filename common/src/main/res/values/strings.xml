@@ -728,4 +728,24 @@
     <string name="settings_interface_size">Interface size</string>
     <string name="settings_interface_size_auto">Automatic</string>
     <string name="settings_interface_size_hint">Size of text and controls on DiPlay\'s own screens. Automatic enlarges them on large screens with a low density. CarPlay is not affected.</string>
+    <string name="main_board_i2c_title">Board I2C diagnostic</string>
+    <string name="main_board_i2c_hint">Linux I2C device</string>
+    <string name="main_run_self_check">Run MFi self-check</string>
+    <string name="main_ch341_note">CH341 requires deployment-specific VID/PID configuration.</string>
+    <string name="settings_external_wifi_ssid_unknown">SSID: --</string>
+    <string name="settings_external_wifi_ip_unknown">IP: --</string>
+    <string name="settings_external_wifi_band_unknown">Band: --</string>
+    <string name="settings_external_wifi_scan">Scan for CarPlay devices</string>
+    <string name="settings_external_wifi_ip_hint">IP address</string>
+    <string name="settings_external_wifi_connect">Connect</string>
+    <string name="settings_external_wifi_disconnect">Disconnect</string>
+    <string name="settings_external_wifi_input_ip">Enter an IP address</string>
+    <string name="settings_external_wifi_connecting">Connecting…</string>
+    <string name="settings_external_wifi_connected">Connected to %1$s</string>
+    <string name="settings_external_wifi_disconnected">Disconnected: %1$s</string>
+    <string name="settings_external_wifi_error">Error: %1$s</string>
+    <string name="settings_external_wifi_scanning">Scanning…</string>
+    <string name="settings_external_wifi_found_device">Found device: %1$s</string>
+    <string name="settings_external_wifi_not_available">Connect to a Wi-Fi network first</string>
+    <string name="settings_external_wifi_device_label">%1$s (%2$s:%3$d)</string>
 </resources>

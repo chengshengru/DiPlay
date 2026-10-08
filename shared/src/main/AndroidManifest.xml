@@ -6,13 +6,15 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission
+    <!-- API 17 迁移：移除 NEARBY_WIFI_DEVICES（API 33+）与 usesPermissionFlags（API 31+） -->
+    <!-- <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"
-        android:usesPermissionFlags="neverForLocation" />
+        android:usesPermissionFlags="neverForLocation" /> -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- API 17 迁移：移除 BLUETOOTH_CONNECT（API 31+）；基础蓝牙权限安装时授予 -->
+    <!-- <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" /> -->
     <uses-permission
         android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
@@ -24,7 +26,8 @@
         android:name="android.hardware.usb.host"
         android:required="false" />
 
-    <queries>
+    <!-- API 17 迁移：移除 <queries>（API 30+ 包可见性） -->
+    <!-- <queries>
         <package android:name="com.byd.carsettings" />
         <package android:name="com.byd.appmgr" />
         <package android:name="com.byd.deviceinfo" />
@@ -39,7 +42,7 @@
         <intent>
             <action android:name="com.android.settings.WIFI_TETHER_SETTINGS" />
         </intent>
-    </queries>
+    </queries> -->
 
     <application android:usesCleartextTraffic="true">
         <!-- Minimum Car API level -->

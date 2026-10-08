@@ -631,4 +631,24 @@
     <string name="settings_interface_size">حجم الواجهة</string>
     <string name="settings_interface_size_auto">تلقائي</string>
     <string name="settings_interface_size_hint">حجم النص وعناصر التحكم في شاشات DiPlay. يكبّرها الوضع التلقائي على الشاشات الكبيرة منخفضة الكثافة. لا يتأثر CarPlay.</string>
+    <string name="main_board_i2c_title">تشخيص I2C للوحة</string>
+    <string name="main_board_i2c_hint">جهاز Linux I2C</string>
+    <string name="main_run_self_check">تشغيل الفحص الذاتي MFi</string>
+    <string name="main_ch341_note">يتطلب CH341 إعداد VID/PID خاص بالنشر.</string>
+    <string name="settings_external_wifi_ssid_unknown">SSID: --</string>
+    <string name="settings_external_wifi_ip_unknown">IP: --</string>
+    <string name="settings_external_wifi_band_unknown">النطاق: --</string>
+    <string name="settings_external_wifi_scan">البحث عن أجهزة CarPlay</string>
+    <string name="settings_external_wifi_ip_hint">عنوان IP</string>
+    <string name="settings_external_wifi_connect">اتصال</string>
+    <string name="settings_external_wifi_disconnect">قطع الاتصال</string>
+    <string name="settings_external_wifi_input_ip">أدخل عنوان IP</string>
+    <string name="settings_external_wifi_connecting">جارٍ الاتصال…</string>
+    <string name="settings_external_wifi_connected">تم الاتصال بـ %1$s</string>
+    <string name="settings_external_wifi_disconnected">انقطع الاتصال: %1$s</string>
+    <string name="settings_external_wifi_error">خطأ: %1$s</string>
+    <string name="settings_external_wifi_scanning">جارٍ البحث…</string>
+    <string name="settings_external_wifi_found_device">جهاز مكتشف: %1$s</string>
+    <string name="settings_external_wifi_not_available">اتصل بشبكة Wi-Fi أولاً</string>
+    <string name="settings_external_wifi_device_label">%1$s (%2$s:%3$d)</string>
 </resources>

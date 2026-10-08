@@ -12,7 +12,8 @@ pluginManagement {
     }
 }
 plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+    // 0.5.0 要求 Gradle 7.6+（1.0.0 要求 Gradle 8+）；当前 wrapper 为 7.6.4（腾讯云镜像）
+    id("org.gradle.toolchains.foojay-resolver-convention") version "0.5.0"
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)

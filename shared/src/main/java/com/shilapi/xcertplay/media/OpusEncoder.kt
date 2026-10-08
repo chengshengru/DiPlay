@@ -9,6 +9,8 @@ import java.io.Closeable
  * Encodes 20 ms chunks of 48 kHz mono PCM into raw Opus access units for the CarPlay
  * microphone uplink.
  */
+// Kotlin 1.9：ByteArray.toHexString() 仍是 ExperimentalStdlibApi，需显式 opt-in
+@OptIn(ExperimentalStdlibApi::class)
 internal class OpusEncoder(bitrate: Int) : Closeable {
     private val codec: MediaCodec? = try {
         val format = MediaFormat.createAudioFormat(

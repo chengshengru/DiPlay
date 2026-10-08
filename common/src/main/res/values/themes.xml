@@ -1,14 +1,13 @@
 <resources>
-    <style name="Theme.Xcertplay" parent="android:Theme.Material.NoActionBar">
+    <!-- API 17 基线：Theme.Material 是 API 21+，低版本回退 Holo。
+         高版本属性（colorAccent/windowLightStatusBar/navigationBarColor/statusBarColor）
+         放到 values-v21/themes.xml 覆盖。 -->
+    <style name="Theme.Xcertplay" parent="android:Theme.Holo.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#A6C8FF</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:navigationBarColor">#0C111B</item>
-        <item name="android:statusBarColor">#0C111B</item>
         <item name="android:windowBackground">#0C111B</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
-    <style name="Theme.AdbCluster" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.AdbCluster" parent="android:Theme.Holo.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>

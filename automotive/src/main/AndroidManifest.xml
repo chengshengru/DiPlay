@@ -11,6 +11,7 @@
         android:required="true" />
 
     <application
+        android:name="com.shilapi.xcertplay.DiPlayApplication"
         android:allowBackup="true"
         android:appCategory="audio"
         android:dataExtractionRules="@xml/data_extraction_rules"

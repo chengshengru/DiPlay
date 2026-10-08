@@ -1,13 +1,17 @@
 plugins {
     id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
 }
 android {
     namespace = 'com.shilapi.xcertplay.shared'
-    compileSdk = 37
+    // 本机 android-33/34/35 jar 为裁剪版（缺 TetheringManager 等类），使用完整的 android-36
+    compileSdk = 36
 
     defaultConfig {
-        minSdk = 28
-        targetSdk = 37
+        minSdk = 17
+        targetSdk = 28
+        // API 17-20：desugaring 要求 legacy multidex
+        multiDexEnabled true
 
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
@@ -15,27 +19,48 @@ android {
 
         externalNativeBuild {
             ndkBuild {
-                arguments 'APP_PLATFORM=android-28'
+                // 降低 NDK 平台版本以支持 API 17
+                arguments 'APP_PLATFORM=android-17'
+                // 使用 STL 兼容版本
+                arguments 'APP_STL=c++_shared'
             }
         }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    ndkVersion = '28.2.13676358'
+    // NDK r28 最低支持 android-21；API 17 需使用 NDK 21.x
+    ndkVersion = '21.1.6352462'
     externalNativeBuild {
         ndkBuild {
             path = file('src/main/jni/Android.mk')
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        // 使用 Java 8 以支持 desugaring
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+        coreLibraryDesugaringEnabled true
+    }
+
+    lint {
+        disable += ['ExpiredTargetSdkVersion', 'OldTargetApi']
     }
 }
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    // Java 8 字节码以支持 core library desugaring
+    kotlinOptions.jvmTarget = '1.8'
+}
+
 dependencies {
+    // Core library desugaring - 必须
+    coreLibraryDesugaring libs.desugar.jdk.libs
+
+    // androidx.car.app 最低 minSdk 19：仅 Android Auto 相关代码使用，
+    // API 17-18 设备通过运行时保护跳过该功能
     implementation libs.androidx.app
     implementation libs.bouncycastle
     implementation libs.jmdns
     testImplementation libs.junit
-    testImplementation 'org.robolectric:robolectric:4.17'
+    testImplementation 'org.robolectric:robolectric:4.9'
 }

@@ -1,21 +1,22 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.android)
 }
 
 android {
     namespace = "com.shilapi.xcertplay"
-    compileSdk {
-        version = release(37)
-    }
+    // 本机 android-33/34/35 jar 为裁剪版（缺 TetheringManager 等类），使用完整的 android-36
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.shilapi.xcertplay"
-        minSdk = 28
-        targetSdk = 37
+        minSdk = 19 // androidx.car.app.automotive 要求 minSdk >= 19
+        targetSdk = 28
         versionCode = 1201
         versionName = "1.2.1"
 
+        // API 19-20：desugaring 要求 legacy multidex
+        multiDexEnabled = true
     }
 
     signingConfigs {
@@ -32,33 +33,24 @@ android {
 
     buildTypes {
         release {
-            optimization {
-                enable = false
-            }
+            isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-    buildFeatures {
-        compose = true
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+        isCoreLibraryDesugaringEnabled = true
     }
 }
 
 dependencies {
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(project(":common"))
     implementation(project(":shared"))
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.app.automotive)
     implementation(libs.androidx.appcompat)
-    implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    debugImplementation(libs.androidx.compose.ui.tooling)
+    // 移除所有 Compose 依赖（API 17 不支持）
 }

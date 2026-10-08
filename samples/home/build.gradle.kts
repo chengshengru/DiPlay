@@ -5,21 +5,22 @@ plugins {
 
 android {
     namespace = "com.diplay.home"
-    compileSdk {
-        version = release(37)
-    }
+    // 本机 android-33/34/35 jar 为裁剪版（缺 TetheringManager 等类），使用完整的 android-36
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.diplay.home"
-        minSdk = 30 // SurfaceView.getHostToken and setChildSurfacePackage
-        targetSdk = 37
+        // 该示例依赖 SurfaceView.getHostToken 与 setChildSurfacePackage（API 30+），
+        // 面向新设备，不参与 API 17 迁移
+        minSdk = 30
+        targetSdk = 33
         versionCode = 1
         versionName = "0.1"
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
 
     testOptions {
@@ -30,10 +31,5 @@ android {
 dependencies {
     implementation(libs.androidx.activity)
     testImplementation(libs.junit)
-    testImplementation("org.robolectric:robolectric:4.17")
-}
-
-tasks.withType<Test>().configureEach {
-    // Robolectric's API 36 shared-memory implementation needs this JDK interface.
-    jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
+    testImplementation("org.robolectric:robolectric:4.9")
 }

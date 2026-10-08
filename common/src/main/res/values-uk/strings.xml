@@ -643,4 +643,24 @@
     <string name="settings_interface_size">Розмір інтерфейсу</string>
     <string name="settings_interface_size_auto">Автоматично</string>
     <string name="settings_interface_size_hint">Розмір тексту й елементів керування на екранах DiPlay. В автоматичному режимі вони збільшуються на великих екранах із низькою щільністю. CarPlay не змінюється.</string>
+    <string name="main_board_i2c_title">Діагностика I2C плати</string>
+    <string name="main_board_i2c_hint">Пристрій Linux I2C</string>
+    <string name="main_run_self_check">Запустити самодіагностику MFi</string>
+    <string name="main_ch341_note">CH341 потребує налаштування VID/PID під конкретне розгортання.</string>
+    <string name="settings_external_wifi_ssid_unknown">SSID: --</string>
+    <string name="settings_external_wifi_ip_unknown">IP: --</string>
+    <string name="settings_external_wifi_band_unknown">Діапазон: --</string>
+    <string name="settings_external_wifi_scan">Пошук пристроїв CarPlay</string>
+    <string name="settings_external_wifi_ip_hint">IP-адреса</string>
+    <string name="settings_external_wifi_connect">Підключити</string>
+    <string name="settings_external_wifi_disconnect">Відключити</string>
+    <string name="settings_external_wifi_input_ip">Введіть IP-адресу</string>
+    <string name="settings_external_wifi_connecting">Підключення…</string>
+    <string name="settings_external_wifi_connected">Підключено до %1$s</string>
+    <string name="settings_external_wifi_disconnected">Відключено: %1$s</string>
+    <string name="settings_external_wifi_error">Помилка: %1$s</string>
+    <string name="settings_external_wifi_scanning">Пошук…</string>
+    <string name="settings_external_wifi_found_device">Знайдено пристрій: %1$s</string>
+    <string name="settings_external_wifi_not_available">Спочатку підключіться до мережі Wi-Fi</string>
+    <string name="settings_external_wifi_device_label">%1$s (%2$s:%3$d)</string>
 </resources>

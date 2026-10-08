@@ -9,8 +9,14 @@ internal data class UsbReadQueueResult(val queued: Boolean, val firstBytes: Int,
  * Android 9 UsbRequest.queue(ByteBuffer) accepts any size and clears its queued state on false:
  * https://android.googlesource.com/platform/frameworks/base/+/android-9.0.0_r1/core/java/android/hardware/usb/UsbRequest.java
  * Call under the pipe's state lock, including publication, queueing and the open-state checks.
+ *
+ * API 17 迁移：API 17-20 的 UsbRequest.queue(ByteBuffer) 行为与高版本不同，调用方按
+ * Build.VERSION.SDK_INT 传入更保守的 8KB 兼容大小；API 21+ 保持原 16KB。
+ * 大小由构造参数注入（而非在类内读 Build），保持纯 JVM 单元测试可运行。
  */
-internal class UsbReadQueuePolicy {
+internal class UsbReadQueuePolicy(
+    private val compatibilityBytes: Int = COMPATIBILITY_BYTES,
+) {
     private var successfulLimit: Int? = null
 
     fun queue(buffer: ByteBuffer, checkOpen: () -> Unit, submit: (ByteBuffer) -> Boolean): UsbReadQueueResult {
@@ -26,15 +32,15 @@ internal class UsbReadQueuePolicy {
         check(buffer.position() == position && buffer.limit() == position + firstBytes) {
             "Rejected USB queue changed its buffer state"
         }
-        if (firstBytes <= COMPATIBILITY_BYTES) {
+        if (firstBytes <= compatibilityBytes) {
             buffer.limit(originalLimit)
             return UsbReadQueueResult(false, firstBytes)
         }
         checkOpen()
-        buffer.limit(position + COMPATIBILITY_BYTES)
+        buffer.limit(position + compatibilityBytes)
         val queued = submit(buffer)
-        if (queued) successfulLimit = COMPATIBILITY_BYTES else buffer.limit(originalLimit)
-        return UsbReadQueueResult(queued, firstBytes, COMPATIBILITY_BYTES)
+        if (queued) successfulLimit = compatibilityBytes else buffer.limit(originalLimit)
+        return UsbReadQueueResult(queued, firstBytes, compatibilityBytes)
     }
 
     private companion object { const val COMPATIBILITY_BYTES = 16 * 1024 }

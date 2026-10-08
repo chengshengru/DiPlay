@@ -19,6 +19,8 @@ import java.io.Closeable
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.concurrent.Executor
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -340,6 +342,55 @@ class Iap2UsbSession internal constructor(
     private var failure: IphoneUsbException? = null
     private var pendingRead: UsbRequest? = null
     private val readQueuePolicy = UsbReadQueuePolicy()
+    // API 17 迁移：requestWait(long) 重载是 API 26 新增。API 26+ 直接调用；
+    // API 17-25 由守护线程调用阻塞式 requestWait()（API 12+），完成的请求经队列交给读者。
+    private val legacyRequestWait = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+    private val completedRequests = if (legacyRequestWait) LinkedBlockingQueue<UsbRequest>() else null
+    private val waitThreadExited = UsbRequest() // 哨兵：requestWait() 返回 null，连接已错误/关闭
+    private val requestWaitThread = if (legacyRequestWait) {
+        Thread({ drainCompletedRequests() }, "usbmux-request-wait").apply {
+            isDaemon = true
+            start()
+        }
+    } else null
+
+    /**
+     * API 17 迁移：守护线程循环调用阻塞式 requestWait()，把完成的请求放入队列；
+     * 返回 null 表示连接错误/关闭，放入哨兵唤醒读者。close() 后 connection 关闭会使
+     * requestWait() 返回，线程随之退出（daemon 线程不阻止 JVM 退出）。
+     */
+    private fun drainCompletedRequests() {
+        while (true) {
+            val completed = try {
+                connection.requestWait()
+            } catch (_: RuntimeException) {
+                break
+            }
+            if (completed == null) break
+            completedRequests?.offer(completed)
+        }
+        completedRequests?.offer(waitThreadExited)
+    }
+
+    /** 返回 null 表示超时（请求保持排队）；哨兵或 requestWait() 返回 null 时判定会话失败。 */
+    private fun awaitCompletedRead(timeoutMillis: Long): UsbRequest? {
+        if (!legacyRequestWait) {
+            return try {
+                connection.requestWait(timeoutMillis)
+            } catch (_: TimeoutException) {
+                null
+            } ?: throw failSession("Android returned no USBMUX read request")
+        }
+        val queue = completedRequests ?: return null
+        val polled = try {
+            queue.poll(timeoutMillis, TimeUnit.MILLISECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return null
+        }
+        if (polled === waitThreadExited) throw failSession("Android returned no USBMUX read request")
+        return polled
+    }
 
     fun write(data: ByteArray, timeoutMillis: Int) = synchronized(writeLock) {
         checkOpen()
@@ -386,14 +437,11 @@ class Iap2UsbSession internal constructor(
                         "fallbackBytes=${queueResult.fallbackBytes}",
                 )
             }
-            val completed = try {
-                connection.requestWait(timeoutMillis)
-            } catch (_: TimeoutException) {
+            val completed = awaitCompletedRead(timeoutMillis)
+            if (completed == null) {
+                // API 17 迁移：超时（legacy 队列 poll 超时或 API 26+ TimeoutException）
                 drainCancelledRead(request)
                 return@synchronized null
-            }
-            if (completed == null) {
-                throw failSession("Android returned no USBMUX read request")
             }
             if (completed !== request) {
                 throw failSession("Android completed an unexpected USB request")
@@ -438,11 +486,9 @@ class Iap2UsbSession internal constructor(
         if (!request.cancel()) {
             throw failSession("Android could not cancel timed out USBMUX read request")
         }
-        val completed = try {
-            connection.requestWait(CANCEL_DRAIN_TIMEOUT_MILLIS)
-        } catch (_: TimeoutException) {
-            throw failSession("Timed out draining cancelled USBMUX read request")
-        }
+        // API 17 迁移：经 awaitCompletedRead 统一等待（legacy 队列或 API 26+ 定时重载）
+        val completed = awaitCompletedRead(CANCEL_DRAIN_TIMEOUT_MILLIS)
+            ?: throw failSession("Timed out draining cancelled USBMUX read request")
         if (completed !== request) {
             throw failSession("Android did not drain the cancelled USBMUX read request")
         }

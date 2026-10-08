@@ -783,7 +783,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun isIphoneUsbAttachment(intent: Intent): Boolean {
         if (intent.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return false
-        val device = androidx.core.content.IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        // API 17 迁移：androidx.core 1.9.0 无 IntentCompat（1.13+ 才有），
+        // 使用旧版 getParcelableExtra(String)（API 1 起可用，API 33 才废弃）
+        @Suppress("DEPRECATION")
+        val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
         return device?.vendorId == IphoneUsbMatcher.APPLE_VENDOR_ID
     }
 

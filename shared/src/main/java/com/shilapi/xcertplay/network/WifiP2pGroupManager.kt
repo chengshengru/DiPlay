@@ -90,7 +90,7 @@ class WifiP2pGroupManager(
                 val group = result.get()
                 if (group == null) "p2pGroup=absent association=unknown"
                 else "p2pGroup=present owner=${group.isGroupOwner} " +
-                    "sameGroup=${group.networkName == observedCreatedName} " +
+                    "sameGroup=${groupNetworkName(group) == observedCreatedName} " +
                     "reportedP2pClients=${group.clientList.size} association=unknown legacyClients=not_exposed"
             }
         } catch (error: InterruptedException) {
@@ -162,12 +162,15 @@ class WifiP2pGroupManager(
             val existing = requestGroupInfo(attempt, p2pChannel, REQUEST_POLL_NANOS, requireResponse = true)
             diagnostic("Wi-Fi P2P existingGroup=${existing != null}")
             if (existing != null) {
-                if (!P2pOwnership.canReclaim(existing.isGroupOwner, existing.networkName,
+                // API 17 迁移：低版本无法读取组名（getNetworkName 为 API 28+），
+                // canReclaim 收到 null 时按"无法确认归属"处理，保守要求重置。
+                val existingName = groupNetworkName(existing)
+                if (!P2pOwnership.canReclaim(existing.isGroupOwner, existingName,
                         ownership.getString("owned_ssid", null), ssidPrefix)) {
                     throw P2pResetRequiredException()
                 }
                 diagnostic("Wi-Fi P2P reclaiming retained owned group")
-                removeGroupBlocking(p2pChannel, existing.networkName)
+                removeGroupBlocking(p2pChannel, existingName)
                 val removalDeadline = minOf(deadlineNanos, deadlineAfter(REMOVE_GROUP_TIMEOUT_MILLIS))
                 while (requestGroupInfo(attempt, p2pChannel, REQUEST_POLL_NANOS, requireResponse = true) != null) {
                     if (remainingNanos(removalDeadline) == 0L) throw IOException("Wi-Fi Direct reset did not finish")
@@ -318,7 +321,7 @@ class WifiP2pGroupManager(
         }
         synchronized(legacyChannelLock) {
             if (activeChannel != null) releaseLegacyChannelRestriction(activeChannel)
-            activeChannel?.close()
+            closeChannel(activeChannel)
         }
         activeThread?.quitSafely()
     }
@@ -580,8 +583,8 @@ class WifiP2pGroupManager(
                 throw IOException("Wi-Fi P2P device became a group client instead of owner")
             }
 
-            val networkName = group.networkName?.takeIf { it.isNotBlank() }
-            val passphrase = group.passphrase?.takeIf { it.isNotBlank() }
+            val networkName = groupNetworkName(group)
+            val passphrase = groupPassphrase(group)
             val interfaceName = legacyGroupInterface(group)
             if (networkName == null || passphrase == null || interfaceName == null) {
                 lastReason = "incomplete group details ssid=${networkName != null} " +
@@ -624,6 +627,31 @@ class WifiP2pGroupManager(
     private fun legacyGroupInterface(group: WifiP2pGroup): String? =
         runCatching { group.getInterface()?.takeIf { it.isNotBlank() } }.getOrNull()
 
+    // API 17 迁移：getNetworkName/getPassphrase 是 Android 9（API 28）新增。
+    // API 17-27 回退到旧版 getSSID()/getPrePSK()（API 28 已从公开 SDK 移除，只能反射调用）。
+    private fun groupNetworkName(group: WifiP2pGroup): String? =
+        runCatching { group.networkName?.takeIf { it.isNotBlank() } }.getOrNull()
+            ?: invokeLegacyGroupString(group, "getSSID")
+
+    private fun groupPassphrase(group: WifiP2pGroup): String? =
+        runCatching { group.passphrase?.takeIf { it.isNotBlank() } }.getOrNull()
+            ?: invokeLegacyGroupString(group, "getPrePSK")
+
+    private fun invokeLegacyGroupString(group: WifiP2pGroup, methodName: String): String? = runCatching {
+        val method = group.javaClass.getMethod(methodName)
+        (method.invoke(group) as? String)?.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    // API 17 迁移：Channel.close() 是 API 27 新增；低版本无法显式关闭，依赖连接释放与 GC。
+    private fun closeChannel(activeChannel: WifiP2pManager.Channel?) {
+        if (activeChannel == null) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            runCatching { activeChannel.close() }
+        } else {
+            diagnostic("Wi-Fi P2P channel close skipped api=${Build.VERSION.SDK_INT}")
+        }
+    }
+
     private fun requestGroupInfo(
         attempt: StartAttempt,
         channel: WifiP2pManager.Channel,
@@ -635,9 +663,12 @@ class WifiP2pGroupManager(
         p2pManager.requestGroupInfo(channel) {
             // Keep the first identity returned after our successful creation. A later global
             // broadcast may describe a replacement group belonging to another app.
+            // API 17 迁移：getNetworkName 仅在 API 28+ 可用，低版本返回 null，
+            // 此时 requestedName 非空即视为不匹配，避免误认领其它应用创建的组。
+            val name = it?.let(::groupNetworkName)
             if (attempt.createSucceeded && observedCreatedName == null && it?.isGroupOwner == true &&
-                (requestedName == null || it.networkName == requestedName)) {
-                observedCreatedName = it.networkName
+                (requestedName == null || name == requestedName)) {
+                observedCreatedName = name
             }
             result.set(it)
             latch.countDown()
@@ -827,7 +858,7 @@ class WifiP2pGroupManager(
         }
         synchronized(legacyChannelLock) {
             if (failedChannel != null) releaseLegacyChannelRestriction(failedChannel)
-            failedChannel?.close()
+            closeChannel(failedChannel)
         }
         failedThread?.quitSafely()
     }
@@ -848,7 +879,7 @@ class WifiP2pGroupManager(
                 // Cleanup needs this attempt's exact identity. The reinstall namespace used at
                 // startup is broader and could also match a newer DiPlay session.
                 val ours = current.isGroupOwner && !expectedName.isNullOrBlank() &&
-                    current.networkName == expectedName
+                    groupNetworkName(current) == expectedName
                 if (!ours) {
                     diagnostic("Wi-Fi P2P cleanup skipped=another_app_owns_group")
                     latch.countDown()

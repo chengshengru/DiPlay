@@ -1,6 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.android)
 }
 
 // Optional local-only input. CI and ordinary source builds contain no accessory identity.
@@ -9,19 +9,24 @@ val localAuthenticationAssets = providers.environmentVariable("DIPLAY_AUTH_ASSET
 
 android {
     namespace = "com.shilapi.xcertplay"
-    compileSdk {
-        version = release(37)
-    }
+    // 本机 android-33/34/35 jar 为裁剪版（缺 TetheringManager 等类），使用完整的 android-36
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.shihab.diplay"
-        minSdk = 28
-        targetSdk = 37
+        minSdk = 17
+        targetSdk = 28
         versionCode = 33
-        versionName = "0.2.14"
+        versionName = "0.2.14-api17"
 
+        // API 17-20：desugaring 要求 legacy multidex
+        multiDexEnabled = true
+
+        // 低版本设备只安装 ARM 产物，保持与原有 ABI 一致
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
     }
-
 
     localAuthenticationAssets?.let { sourceSets.getByName("main").assets.srcDir(it) }
 
@@ -43,39 +48,47 @@ android {
             versionNameSuffix = "-hud-test"
         }
         release {
-            optimization {
-                enable = false
-            }
+            isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        // 使用 Java 8 以支持 desugaring
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+        // 启用 core library desugaring（java.time / Optional / CompletableFuture）
+        isCoreLibraryDesugaringEnabled = true
     }
     buildFeatures {
-        compose = true
+        // Compose 不支持 API 17，改用 View 系统
+        viewBinding = true
+    }
+    lint {
+        // API 17 兼容分支中大量使用已废弃的旧 API，属预期行为
+        disable += setOf("ExpiredTargetSdkVersion", "OldTargetApi")
     }
 }
 
 dependencies {
-    implementation(platform(libs.androidx.compose.bom))
     implementation(project(":common"))
     implementation(project(":shared"))
-    implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.app.projected)
-    implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.ui.tooling.preview)
+
+    // Core library desugaring - 必须
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
+
+    // AndroidX 兼容库
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.activity)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    debugImplementation(libs.androidx.compose.ui.tooling)
+
+    // 移除所有 Compose 依赖（API 17 不支持）
 }
 
 // No implicit import. Only the two explicitly selected local runtime assets are allowed.
+// AGP 7.4.2：AndroidSourceDirectorySet 使用 srcDirs（AGP 9 的 directories 属性不存在）
 val credentialAssets = files(android.sourceSets.flatMap { source ->
-    source.assets.directories.map { directory ->
+    source.assets.srcDirs.map { directory ->
         fileTree(directory) {
             include("**/offline-mfi/**", "**/*.pk8", "**/*.p7b", "**/*.key",
                 "**/*.pem", "**/*.p12", "**/*.pfx", "**/*.jks", "**/*.keystore")
@@ -100,7 +113,7 @@ tasks.named("preBuild") { dependsOn(rejectBundledCredentials) }
 
 // Car-test packages must be standalone. Keep ordinary source/CI builds identity-free.
 val verifyStandaloneAuthentication by tasks.registering {
-    group = "verification"
+    group = "build"
     description = "Require the explicit runtime authentication input for a standalone car-test APK."
     val directory = localAuthenticationAssets
     doLast {
