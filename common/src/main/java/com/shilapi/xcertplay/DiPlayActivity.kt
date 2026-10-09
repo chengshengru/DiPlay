@@ -367,11 +367,13 @@ class DiPlayActivity : ComponentActivity() {
     /** If the previous run died on an uncaught exception, point the user at the on-disk log. */
     private fun notifyPreviousCrash() {
         if (crashNoticeShown) return
-        val crash = CrashFileLogger.lastCrashFile(this)
-        if (!crash.isFile) return
+        val public = CrashFileLogger.publicCrashFile()
+        if (!public.isFile && !CrashFileLogger.lastCrashFile(this).isFile) return
         crashNoticeShown = true
         // Reuses the existing "saved to path" string to avoid adding untranslated resources.
-        android.widget.Toast.makeText(this, getString(R.string.diagnostic_report_saved_to_path, crash.absolutePath), android.widget.Toast.LENGTH_LONG).show()
+        // Point at the public /sdcard/DiPlay/ copy, which is retrievable even when the app
+        // (the head unit's launcher UI) is dead.
+        android.widget.Toast.makeText(this, getString(R.string.diagnostic_report_saved_to_path, public.absolutePath), android.widget.Toast.LENGTH_LONG).show()
     }
 
     override fun onStop() {

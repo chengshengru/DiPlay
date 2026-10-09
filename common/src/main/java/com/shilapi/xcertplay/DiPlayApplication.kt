@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import android.content.Context
 import androidx.multidex.MultiDexApplication
 
 /**
@@ -10,10 +11,15 @@ import androidx.multidex.MultiDexApplication
  * @author TRAE AI
  */
 class DiPlayApplication : MultiDexApplication() {
+    override fun attachBaseContext(base: Context) {
+        // Install the crash handler BEFORE MultiDex.install runs inside super.attachBaseContext,
+        // so we also capture multidex failures and early class-init crashes — the most likely
+        // cause of a crash-at-startup that takes down the head unit's launcher / causes a boot loop.
+        CrashFileLogger.install(this)
+        super.attachBaseContext(base)
+    }
+
     override fun onCreate() {
         super.onCreate()
-        // Persist any uncaught Java crash to disk before the process dies, so head-unit
-        // crashes without adb can still be recovered via the Diagnostics export or the file.
-        CrashFileLogger.install(this)
     }
 }

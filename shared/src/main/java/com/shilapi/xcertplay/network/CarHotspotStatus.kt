@@ -30,6 +30,42 @@ object CarHotspotStatus {
         )
     }
 
+    /**
+     * Rich AP state used by [LegacyHotspotRecovery] to tell a genuinely enabled-but-interfaceless
+     * hotspot apart from a transitional or owner-disabled one. Additive: the boolean [isEnabled]
+     * path (with its BYD-specific `wifi_ap_mode` guard) stays authoritative for connection decisions.
+     */
+    enum class State { DISABLING, DISABLED, ENABLING, ENABLED, FAILED, UNKNOWN }
+
+    fun fromLegacyState(value: Int): State = when (value) {
+        10 -> State.DISABLING
+        11 -> State.DISABLED
+        12 -> State.ENABLING
+        13 -> State.ENABLED
+        14 -> State.FAILED
+        else -> State.UNKNOWN
+    }
+
+    /** Clears the one-shot recovery budget for [ssid] once a healthy interface appears. */
+    fun resetRecoveryBudget(ssid: String) = LegacyHotspotRecovery.resetBudget(ssid)
+
+    fun state(context: Context): State {
+        val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            ?: return State.UNKNOWN
+        return state(wifi)
+    }
+
+    internal fun state(wifi: WifiManager): State =
+        runCatching {
+            fromLegacyState(WifiManager::class.java.getMethod("getWifiApState").invoke(wifi) as Int)
+        }.recoverCatching {
+            if (WifiManager::class.java.getMethod("isWifiApEnabled").invoke(wifi) as Boolean) {
+                State.ENABLED
+            } else {
+                State.DISABLED
+            }
+        }.getOrDefault(State.UNKNOWN)
+
     internal fun stateEnabled(state: Int?): Boolean? = state?.takeIf { it in 10..14 }?.let { it == 13 }
 
     internal fun read(state: () -> Int?, enabled: () -> Boolean?, sticky: () -> Intent?): Boolean? {

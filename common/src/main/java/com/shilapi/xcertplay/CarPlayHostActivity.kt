@@ -1129,8 +1129,27 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
+    // Guards the one-shot remap of a learned OEM signal to its CarPlay logical key (see dispatchKeyEvent).
+    private var remappingLearnedKey = false
+
     // Hardware navigation belongs to the iPhone-rendered CarPlay UI, not Android View focus.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Owner-learned OEM keys: translate the vendor signal to its logical key once, then let the
+        // existing media/voice/phone paths below handle it. A no-op when nothing has been learned.
+        if (!remappingLearnedKey) {
+            val learned = HardwareKeyBindings.logicalKey(this, event)
+            if (learned != null && learned != event.keyCode) {
+                remappingLearnedKey = true
+                try {
+                    return dispatchKeyEvent(
+                        KeyEvent(event.downTime, event.eventTime, event.action, learned,
+                            event.repeatCount, event.metaState, event.deviceId, event.scanCode),
+                    )
+                } finally {
+                    remappingLearnedKey = false
+                }
+            }
+        }
         val physicalKey = Triple(event.deviceId, event.keyCode, event.scanCode)
         val downOrUp = event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP
         if (downOrUp && physicalKey in legacySiriPresses) {

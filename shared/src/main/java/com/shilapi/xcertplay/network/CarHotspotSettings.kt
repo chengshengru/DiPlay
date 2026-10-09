@@ -12,6 +12,17 @@ object CarHotspotSettings {
     fun setEnabled(context: Context, enabled: Boolean) =
         prefs(context).edit().putBoolean("auto_enable", enabled).apply()
 
+    /**
+     * Opt-in legacy AP recovery for API 17..22 head units whose already-enabled hotspot loses its
+     * network interface. Default off; the recovery itself is a no-op outside API 17..22, so enabling
+     * it is harmless on newer firmware.
+     */
+    fun legacyRecoveryEnabled(context: Context): Boolean =
+        prefs(context).getBoolean("legacy_recovery", false)
+
+    fun setLegacyRecoveryEnabled(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("legacy_recovery", enabled).apply()
+
     // Visibility is independent of the saved choice: ADB is only needed to grant permission.
     fun visible(bydAvailable: Boolean, access: LocalAdb.Access): Boolean =
         bydAvailable && (access == LocalAdb.Access.READY || access == LocalAdb.Access.NOT_APPROVED)

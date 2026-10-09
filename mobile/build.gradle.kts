@@ -22,6 +22,9 @@ android {
         // API 17-20：desugaring 要求 legacy multidex
         multiDexEnabled = true
 
+        // 保证崩溃处理器类在主 dex：attachBaseContext 在 MultiDex.install 之前就要调用它
+        multiDexKeepProguard = file("multidex-keep.pro")
+
         // 低版本设备只安装 ARM 产物，保持与原有 ABI 一致
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")

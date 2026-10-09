@@ -2,6 +2,7 @@ package com.shilapi.xcertplay
 
 import android.content.Context
 import android.os.Build
+import android.os.Environment
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -53,18 +54,39 @@ internal object CrashFileLogger {
     }
 
     internal fun writeCrash(context: Context, thread: Thread, throwable: Throwable) {
-        val dir = resolveDir(context)
-        if (!dir.isDirectory && !dir.mkdirs()) return
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        val archive = File(dir, "crash-$stamp.log")
-        val last = File(dir, LAST)
+        val report = runCatching { buildReport(thread, throwable, deviceMeta(context)) }
+            .getOrDefault("DiPlay crash report\n(time=unavailable)\n" + stackTrace(throwable))
+        // 1) App-private path: feeds the in-app Diagnostics export. May be unavailable before
+        //    the base context is attached (e.g. a crash inside MultiDex.install).
         runCatching {
-            val report = buildReport(thread, throwable, deviceMeta(context))
-            archive.writeText(report, Charsets.UTF_8)
-            last.writeText(report, Charsets.UTF_8)
-            prune(dir)
+            val dir = resolveDir(context)
+            if (dir.isDirectory || dir.mkdirs()) {
+                File(dir, "crash-$stamp.log").writeText(report, Charsets.UTF_8)
+                File(dir, LAST).writeText(report, Charsets.UTF_8)
+                prune(dir)
+            }
+        }
+        // 2) Public external path: world-readable on API 17 and retrievable even when the app
+        //    (the head unit's foreground/launcher UI) is dead and no DiPlay screen can export.
+        //    Needs WRITE_EXTERNAL_STORAGE, auto-granted at install on API 17.
+        writePublic(stamp, report)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun writePublic(stamp: String, report: String) {
+        runCatching {
+            if (Environment.getExternalStorageState() != Environment.MEDIA_MOUNTED) return@runCatching
+            val dir = File(Environment.getExternalStorageDirectory(), "DiPlay")
+            if (!dir.isDirectory && !dir.mkdirs()) return@runCatching
+            File(dir, "crash-$stamp.log").writeText(report, Charsets.UTF_8)
+            File(dir, LAST).writeText(report, Charsets.UTF_8)
         }
     }
+
+    /** Public, always-retrievable copy of the last crash (for dead-launcher scenarios). */
+    fun publicCrashFile(): File =
+        File(Environment.getExternalStorageDirectory(), "DiPlay/$LAST")
 
     /** Pure, Android-free: includes device metadata + the full stack trace. */
     internal fun buildReport(thread: Thread, throwable: Throwable, deviceMeta: String): String = buildString {

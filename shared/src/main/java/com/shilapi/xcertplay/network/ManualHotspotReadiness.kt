@@ -68,7 +68,7 @@ internal class ManualHotspotReadiness(
     private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
     private val log: (String) -> Unit = {},
 ) {
-    fun await(timeoutMillis: Long): HotspotSelection {
+    fun await(timeoutMillis: Long, onPoll: (interfaceReady: Boolean) -> Unit = {}): HotspotSelection {
         val deadline = nowMillis() + timeoutMillis
         var previous: HotspotSelection? = null
         var stable = 0
@@ -78,6 +78,7 @@ internal class ManualHotspotReadiness(
                 WirelessStartupFailure.HOTSPOT_NOT_READY, "Hotspot network is not ready",
             )
             val selected = selectHotspotInterface(sample(), log)
+            onPoll(selected != null)
             if (cancelled()) throw InterruptedIOException("Hotspot readiness cancelled")
             stable = if (selected != null && previous?.sameAddress(selected) == true) stable + 1 else 1
             previous = selected

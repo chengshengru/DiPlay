@@ -7,6 +7,7 @@ import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.shilapi.xcertplay.orchestration.ManualHotspotBand
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
@@ -33,6 +34,8 @@ class ManualHotspotManager(
     security: ManualHotspotSecurity,
     private val onDiagnostic: (String) -> Unit = {},
     private val isCancelled: () -> Boolean = { false },
+    /** Opt-in legacy AP recovery (API 17..22): one bounded AP restart when the interface never appears. */
+    private val legacyRecoveryEnabled: Boolean = false,
 ) : WirelessHotspotManager {
     private val appContext = context.applicationContext
     private val interfaces = ManualHotspotInterfaces(appContext, onDiagnostic)
@@ -81,6 +84,18 @@ class ManualHotspotManager(
         }
         validateApConfiguration(apConfiguration)
 
+        // 老安卓（API 17..22）：已启用的 AP 若长时间没有接口，做一次有界重启恢复。
+        // 开关默认关闭；isInterfaceReady 复用与主循环一致的选择逻辑，避免误判。
+        val recovery = LegacyHotspotRecovery(
+            api = Build.VERSION.SDK_INT,
+            enabled = legacyRecoveryEnabled,
+            expectedSsid = expectedSsid,
+            port = LegacyHotspotRecovery.AndroidPort(wifiManager),
+            onDiagnostic = onDiagnostic,
+            isInterfaceReady = { selectHotspotInterface(interfaces.sample(), {}) != null },
+        )
+        val recoveryDeadline = SystemClock.elapsedRealtime() + timeoutMillis
+
         // 只在候选证据变化时记录，避免每 250ms 重复输出。
         val selected = ManualHotspotReadiness(
             sample = {
@@ -96,7 +111,9 @@ class ManualHotspotManager(
             cancelled = { closed || isCancelled() },
             pause = { millis -> synchronized(waitLock) { if (!closed && !isCancelled()) waitLock.wait(millis) } },
             log = {},
-        ).await(timeoutMillis)
+        ).await(timeoutMillis) { interfaceReady ->
+            recovery.recoverIfNeeded(interfaceReady, recoveryDeadline) { closed || isCancelled() }
+        }
         confirmed = selected
         onDiagnostic("hotspot interface confirmed iface=${selected.name} index=${selected.index} atNs=${System.nanoTime()}")
         val network = NetworkInterface.getByName(selected.name)

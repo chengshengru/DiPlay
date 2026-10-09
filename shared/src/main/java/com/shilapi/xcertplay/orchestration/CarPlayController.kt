@@ -2124,6 +2124,8 @@ class CarPlayController(
                 security = config.manualHotspotSecurity,
                 onDiagnostic = { debugLog("generation=$generation $it") },
                 isCancelled = { isStaleWirelessRun(generation) },
+                legacyRecoveryEnabled =
+                    com.shilapi.xcertplay.network.CarHotspotSettings.legacyRecoveryEnabled(appContext),
             )
         }
         synchronized(wirelessResourceLock) {
