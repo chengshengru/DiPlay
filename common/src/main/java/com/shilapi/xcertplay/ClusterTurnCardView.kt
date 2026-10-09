@@ -221,7 +221,7 @@ internal class ClusterTurnCardView(context: Context) : View(context) {
         if (next.icon == 0) return
         val resId = glyphRes(next.icon)
         if (resId != glyphTag) {
-            glyph = ContextCompat.getDrawable(context, resId)?.mutate()?.apply { setTint(accent) }
+            glyph = ContextCompat.getDrawable(context, resId)?.mutate()?.let { UiCompat.tint(it, accent) }
             glyphTag = resId
         }
         val inset = side * 0.10f

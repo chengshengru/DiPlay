@@ -17,7 +17,7 @@ internal class ManualHotspotInterfaces(
     private val context: Context,
     private val onDiagnostic: (String) -> Unit = {},
 ) : Closeable {
-    private val connectivity = context.getSystemService(ConnectivityManager::class.java)
+    private val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
     private val publicTethering = if (Build.VERSION.SDK_INT >= 36) PublicTethering(context) else null
     private var lastLegacyDiagnostic: String? = null
 
@@ -79,7 +79,7 @@ internal class ManualHotspotInterfaces(
     private class PublicTethering(context: Context) : Closeable {
         @Volatile var interfaces: Set<String>? = null
             private set
-        private val manager = context.getSystemService(TetheringManager::class.java)
+        private val manager = context.getSystemService(Context.TETHERING_SERVICE) as? TetheringManager
         private val callback = object : TetheringManager.TetheringEventCallback {
             override fun onTetheredInterfacesChanged(interfaces: Set<TetheringInterface>) {
                 this@PublicTethering.interfaces = interfaces.filter { it.type == TetheringManager.TETHERING_WIFI }

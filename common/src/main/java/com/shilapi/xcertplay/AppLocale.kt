@@ -96,9 +96,9 @@ object AppLocale {
     @Suppress("DEPRECATION")
     fun enforce(context: Context): Boolean {
         if (Build.VERSION.SDK_INT >= 33) return false
-        val locale = locale(preference(context)) ?: Resources.getSystem().configuration.locales[0]
+        val locale = locale(preference(context)) ?: primaryLocale(Resources.getSystem().configuration)
         val resources = context.resources
-        if (resources.configuration.locales[0] == locale) return false
+        if (primaryLocale(resources.configuration) == locale) return false
         val configuration = Configuration(resources.configuration).apply {
             setLocale(locale)
             setLayoutDirection(locale)
@@ -106,6 +106,14 @@ object AppLocale {
         resources.updateConfiguration(configuration, resources.displayMetrics)
         return true
     }
+
+    /**
+     * Configuration.getLocales()/LocaleList is API 24+; on API 17-23 (Jelly Bean head units) it would
+     * throw NoSuchMethodError. Fall back to the deprecated single-locale accessor there.
+     */
+    @Suppress("DEPRECATION")
+    private fun primaryLocale(configuration: Configuration): Locale =
+        if (Build.VERSION.SDK_INT >= 24) configuration.locales[0] else configuration.locale ?: Locale.getDefault()
 
     fun showPicker(activity: Activity) {
         var selected = ALL.indexOf(preference(activity)).coerceAtLeast(0)

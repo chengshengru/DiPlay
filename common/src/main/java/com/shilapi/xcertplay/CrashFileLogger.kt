@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import android.app.Application
 import android.content.Context
 import android.os.Build
 import android.os.Environment
@@ -27,7 +28,12 @@ internal object CrashFileLogger {
     fun install(context: Context) {
         if (installed) return
         installed = true
-        val appContext = context.applicationContext
+        // During attachBaseContext the Application's mBase is not set yet, so calling
+        // context.applicationContext NPEs on API 17 (ContextWrapper.getApplicationContext() has no
+        // null guard there). `this` passed from DiPlayApplication IS the application context, so use
+        // it directly; only fall back to the base's applicationContext when a non-Application context
+        // is supplied (e.g. unit tests).
+        val appContext = if (context is Application) context else context.applicationContext
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             // Persist first so a disk/permission failure can never hide the crash from the user.

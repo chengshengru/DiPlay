@@ -178,9 +178,15 @@ class CarPlayController(
     private val appContext = context.applicationContext
     private val diagnosticAttempt = diagnosticAttempts.incrementAndGet()
     private val diagnosticRun = AtomicInteger()
-    private val usbManager: UsbManager? = context.getSystemService(UsbManager::class.java)
+    // Context.getSystemService(Class) is API 23+ and BluetoothManager is API 18+, so Jelly Bean
+    // (API 17) has neither the overload nor a BLE stack. Use the string service name and guard.
+    private val usbManager: UsbManager? = context.getSystemService(Context.USB_SERVICE) as? UsbManager
     private val bluetoothAdapter =
-        appContext.getSystemService(BluetoothManager::class.java)?.adapter
+        if (Build.VERSION.SDK_INT >= 18) {
+            (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+        } else {
+            null
+        }
     private val iphoneHost by lazy {
         IphoneUsbHost(
             appContext,

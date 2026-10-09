@@ -276,7 +276,7 @@ class DiPlayActivity : ComponentActivity() {
         com.shilapi.xcertplay.hud.BydNavigationOutputs.onAppOpened(applicationContext)
         WheelKeyService.restoreIfNeeded(this)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        window.statusBarColor = BG; window.navigationBarColor = BG
+        UiCompat.setSystemBarColors(window, BG)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = false
             hide(WindowInsetsCompat.Type.statusBars())
@@ -626,11 +626,11 @@ class DiPlayActivity : ComponentActivity() {
         val wide = resources.configuration.screenWidthDp >= 850
         val body = column()
         val left = column()
-        left.addView(label(getString(R.string.your_phone_your_drive), 12, ACCENT, true).apply { letterSpacing = .16f })
+        left.addView(label(getString(R.string.your_phone_your_drive), 12, ACCENT, true).apply { UiCompat.setLetterSpacing(this, .16f) })
         left.addView(label(getString(R.string.a_familiar_drive), if (wide) 42 else 36, TEXT, true).apply { setPadding(0, dp(12), 0, dp(10)) })
         left.addView(label(getString(R.string.your_maps_music_and_conversations_carplay_right_here_on_yo), 19, MUTED))
         val card = card()
-        card.addView(label(getString(R.string.wireless_carplay), 12, ACCENT, true).apply { letterSpacing = .12f })
+        card.addView(label(getString(R.string.wireless_carplay), 12, ACCENT, true).apply { UiCompat.setLetterSpacing(this, .12f) })
         status = label(getString(R.string.ready_when_you_are), 24, TEXT, true).apply { setPadding(0, dp(10), 0, dp(16)) }
         card.addView(status)
         connectButton = button(getString(R.string.connect_phone), true) {
@@ -677,7 +677,7 @@ class DiPlayActivity : ComponentActivity() {
         right.addView(label(getString(R.string.plug_your_iphone_into_a_usb_data_port_allow_carplay_when_y), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(10), dp(8), dp(24)) })
         right.addView(button(getString(R.string.settings), false) { page = "settings"; render() }, matchButton())
         right.addView(label(getString(R.string.make_diplay_feel_right_for_your_car), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(24)) })
-        right.addView(label("${getString(R.string.home_public_preview)}${version()}", 12, MUTED).apply { letterSpacing = .08f })
+        right.addView(label("${getString(R.string.home_public_preview)}${version()}", 12, MUTED).apply { UiCompat.setLetterSpacing(this, .08f) })
         if (wide) {
             // Both rows share column widths. The USB button starts at the wireless
             // card's top edge, independently of hero wrapping or font scaling.
@@ -740,10 +740,10 @@ class DiPlayActivity : ComponentActivity() {
             isClickable = true
             isFocusable = true
             isSelected = selected
-            foreground = focusRing(12)
+            UiCompat.setForeground(this, focusRing(12))
             contentDescription = getString(R.string.settings_open_category, title)
-            background = android.graphics.drawable.RippleDrawable(
-                ColorStateList.valueOf(RIPPLE),
+            background = UiCompat.ripple(
+                RIPPLE,
                 GradientDrawable().apply {
                     setColor(if (selected) RAIL_SELECTED else Color.TRANSPARENT)
                     cornerRadius = dp(12).toFloat()
@@ -761,7 +761,7 @@ class DiPlayActivity : ComponentActivity() {
             }, LinearLayout.LayoutParams(dp(4), dp(34)).apply { marginEnd = dp(10) })
             addView(ImageView(this@DiPlayActivity).apply {
                 setImageResource(settingsCategoryIcon(category))
-                imageTintList = ColorStateList.valueOf(if (selected) ACCENT else TEXT)
+                UiCompat.setImageTint(this, if (selected) ACCENT else TEXT)
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }, LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(12) })
             addView(label(title, 16, if (selected) ACCENT else TEXT, true),
@@ -940,12 +940,12 @@ class DiPlayActivity : ComponentActivity() {
         isClickable = true
         isFocusable = true
         contentDescription = getString(R.string.settings_open_category, settingsCategoryTitle(category))
-        foreground = android.graphics.drawable.LayerDrawable(arrayOf(
-            android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(RIPPLE), null, null), focusRing(12)))
+        UiCompat.setForeground(this, android.graphics.drawable.LayerDrawable(arrayOf(
+            UiCompat.ripple(RIPPLE, null, null), focusRing(12))))
         setPadding(dp(16), 0, dp(16), 0)
         addView(ImageView(this@DiPlayActivity).apply {
             setImageResource(icon)
-            imageTintList = ColorStateList.valueOf(tint)
+            UiCompat.setImageTint(this, tint)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(14) })
         addView(column().apply {
@@ -954,7 +954,7 @@ class DiPlayActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(0, -2, 1f))
         addView(ImageView(this@DiPlayActivity).apply {
             setImageResource(R.drawable.ic_dp_chevron)
-            imageTintList = ColorStateList.valueOf(ACCENT)
+            UiCompat.setImageTint(this, ACCENT)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginStart = dp(12) })
         setOnClickListener {
@@ -989,8 +989,8 @@ class DiPlayActivity : ComponentActivity() {
         setPadding(dp(16), dp(10), dp(16), dp(10))
         isClickable = true
         isFocusable = true
-        foreground = android.graphics.drawable.LayerDrawable(arrayOf(
-            android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(RIPPLE), null, null), focusRing(12)))
+        UiCompat.setForeground(this, android.graphics.drawable.LayerDrawable(arrayOf(
+            UiCompat.ripple(RIPPLE, null, null), focusRing(12))))
         contentDescription = getString(R.string.settings_open_category, settingsCategoryTitle(category))
         addView(label(settingsCategoryTitle(category), 17, TEXT, true))
         addView(label(summary, 13, MUTED).apply { setPadding(0, dp(3), 0, 0) })
@@ -2127,7 +2127,7 @@ class DiPlayActivity : ComponentActivity() {
             }
         })
         val error = label("", 14, WARNING)
-        error.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        UiCompat.setAccessibilityLiveRegion(error, View.ACCESSIBILITY_LIVE_REGION_POLITE)
         fields.addView(error)
         val dialog = AlertDialog.Builder(this).setTitle(getString(if (existingWifi) R.string.existing_wifi_details else R.string.car_hotspot_details))
             .setView(ScrollView(this).apply { addView(fields) })
@@ -2214,7 +2214,7 @@ class DiPlayActivity : ComponentActivity() {
             setPadding(0, dp(16), 0, dp(16))
         })
         body.addView(button(getString(R.string.copy_command), false) {
-            getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(
+            (getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(
                 android.content.ClipData.newPlainText(getString(R.string.clipboard_usage_access), command))
             toast(getString(R.string.copied_to_the_car_clipboard_run_the_command_on_your_comput))
         }, matchButton(0, 56))
@@ -2351,7 +2351,7 @@ class DiPlayActivity : ComponentActivity() {
             setBackgroundColor(0x22FFFFFF)
         })
         body.addView(button(getString(R.string.copy_command), false) {
-            getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(
+            (getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(
                 android.content.ClipData.newPlainText("DiPlay ADB Command", adbCmd)
             )
             toast(getString(R.string.copied_to_the_car_clipboard_run_the_command_on_your_comput))
@@ -3265,7 +3265,7 @@ class DiPlayActivity : ComponentActivity() {
         BydOutputSettings.wheelSpeedToIphone(this) || BydOutputSettings.videoWhileParked(this)
 
     private fun hasPreciseLocation() =
-        checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        androidx.core.content.ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     // The cluster screen is described at connection time, so a running session reconnects over
     // its current link. The position choices need no call: getString(R.string.apply_and_reconnect) already does it.
@@ -3641,7 +3641,7 @@ class DiPlayActivity : ComponentActivity() {
             setImageBitmap(custom ?: BitmapFactory.decodeResource(resources, R.raw.ic_car_home))
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = rounded(SURFACE, BORDER)
-            clipToOutline = true
+            UiCompat.setClipToOutline(this, true)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(72), dp(72)).apply { marginEnd = dp(16) })
         val text = column()
@@ -3758,7 +3758,7 @@ class DiPlayActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT); return
         }
-        val adapter = getSystemService(BluetoothManager::class.java)?.adapter
+        val adapter = if (Build.VERSION.SDK_INT >= 18) (getSystemService(android.content.Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter else null
         if (adapter == null || !adapter.isEnabled) {
             AlertDialog.Builder(this).setTitle(getString(R.string.turn_on_bluetooth))
                 .setMessage(getString(R.string.enable_the_car_s_bluetooth_and_pair_your_iphone_first))
@@ -3809,22 +3809,27 @@ class DiPlayActivity : ComponentActivity() {
             }.setNegativeButton(getString(R.string.cancel), null).show()
     }
 
+    /** WifiP2pManager.Channel.close() is API 27+; below that the channel dies with the activity. */
+    private fun closeChannel(channel: android.net.wifi.p2p.WifiP2pManager.Channel) {
+        if (Build.VERSION.SDK_INT >= 27) channel.close()
+    }
+
     private fun resetWirelessGroup() {
-        val manager = getSystemService(android.net.wifi.p2p.WifiP2pManager::class.java)
+        val manager = getSystemService(android.content.Context.WIFI_P2P_SERVICE) as? android.net.wifi.p2p.WifiP2pManager
         if (manager == null) { toast(getString(R.string.this_head_unit_does_not_support_wi_fi_direct)); return }
         val channel = manager.initialize(this, mainLooper, null)
         try {
             manager.requestGroupInfo(channel) { group ->
-                if (group == null) { channel.close(); connect(true); return@requestGroupInfo }
+                if (group == null) { closeChannel(channel); connect(true); return@requestGroupInfo }
                 manager.removeGroup(channel, object : android.net.wifi.p2p.WifiP2pManager.ActionListener {
                     override fun onSuccess() {
                         val deadline = android.os.SystemClock.elapsedRealtime() + 4000
                         fun waitUntilRemoved() {
                             manager.requestGroupInfo(channel) { remaining ->
                                 when {
-                                    remaining == null -> { channel.close(); if (!isFinishing && !isDestroyed) connect(true) }
+                                    remaining == null -> { closeChannel(channel); if (!isFinishing && !isDestroyed) connect(true) }
                                     android.os.SystemClock.elapsedRealtime() >= deadline -> {
-                                        channel.close(); toast(getString(R.string.wi_fi_direct_is_still_busy_close_the_other_projection_app))
+                                        closeChannel(channel); toast(getString(R.string.wi_fi_direct_is_still_busy_close_the_other_projection_app))
                                     }
                                     else -> handler.postDelayed({ waitUntilRemoved() }, 200)
                                 }
@@ -3832,11 +3837,11 @@ class DiPlayActivity : ComponentActivity() {
                         }
                         waitUntilRemoved()
                     }
-                    override fun onFailure(reason: Int) { channel.close(); toast(getString(R.string.could_not_reset_wi_fi_direct_close_the_other_projection_ap)) }
+                    override fun onFailure(reason: Int) { closeChannel(channel); toast(getString(R.string.could_not_reset_wi_fi_direct_close_the_other_projection_ap)) }
                 })
             }
         } catch (_: SecurityException) {
-            channel.close(); permissionHelp(getString(R.string.wireless_permissions), getString(R.string.allow_nearby_devices_and_on_older_android_versions_locatio))
+            closeChannel(channel); permissionHelp(getString(R.string.wireless_permissions), getString(R.string.allow_nearby_devices_and_on_older_android_versions_locatio))
         }
     }
 
@@ -4071,8 +4076,8 @@ class DiPlayActivity : ComponentActivity() {
         val target = channelButtons.getOrNull(index) ?: return
         target.isSelected = selected
         target.setTextColor(if (selected) BG else TEXT)
-        target.background = android.graphics.drawable.RippleDrawable(
-            ColorStateList.valueOf(RIPPLE),
+        target.background = UiCompat.ripple(
+            RIPPLE,
             rounded(if (selected) ACCENT else SURFACE, if (selected) ACCENT else BORDER),
             null
         )
@@ -4091,7 +4096,7 @@ class DiPlayActivity : ComponentActivity() {
                 isAllCaps = false
                 textSize = 16f
                 minHeight = dp(48)
-                stateListAnimator = null
+                UiCompat.clearStateListAnimator(this)
                 setOnClickListener {
                     val previous = navigationStreamType
                     navigationStreamType = i
@@ -4105,7 +4110,7 @@ class DiPlayActivity : ComponentActivity() {
             val params = GridLayout.LayoutParams().apply {
                 width = 0
                 height = dp(48)
-                columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                columnSpec = if (android.os.Build.VERSION.SDK_INT >= 21) GridLayout.spec(GridLayout.UNDEFINED, 1f) else GridLayout.spec(GridLayout.UNDEFINED, 1)
                 setMargins(dp(4), dp(4), dp(4), dp(4))
             }
             grid.addView(btn, params)
@@ -4131,7 +4136,7 @@ class DiPlayActivity : ComponentActivity() {
         val card = card()
         val heading = row().apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(16)) }
         if (icon != null) heading.addView(ImageView(this).apply {
-            setImageResource(icon); imageTintList = ColorStateList.valueOf(ACCENT)
+            setImageResource(icon); UiCompat.setImageTint(this, ACCENT)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(12) })
         heading.addView(label(title, 22, TEXT, true), LinearLayout.LayoutParams(0, -2, 1f))
@@ -4235,10 +4240,10 @@ class DiPlayActivity : ComponentActivity() {
     private fun button(title: String, primary: Boolean, click: () -> Unit) = SettingButton(this).apply {
         isAllCaps = false; textSize = 18f; setTextColor(if (primary) BG else TEXT)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(RIPPLE), rounded(if (primary) ACCENT else BUTTON, if (primary) ACCENT else BORDER), null)
-        setPadding(dp(16), 0, dp(16), 0); minHeight = dp(56); stateListAnimator = null
+        background = UiCompat.ripple(RIPPLE, rounded(if (primary) ACCENT else BUTTON, if (primary) ACCENT else BORDER), null)
+        setPadding(dp(16), 0, dp(16), 0); minHeight = dp(56); UiCompat.clearStateListAnimator(this)
         compoundDrawablePadding = dp(12)
-        foreground = focusRing()
+        UiCompat.setForeground(this, focusRing())
         text = title
         searchIndexSink?.add(title.substringBefore(VALUE_SEPARATOR))
         setOnClickListener { click() }
@@ -4271,7 +4276,7 @@ class DiPlayActivity : ComponentActivity() {
             super.setText(styled, BufferType.SPANNABLE)
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
             setCompoundDrawablesRelativeWithIntrinsicBounds(null, null,
-                context.getDrawable(R.drawable.ic_dp_chevron)?.mutate()?.apply { setTint(ACCENT) }, null)
+                androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_dp_chevron)?.mutate()?.let { UiCompat.tint(it, ACCENT) }, null)
         }
     }
     // Remote and D-pad users need to see where they are; touch mode never shows it.

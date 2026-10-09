@@ -21,7 +21,7 @@ internal object ProcessExitDiagnostics {
     fun report(context: Context): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return UNSUPPORTED
         return report(Build.VERSION.SDK_INT, System.currentTimeMillis()) {
-            val manager = context.getSystemService(ActivityManager::class.java)
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
                 ?: throw IllegalStateException()
             manager.getHistoricalProcessExitReasons(context.packageName, 0, MAX_RECORDS).take(MAX_RECORDS).map {
                 Record(it.timestamp, it.reason, it.status, it.importance, it.pss, it.rss)

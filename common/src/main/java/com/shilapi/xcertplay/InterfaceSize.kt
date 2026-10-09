@@ -6,9 +6,11 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.res.Configuration
 import android.content.res.Resources
+import android.os.Build
 import android.util.DisplayMetrics
 import android.view.ContextThemeWrapper
 import com.shilapi.xcertplay.host.R
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
@@ -51,8 +53,7 @@ object InterfaceSize {
             screenWidthDp = (base.screenWidthDp / scale).roundToInt()
             screenHeightDp = (base.screenHeightDp / scale).roundToInt()
             smallestScreenWidthDp = (base.smallestScreenWidthDp / scale).roundToInt()
-            setLocales(base.locales)
-            setLayoutDirection(base.locales[0])
+            carryLocalesFrom(base)
         }
     }
 
@@ -63,8 +64,24 @@ object InterfaceSize {
      */
     internal fun contextOverride(scaled: Configuration): Configuration = Configuration().apply {
         densityDpi = scaled.densityDpi
-        setLocales(scaled.locales)
-        setLayoutDirection(scaled.locales[0])
+        carryLocalesFrom(scaled)
+    }
+
+    /**
+     * Copies [base]'s locales so an override does not drop them. Configuration.getLocales()/LocaleList
+     * and setLocales() are API 24+; on API 17-23 they throw NoSuchMethodError, so the deprecated
+     * single-locale accessors are used there (the app only ever holds one language anyway).
+     */
+    @Suppress("DEPRECATION")
+    private fun Configuration.carryLocalesFrom(base: Configuration) {
+        if (Build.VERSION.SDK_INT >= 24) {
+            setLocales(base.locales)
+            setLayoutDirection(base.locales[0])
+        } else {
+            val locale = base.locale ?: Locale.getDefault()
+            setLocale(locale)
+            setLayoutDirection(locale)
+        }
     }
 
     /** Applies the density override for [base] to [activity]; call from attachBaseContext. */

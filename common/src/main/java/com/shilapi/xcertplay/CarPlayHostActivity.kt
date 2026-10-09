@@ -3,7 +3,6 @@ package com.shilapi.xcertplay
 import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.hardware.usb.UsbDevice
@@ -58,6 +57,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
+import com.shilapi.xcertplay.compat.PermissionCompat
 import com.shilapi.xcertplay.airplay.AirPlayConfig
 import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.airplay.AirPlayPhysicalSizeBasis
@@ -569,7 +569,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         WheelKeyService.restoreIfNeeded(this)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        getSystemService(android.hardware.display.DisplayManager::class.java)
+        (getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager)
             ?.registerDisplayListener(clusterDisplayListener, mainHandler)
         initializeSessionLog()
         lastConfiguration = Configuration(resources.configuration)
@@ -604,7 +604,7 @@ class CarPlayHostActivity : ComponentActivity() {
         )
         val reusedBackgroundSession = adoptBackgroundSession()
         microphoneAvailable =
-            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            PermissionCompat.hasPermission(this, Manifest.permission.RECORD_AUDIO)
         microphonePermissionResolved = microphoneAvailable
         if (reusedBackgroundSession) {
             updateDebugOverlays()
@@ -709,8 +709,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun hasFineLocationPermission(): Boolean =
-        checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
+        PermissionCompat.hasPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
 
     private fun requestVpnConsent() {
         if (awaitingVpnConsent) return
@@ -727,7 +726,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun requestWirelessPermissions() {
         val permissions = requiredWirelessPermissions()
-        if (permissions.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
+        if (permissions.all { PermissionCompat.hasPermission(this, it) }) {
             wirelessPermissionsReady = true
             updateHotspotStatusBlock()
             maybeStartCarPlay()
@@ -740,9 +739,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun hasRequiredWirelessPermissions(): Boolean =
-        requiredWirelessPermissions().all {
-            checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
-        }
+        requiredWirelessPermissions().all { PermissionCompat.hasPermission(this, it) }
 
     private fun requiredWirelessPermissions(): List<String> = when {
         wirelessHotspotMode == WirelessHotspotMode.EXISTING_WIFI ->
@@ -1331,7 +1328,7 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.overlaySettingsListener = null
         com.shilapi.xcertplay.hud.BydNavigationOutputs.setTurnOverlayListener(null)
         clusterMonitor?.stop()
-        getSystemService(android.hardware.display.DisplayManager::class.java)
+        (getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager)
             ?.unregisterDisplayListener(clusterDisplayListener)
         mainHandler.removeCallbacks(hideIdleCenterMap)
         homeMonitor?.stop()
@@ -1999,7 +1996,7 @@ class CarPlayHostActivity : ComponentActivity() {
             isAllCaps = false
             textSize = 17f
             setTextColor(MENU_BUTTON_TEXT)
-            backgroundTintList = ColorStateList.valueOf(MENU_ACCENT)
+            UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_ACCENT))
             minHeight = dp(52)
             setOnClickListener { saveSettingsAndReconnect() }
         }
@@ -2016,7 +2013,7 @@ class CarPlayHostActivity : ComponentActivity() {
             isAllCaps = false
             textSize = 17f
             setTextColor(Color.WHITE)
-            backgroundTintList = ColorStateList.valueOf(MENU_DANGER)
+            UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_DANGER))
             minHeight = dp(52)
             setOnClickListener { exitApplication() }
         }
@@ -2049,7 +2046,7 @@ class CarPlayHostActivity : ComponentActivity() {
             isAllCaps = false
             textSize = 17f
             setTextColor(Color.WHITE)
-            backgroundTintList = ColorStateList.valueOf(MENU_TRACK_OFF)
+            UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_TRACK_OFF))
             minHeight = dp(52)
             setOnClickListener {
                 cancelSettingsEdits()
@@ -2087,7 +2084,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 isAllCaps = false
                 textSize = 22f
                 setTextColor(Color.WHITE)
-                backgroundTintList = ColorStateList.valueOf(MENU_TRACK_OFF)
+                UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_TRACK_OFF))
                 contentDescription = getString(R.string.discard_changes_and_exit_settings)
                 minWidth = 0
                 minHeight = 0
@@ -2929,7 +2926,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 textSize = 18f
                 setTextColor(Color.WHITE)
                 setHintTextColor(MENU_SECONDARY)
-                backgroundTintList = ColorStateList.valueOf(MENU_ACCENT)
+                UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_ACCENT))
                 minHeight = dp(48)
                 isSingleLine = true
                 inputType = when {
@@ -4097,7 +4094,9 @@ class CarPlayHostActivity : ComponentActivity() {
             }
         }
         try {
-            startForegroundService(Intent(this, DiPlaySessionService::class.java))
+            // Context.startForegroundService is API 26+; Jelly Bean starts the same service plainly.
+            val serviceIntent = Intent(this, DiPlaySessionService::class.java)
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent) else startService(serviceIntent)
             next.start()
         } catch (error: RuntimeException) {
             appendLog("Connection could not start: ${error.javaClass.simpleName}")

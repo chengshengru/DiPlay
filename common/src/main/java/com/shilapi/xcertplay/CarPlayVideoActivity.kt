@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay
 
 import android.app.Activity
+import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -316,7 +317,7 @@ class CarPlayVideoActivity : Activity() {
         .joinToString(" <- ") { "${it.javaClass.simpleName}(${it.message?.replace(Regex("\\w+://\\S+"), "<url>")})" }
 
     private fun playbackNetworkSummary(): String {
-        val manager = getSystemService(ConnectivityManager::class.java)
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         val network = manager?.activeNetwork
         val capabilities = network?.let(manager::getNetworkCapabilities)
         if (network == null || capabilities == null) return "network=none"

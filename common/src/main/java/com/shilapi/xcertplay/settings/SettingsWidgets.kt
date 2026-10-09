@@ -14,6 +14,7 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
+import com.shilapi.xcertplay.UiCompat
 import com.shilapi.xcertplay.host.R
 
 object SettingsWidgets {
@@ -76,18 +77,18 @@ object SettingsWidgets {
             this.contentDescription = contentDescription
             isEnabled = enabled
             if (theme.isOverlay) {
-                showText = false
-                thumbTintList = ColorStateList(
+                UiCompat.setShowText(this, false)
+                UiCompat.setThumbTint(this, ColorStateList(
                     arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                     intArrayOf(theme.accent, theme.textSecondary),
-                )
-                trackTintList = ColorStateList(
+                ))
+                UiCompat.setTrackTint(this, ColorStateList(
                     arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                     intArrayOf(theme.accentTrack, theme.trackOff),
-                )
+                ))
             } else {
                 minHeight = theme.dp(context, 56)
-                buttonTintList = ColorStateList.valueOf(theme.accent)
+                UiCompat.setButtonTint(this, ColorStateList.valueOf(theme.accent))
             }
             setOnCheckedChangeListener { _, isChecked -> onChanged(isChecked) }
         }
@@ -126,18 +127,18 @@ object SettingsWidgets {
             // The whole row is the target; the switch stays out of the focus order so D-pad stops once.
             switch.isFocusable = false
             row.isFocusable = true
-            row.background = android.graphics.drawable.RippleDrawable(
-                ColorStateList.valueOf(ROW_RIPPLE), null, android.graphics.drawable.ColorDrawable(Color.WHITE))
-            row.foreground = android.graphics.drawable.StateListDrawable().apply {
+            row.background = UiCompat.ripple(ROW_RIPPLE, null, android.graphics.drawable.ColorDrawable(Color.WHITE))
+            UiCompat.setForeground(row, android.graphics.drawable.StateListDrawable().apply {
                 addState(intArrayOf(android.R.attr.state_focused), android.graphics.drawable.GradientDrawable().apply {
                     setColor(Color.TRANSPARENT)
                     cornerRadius = theme.dp(context, 12).toFloat()
                     setStroke(theme.dp(context, 3), theme.accent)
                 })
-            }
+            })
             row.setOnClickListener { if (switch.isEnabled) switch.toggle() }
             switch.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             row.accessibilityDelegate = object : View.AccessibilityDelegate() {
+                @Suppress("DEPRECATION")
                 override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
                     super.onInitializeAccessibilityNodeInfo(host, info)
                     info.className = Switch::class.java.name
@@ -205,10 +206,10 @@ object SettingsWidgets {
                 this.text = text
                 textSize = 17f
                 setTextColor(theme.textSecondary)
-                buttonTintList = ColorStateList(
+                UiCompat.setButtonTint(this, ColorStateList(
                     arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                     intArrayOf(theme.accent, theme.textSecondary),
-                )
+                ))
                 tag = value
                 isChecked = value == selected
             }
@@ -288,9 +289,7 @@ object SettingsWidgets {
         val seekBar = SeekBar(context).apply {
             max = CarPlayDisplayScale.MAX_PERCENT - CarPlayDisplayScale.MIN_PERCENT
             progress = initial - CarPlayDisplayScale.MIN_PERCENT
-            splitTrack = false
-            progressTintList = ColorStateList.valueOf(theme.accent)
-            thumbTintList = ColorStateList.valueOf(theme.accent)
+            UiCompat.setSeekBarTints(this, theme.accent)
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {

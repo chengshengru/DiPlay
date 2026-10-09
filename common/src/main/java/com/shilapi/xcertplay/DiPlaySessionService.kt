@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -22,16 +23,28 @@ class DiPlaySessionService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "CarPlay connection", NotificationManager.IMPORTANCE_LOW))
+        // NotificationChannel and Notification.Builder(Context, channelId) are API 26+; on Jelly
+        // Bean (API 17) the channel is not required and only the channel-less builder exists.
+        if (Build.VERSION.SDK_INT >= 26) {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            manager?.createNotificationChannel(
+                NotificationChannel(CHANNEL, "CarPlay connection", NotificationManager.IMPORTANCE_LOW),
+            )
+        }
         val open = PendingIntent.getActivity(this, 0, Intent(this, CarPlayHostActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(this, 1, Intent(this, DiPlaySessionService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val notification = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_diplay_notification)
+        val builder = notificationBuilder()
+        builder.setSmallIcon(R.drawable.ic_diplay_notification)
             .setContentTitle("DiPlay")
             .setContentText("CarPlay connection running")
             .setContentIntent(open).setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "Disconnect", stop).build()).build()
+        // Notification.Action.Builder is API 23+; below that the int-icon addAction is the only form.
+        if (Build.VERSION.SDK_INT >= 23) {
+            builder.addAction(Notification.Action.Builder(null, "Disconnect", stop).build())
+        } else {
+            addLegacyDisconnectAction(builder, stop)
+        }
+        val notification = builder.build()
         if (Build.VERSION.SDK_INT >= 29) {
             var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             if (Build.VERSION.SDK_INT >= 30 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -53,6 +66,16 @@ class DiPlaySessionService : Service() {
         CarPlayBackgroundSession.stop()
         stopSelf()
     }
+    @Suppress("DEPRECATION")
+    private fun notificationBuilder(): Notification.Builder =
+        if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL)
+        else Notification.Builder(this)
+
+    @Suppress("DEPRECATION")
+    private fun addLegacyDisconnectAction(builder: Notification.Builder, stop: PendingIntent) {
+        builder.addAction(0, "Disconnect", stop)
+    }
+
     companion object {
         const val ACTION_STOP = "com.shihab.diplay.DISCONNECT"
         private const val CHANNEL = "diplay_connection"

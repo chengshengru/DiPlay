@@ -4,6 +4,7 @@ import android.app.AppOpsManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
@@ -51,7 +52,10 @@ internal class DiLink51ClusterMonitor(context: Context, private val onState: (Cl
                     seen.clear()
                     since = bootTime()
                 }
-                val events = context.getSystemService(UsageStatsManager::class.java).queryEvents(since, now)
+                // UsageStatsManager is API 21+; below that hasAccess() already reported no access.
+                val usageStats = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+                    ?: throw IllegalStateException("Usage stats unavailable")
+                val events = usageStats.queryEvents(since, now)
                     ?: throw IllegalStateException("Usage events unavailable")
                 val event = UsageEvents.Event()
                 while (events.hasNextEvent()) {
@@ -79,7 +83,16 @@ internal class DiLink51ClusterMonitor(context: Context, private val onState: (Cl
     }
 
     companion object {
-        fun hasAccess(context: Context): Boolean = context.getSystemService(AppOpsManager::class.java)
-            .checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName) == AppOpsManager.MODE_ALLOWED
+        /** AppOpsManager is API 19 and UsageStatsManager is API 21, so Jelly Bean has neither. */
+        private const val MIN_USAGE_STATS_API = 21
+
+        @Suppress("DEPRECATION")
+        fun hasAccess(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < MIN_USAGE_STATS_API) return false
+            val ops = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
+            return ops.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName,
+            ) == AppOpsManager.MODE_ALLOWED
+        }
     }
 }

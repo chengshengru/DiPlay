@@ -170,9 +170,9 @@ class CarPlayBonjour(
             "bonjourAddressMismatch=${addressMismatchCount.get()} connectProbes=${probeCount.get()} " +
             "connectProbe2xx=${successfulProbeCount.get()} lastProbe=${lastProbe.get()} " +
             "mdnsFamilies=$publishedFamilies"
-    private val multicastLock = (context.applicationContext ?: context)
-        .getSystemService(WifiManager::class.java)
-        .createMulticastLock("carplay-bonjour").apply { setReferenceCounted(false) }
+    private val multicastLock = requireNotNull(
+        (context.applicationContext ?: context).getSystemService(Context.WIFI_SERVICE) as? WifiManager,
+    ) { "WifiManager is unavailable" }.createMulticastLock("carplay-bonjour").apply { setReferenceCounted(false) }
 
     private var started = false
     @Volatile
