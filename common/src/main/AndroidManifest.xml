@@ -27,6 +27,9 @@
             <data android:mimeType="*/*" />
         </intent>
     </queries> -->
+    <!-- API 17 迁移：androidx.car.app（minSdk 23）与 media3（minSdk 21）仅在高版本设备使用；
+         common 自身单元测试 manifest 合并时同样需要覆盖，与 mobile/automotive 保持一致。 -->
+    <uses-sdk tools:overrideLibrary="androidx.car.app,androidx.car.app.projected,androidx.media3.common,androidx.media3.exoplayer,androidx.media3.exoplayer_hls,androidx.media3.ui,androidx.media3.container" />
     <application>
         <provider
             android:name="com.shilapi.xcertplay.DiagnosticReportProvider"

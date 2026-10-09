@@ -166,12 +166,13 @@ android {
 ```kotlin
 android {
     namespace = "com.shihab.diplay"
-    compileSdk = 34  // 降低到 34
+    compileSdk = 36  // 见 2.6：本机 android-33/34/35 jar 为裁剪版，需 36 + aapt2 覆盖；标准环境 34 即可
     
     defaultConfig {
         applicationId = "com.shihab.diplay"
         minSdk = 17  // 目标: API 17
         targetSdk = 28  // 保持 targetSdk 28 以获得更好的行为
+        multiDexEnabled = true  // desugaring + minSdk<21 强制要求，见 2.6
         versionCode = 22
         versionName = "0.2.14-api17"
     }
@@ -238,11 +239,12 @@ android {
 
 ```gradle
 android {
-    compileSdk = 34
+    compileSdk = 36  // 见 2.6；标准环境 34 即可
     
     defaultConfig {
         minSdk = 17
         targetSdk = 28
+        multiDexEnabled true  // desugaring + minSdk<21 强制要求，见 2.6
     }
     
     compileOptions {
@@ -274,11 +276,12 @@ dependencies {
 
 ```kotlin
 android {
-    compileSdk = 34
+    compileSdk = 36  // 见 2.6；标准环境 34 即可
     
     defaultConfig {
         minSdk = 17
         targetSdk = 28
+        multiDexEnabled = true  // desugaring + minSdk<21 强制要求，见 2.6
     }
     
     compileOptions {
@@ -299,6 +302,55 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
 }
 ```
+
+### 2.6 构建实测踩坑（原文档遗漏，落地时逐个撞上）
+
+以下问题全部在实际构建中验证并修复，按出现顺序记录：
+
+1. **Gradle wrapper 版本与镜像**：AGP 7.4.2 兼容 Gradle 7.5–7.6.x，但项目 `settings.gradle.kts`
+   使用的 `foojay-resolver` 0.5.0 **要求 Gradle 7.6+**（7.5 在配置阶段直接失败）。
+   最终 wrapper 定为 `gradle-7.6.4-bin.zip`，并使用腾讯云镜像加速下载：
+
+   ```properties
+   # gradle/wrapper/gradle-wrapper.properties
+   distributionUrl=https\://mirrors.cloud.tencent.com/gradle/gradle-7.6.4-bin.zip
+   ```
+
+2. **desugaring 强制 legacy multidex**：`isCoreLibraryDesugaringEnabled = true` 且 minSdk < 21 时，
+   AGP 7.4.2 配置阶段报错 "In order to use core library desugaring, please enable multidex"。
+   修复需要四件事，缺一不可：
+   - 所有启用 desugaring 的模块（mobile/automotive/common/shared）`defaultConfig` 加 `multiDexEnabled = true`；
+   - 依赖 `androidx.multidex:multidex:2.0.1`（common 用 `api()` 暴露给壳应用）；
+   - Application 类继承 `MultiDexApplication`（本项目新建 `DiPlayApplication`）；
+   - mobile/automotive 的 Manifest `<application android:name=...>` 注册该类。
+
+3. **AGP 7.4.2 没有 `assets.directories`**：该属性是 AGP 9 API，7.4.2 的
+   `AndroidSourceDirectorySet` 只有 `srcDirs`。构建脚本里遍历 assets 目录的代码需改用 `source.assets.srcDirs`。
+
+4. **AGP 7.4.2 内置 D8/R8 无法解析 Kotlin 1.9 元数据**：dexBuilder 阶段报
+   `com.android.tools.r8.kotlin.H`。官方支持方案是在根构建脚本用 buildscript classpath 前置新版 R8 覆盖：
+
+   ```kotlin
+   // build.gradle.kts 顶部
+   buildscript {
+       dependencies { classpath("com.android.tools:r8:8.2.42") }
+   }
+   ```
+
+5. **compileSdk 与 aapt2**：文档建议 compileSdk 34，但本机 android-33/34/35 平台 jar 为裁剪版
+   （缺 `TetheringManager` 等类），实际使用 **compileSdk 36**；而 AGP 7.4.2 自带的旧版 aapt2
+   无法解析 android-36 的资源表，需用本机 build-tools 覆盖：
+
+   ```properties
+   # gradle.properties
+   android.aapt2FromMavenOverride=/path/to/sdk/build-tools/36.0.0/aapt2
+   ```
+
+6. **androidx.car.app / media3 的 minSdk 冲突**：这些库清单声明 minSdk 21/23，与 minSdk 17 合并时
+   manifest merger 报错。在应用 Manifest 加 `tools:overrideLibrary` 强行通过，低版本设备靠运行时
+   版本分支保护跳过相关功能（car.app 仅 AAOS、media3 播放路径需守卫）。
+
+7. **robolectric 版本号**：`4.9.0` 不存在（中央仓库与镜像均 404），正确版本是 **`4.9`**。
 
 ---
 
@@ -846,7 +898,7 @@ fun <T> OptionalCompat<T>.orNull(): T? = if (isPresent) get() else null
 
 | 行号 | API 调用 | 最低 API | 问题描述 |
 |------|---------|---------|---------|
-| 265 | `connection.requestWait(timeout)` | API 21 | API 17 的 requestWait() 不支持超时参数 |
+| 265 | `connection.requestWait(timeout)` | API 26 | 带超时的 `requestWait(long)` 重载实测自 API 26 引入（经 android-33 `api-versions.xml` 与 `javap` 核实，原文档误标 API 21）。API 17-25 只能调用无参阻塞式 `requestWait()`（API 12+） |
 | 50 | `ByteBuffer.allocateDirect()` | API 1 | ✅ 支持 |
 | 231 | `UsbRequest.initialize()` | API 12 | ✅ 支持 |
 | 71 | `connection.bulkTransfer()` | API 12 | ✅ 支持 |
@@ -863,104 +915,89 @@ val completed = try {
     return null
 } ?: throw failSession("Android returned no NCM read request")
 */
+```
 
-// 迁移后代码:
-private fun readChunk(timeoutMillis: Long): Int? {
-    checkOpen()
-    var acceptedFallback: UsbReadQueueResult? = null
-    val request = try {
-        synchronized(stateLock) {
-            checkOpenLocked()
-            val current = readRequest ?: UsbRequest().also {
-                if (!it.initialize(connection, inEndpoint)) {
-                    it.close()
-                    throw failSession("Android could not initialize the NCM read request")
-                }
-                readRequest = it
-            }
-            if (!readQueued) {
-                directReadBuffer.clear()
-                val queued = readQueuePolicy.queue(directReadBuffer, ::checkOpenLocked, current::queue)
-                if (!queued.queued) throw failSession(
-                    "Android could not queue the NCM read request (api=${Build.VERSION.SDK_INT} " +
-                        "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queued.firstBytes} " +
-                        "fallbackBytes=${queued.fallbackBytes ?: "not_attempted"})",
-                )
-                readQueued = true
-                if (queued.fallbackBytes != null) acceptedFallback = queued
-            }
-            current
-        }
-    } catch (error: RuntimeException) {
-        throw failSession("NCM read failed", error)
+> **原文档方案错误纠正**：原文用 `connection.requestWait(0)` 做"非阻塞轮询"，
+> 但 API 17-25 的 `UsbDeviceConnection` **没有带参数的 `requestWait` 重载**，`requestWait(0)`
+> 会直接 `NoSuchMethodError`；且分支阈值误用 API 21（LOLLIPOP），实际带超时重载自 **API 26（O）** 起才有。
+> 下面是实测可用的方案：API 26+ 保持原调用，API 17-25 用守护线程调用无参阻塞 `requestWait()`，
+> 完成的请求经 `LinkedBlockingQueue` 交给读者，用 `poll(timeout)` 模拟超时。
+
+**迁移后代码（字段区）**：
+
+```kotlin
+// API 17 迁移：requestWait(timeout) 是 API 26 新增重载。API 26+ 直接调用；
+// API 17-25 由守护线程调用阻塞式 requestWait()（API 12+），完成的请求经队列交给读者，
+// poll 超时即模拟原有的超时返回 null 行为。
+private val legacyRequestWait = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+private val completedRequests = LinkedBlockingQueue<UsbRequest>()
+private val waitThreadExited = UsbRequest() // 哨兵：requestWait() 返回 null，连接已错误/关闭
+private val requestWaitThread = if (legacyRequestWait) {
+    Thread({ drainCompletedRequests() }, "ncm-request-wait").apply {
+        isDaemon = true
+        start()
     }
-    
-    acceptedFallback?.let { queued ->
-        runCatching {
-            onDiagnostic(
-                "NCM read queue compatibility fallback api=${Build.VERSION.SDK_INT} " +
-                    "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queued.firstBytes} " +
-                    "fallbackBytes=${queued.fallbackBytes}",
-            )
-        }
-    }
-    
-    try {
+} else null
+
+/**
+ * API 17 迁移：唯一的 requestWait() 使用者移到守护线程。阻塞式 requestWait()（API 12+）
+ * 返回完成的请求后放入队列；返回 null 表示连接错误/关闭，放入哨兵唤醒读者。
+ * 线程本身随 JVM 退出（daemon），close() 中 connection.close() 会使 requestWait() 返回。
+ */
+private fun drainCompletedRequests() {
+    while (true) {
         val completed = try {
-            // API 兼容性处理
-            if (ApiLevel.isAtLeast(ApiLevel.LOLLIPOP)) {
-                // API 21+: 使用带超时的 requestWait
-                connection.requestWait(timeoutMillis.coerceAtLeast(1))
-            } else {
-                // API 17-20: 使用轮询模拟超时
-                requestWaitWithPoll(connection, timeoutMillis)
-            }
+            connection.requestWait()
+        } catch (_: RuntimeException) {
+            break
+        }
+        if (completed == null) break
+        completedRequests.offer(completed)
+    }
+    completedRequests.offer(waitThreadExited)
+}
+```
+
+**迁移后代码（readChunk 等待段）**：
+
+```kotlin
+try {
+    val completed = if (legacyRequestWait) {
+        // API 17-25：从守护线程队列按剩余时间取完成的请求，poll 超时即模拟原超时行为
+        val polled = try {
+            completedRequests.poll(timeoutMillis.coerceAtLeast(1), TimeUnit.MILLISECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            null
+        }
+        // 未取到：请求仍留在队列，下次调用继续；拔线/失败由 USBMUX 权威检测。
+        if (polled == null) return null
+        polled
+    } else {
+        // API 26+ 保持原调用：requestWait(long) 超时抛 TimeoutException
+        try {
+            connection.requestWait(timeoutMillis.coerceAtLeast(1))
         } catch (_: TimeoutException) {
             return null
         } ?: throw failSession("Android returned no NCM read request")
-        
-        if (completed !== request) throw failSession("Android completed an unexpected NCM request")
-        readQueued = false
-        val transferred = directReadBuffer.position()
-        if (transferred <= 0) return null
-        directReadBuffer.flip()
-        directReadBuffer.get(readBuffer, 0, transferred)
-        return transferred
-    } catch (error: IphoneUsbException) {
-        throw error
-    } catch (error: RuntimeException) {
-        throw failSession("NCM read failed", error)
     }
-}
-
-/**
- * API 17-20 的 requestWait 轮询实现
- * 通过短时间轮询模拟超时行为
- */
-private fun requestWaitWithPoll(
-    connection: UsbDeviceConnection,
-    timeoutMillis: Long
-): UsbRequest? {
-    val deadline = System.currentTimeMillis() + timeoutMillis
-    val pollInterval = 10L // 10ms 轮询间隔
-    
-    while (System.currentTimeMillis() < deadline) {
-        // 尝试非阻塞等待
-        val result = connection.requestWait(0)
-        if (result != null) return result
-        
-        // 短暂休眠
-        try {
-            Thread.sleep(pollInterval)
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw TimeoutException("USB request wait interrupted")
-        }
-    }
-    
-    throw TimeoutException("USB request wait timed out after ${timeoutMillis}ms")
+    if (completed === waitThreadExited) throw failSession("Android returned no NCM read request")
+    if (completed !== request) throw failSession("Android completed an unexpected NCM request")
+    readQueued = false
+    val transferred = directReadBuffer.position()
+    if (transferred <= 0) return null
+    directReadBuffer.flip()
+    directReadBuffer.get(readBuffer, 0, transferred)
+    return transferred
+} catch (error: IphoneUsbException) {
+    throw error
+} catch (error: RuntimeException) {
+    throw failSession("NCM read failed", error)
 }
 ```
+
+> 需要 `import java.util.concurrent.TimeoutException`、`java.util.concurrent.LinkedBlockingQueue`、`java.util.concurrent.TimeUnit`。
+> `IphoneUsbHost.kt`（Iap2UsbSession）中同样直接调用 `requestWait(timeoutMillis)` 的位置，需按同一 `SDK_INT < O` 分支处理。
 
 ### 5.2 UsbReadQueuePolicy.kt 迁移
 
@@ -1217,10 +1254,10 @@ object UsbPermissionCompat {
 | 199-203 | `WifiP2pConfig.Builder()` | API 29 | API 17 没有 Builder 模式 |
 | 202 | `setGroupOperatingFrequency()` | API 29 | API 17 不支持频率设置 |
 | 321 | `Channel.close()` | API 27 | API 17 不支持 |
-| 504 | `group.networkName` | API 29 | API 17 使用 `group.getNetworkName()` |
-| 508 | `group.passphrase` | API 29 | API 17 不可用 |
-| 510 | `group.getInterface()` | API 28 | API 17 不可用 |
-| 511 | `group.frequency` | API 29 | API 17 不可用 |
+| 504 | `group.networkName` | API 19 | 实测 android-23 jar 已含 `getNetworkName()`（原文档误标 API 29）。API 17-18 设备运行时无此方法，旧名 `getSSID()` 在 API 21+ 已从编译 jar 移除，只能反射兜底 |
+| 508 | `group.passphrase` | API 19 | 同上；API 17-18 需反射旧名 `getPrePSK()`（原文档"API 17 不可用/无法获取"的结论错误） |
+| 510 | `group.getInterface()` | API 19 | android-23 jar 已含（原文档误标 API 28）；API 17-18 运行时无此方法，需兜底默认接口名 |
+| 511 | `group.frequency` | API 29 | ✅ 标注正确；API 17-28 无法获取，返回 0 |
 
 **迁移方案**:
 
@@ -1312,6 +1349,14 @@ val frequencyMHz = group.frequency
 */
 
 // 迁移后代码:
+//
+// 原文档分支方向写反了。经 javap 核实 android-23/28/33 jar：
+//   - getNetworkName()/getPassphrase()/getInterface() 实际自 API 19 就在 jar 中（原文误标 29/29/28）。
+//     直接属性访问在 API 19+ 运行时可用；API 17-18 运行时会 NoSuchMethodError，
+//     但旧名 getSSID()/getPrePSK() 在 compileSdk 33 的 jar 中已被移除、无法直接编译，
+//     所以兜底只能反射调用旧名。
+//   - getFrequency() 才是真正自 API 29 才有（android-33 jar 中首次出现，原文标注正确）。
+
 private data class GroupInfo(
     val networkName: String?,
     val passphrase: String?,
@@ -1319,57 +1364,28 @@ private data class GroupInfo(
     val frequencyMHz: Int
 )
 
-private fun extractGroupInfo(group: WifiP2pGroup): GroupInfo {
-    val networkName = when {
-        ApiLevel.isAtLeast(ApiLevel.Q) -> {
-            // API 29+: 直接访问属性
-            group.networkName?.takeIf { it.isNotBlank() }
-        }
-        else -> {
-            // API 17-28: 使用反射或旧版方法
-            @Suppress("DEPRECATION")
-            runCatching { 
-                // 尝试通过 getNetworkName() 方法获取
-                val method = group.javaClass.getMethod("getNetworkName")
-                (method.invoke(group) as? String)?.takeIf { it.isNotBlank() }
-            }.getOrNull()
-        }
-    }
-    
-    val passphrase = when {
-        ApiLevel.isAtLeast(ApiLevel.Q) -> {
-            group.passphrase?.takeIf { it.isNotBlank() }
-        }
-        else -> {
-            // API 17-28: 无法获取密码，需要从创建时的凭证中获取
-            null
-        }
-    }
-    
-    val interfaceName = when {
-        ApiLevel.isAtLeast(ApiLevel.PIE) -> {
-            // API 28+: 使用 getInterface()
-            group.getInterface()?.takeIf { it.isNotBlank() }
-        }
-        else -> {
-            // API 17-27: 无法获取接口名，使用默认
-            "p2p0"
-        }
-    }
-    
-    val frequencyMHz = when {
-        ApiLevel.isAtLeast(ApiLevel.Q) -> {
-            // API 29+: 直接访问 frequency
-            group.frequency
-        }
-        else -> {
-            // API 17-28: 无法获取频率
-            0
-        }
-    }
-    
-    return GroupInfo(networkName, passphrase, interfaceName, frequencyMHz)
-}
+private fun extractGroupInfo(group: WifiP2pGroup): GroupInfo = GroupInfo(
+    networkName = groupNetworkName(group),
+    passphrase = groupPassphrase(group),
+    interfaceName = runCatching { group.getInterface()?.takeIf { it.isNotBlank() } }
+        .getOrNull() ?: "p2p0", // API 17-18 运行时无 getInterface()
+    frequencyMHz = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) group.frequency else 0,
+)
+
+/** 优先直接访问（API 19+ 运行时可用）；失败时反射旧版 getSSID() 兜底（API 17-18）。 */
+private fun groupNetworkName(group: WifiP2pGroup): String? =
+    runCatching { group.networkName?.takeIf { it.isNotBlank() } }.getOrNull()
+        ?: invokeLegacyGroupString(group, "getSSID")
+
+/** 同上，旧名为 getPrePSK()。 */
+private fun groupPassphrase(group: WifiP2pGroup): String? =
+    runCatching { group.passphrase?.takeIf { it.isNotBlank() } }.getOrNull()
+        ?: invokeLegacyGroupString(group, "getPrePSK")
+
+private fun invokeLegacyGroupString(group: WifiP2pGroup, methodName: String): String? = runCatching {
+    val method = group.javaClass.getMethod(methodName)
+    (method.invoke(group) as? String)?.takeIf { it.isNotBlank() }
+}.getOrNull()
 ```
 
 ### 6.2 Wi-Fi Direct 遗留通道管理
@@ -3548,6 +3564,8 @@ dependencies {
 - [ ] 降级 Kotlin 到 1.9.22
 - [ ] 移除所有 Compose 依赖
 - [ ] 启用 core library desugaring
+- [ ] 启用 legacy multidex（desugaring + minSdk<21 强制要求，见 2.6）
+- [ ] Gradle wrapper 7.6+（foojay-resolver 0.5.0 要求；国内用腾讯云镜像，见 2.6）
 - [ ] 设置 minSdk = 17
 - [ ] 设置 targetSdk = 28
 - [ ] 设置 Java 8 兼容性
@@ -3576,7 +3594,7 @@ dependencies {
 
 ### 12.4 USB 子系统检查清单
 
-- [ ] 修改 requestWait 调用（添加轮询实现）
+- [ ] 修改 requestWait 调用（API 26 阈值分支；API 17-25 用守护线程 + 队列，见 5.1 纠正说明）
 - [ ] 验证 UsbRequest.queue 行为
 - [ ] 创建 UsbPermissionCompat
 - [ ] 测试 USB 连接在 API 17 设备

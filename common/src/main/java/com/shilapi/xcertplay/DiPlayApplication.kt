@@ -9,4 +9,11 @@ import androidx.multidex.MultiDexApplication
  *
  * @author TRAE AI
  */
-class DiPlayApplication : MultiDexApplication()
+class DiPlayApplication : MultiDexApplication() {
+    override fun onCreate() {
+        super.onCreate()
+        // Persist any uncaught Java crash to disk before the process dies, so head-unit
+        // crashes without adb can still be recovered via the Diagnostics export or the file.
+        CrashFileLogger.install(this)
+    }
+}

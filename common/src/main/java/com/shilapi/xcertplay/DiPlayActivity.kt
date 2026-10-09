@@ -241,6 +241,9 @@ class DiPlayActivity : ComponentActivity() {
 
     private var languagePreferenceAtCreate = AppLocale.SYSTEM
 
+    /** Set once per launch so the previous-crash toast shows a single time, not on every onStart. */
+    private var crashNoticeShown = false
+
     private var interfaceOverride: Configuration? = null
     private var interfaceSystemDensityDpi = 0
     private var interfaceRecreateRequested = false
@@ -358,6 +361,17 @@ class DiPlayActivity : ComponentActivity() {
         // Results from the image picker and crop screens arrive before onResume.
         enforceInterfaceSize()
         CenterMapOverlay.onDiPlayScreenShown()
+        notifyPreviousCrash()
+    }
+
+    /** If the previous run died on an uncaught exception, point the user at the on-disk log. */
+    private fun notifyPreviousCrash() {
+        if (crashNoticeShown) return
+        val crash = CrashFileLogger.lastCrashFile(this)
+        if (!crash.isFile) return
+        crashNoticeShown = true
+        // Reuses the existing "saved to path" string to avoid adding untranslated resources.
+        android.widget.Toast.makeText(this, getString(R.string.diagnostic_report_saved_to_path, crash.absolutePath), android.widget.Toast.LENGTH_LONG).show()
     }
 
     override fun onStop() {
@@ -3939,6 +3953,14 @@ class DiPlayActivity : ComponentActivity() {
                     appendLine()
                     appendLine("--- Recent own-app process exits (Android 11+) ---")
                     appendLine(ProcessExitDiagnostics.report(appContext))
+                    appendLine()
+                    appendLine("--- Last uncaught Java crash (written to disk without adb) ---")
+                    val crashFile = CrashFileLogger.lastCrashFile(appContext)
+                    if (crashFile.isFile) {
+                        crashFile.useLines { lines -> lines.forEach { line -> DiagnosticRedactor.redact(line)?.let { appendLine(it) } } }
+                    } else {
+                        appendLine("none captured")
+                    }
                     appendLine()
                     for (name in SessionLogFile.REPORT_NAMES) {
                         val file = File(appContext.filesDir, "logs/$name")

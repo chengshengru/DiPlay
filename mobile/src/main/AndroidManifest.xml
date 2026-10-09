@@ -6,6 +6,8 @@
          上启用，相关代码路径都有 Build.VERSION 运行时保护；低版本设备强制通过清单合并，
          不会调用到这些库的 API。 -->
     <uses-sdk
+        android:targetSdkVersion="17"
+        tools:replace="android:targetSdkVersion"
         tools:overrideLibrary="androidx.car.app,androidx.car.app.projected,androidx.media3.common,androidx.media3.exoplayer,androidx.media3.exoplayer_hls,androidx.media3.ui,androidx.media3.container" />
 
     <application

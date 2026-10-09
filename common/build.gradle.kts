@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         minSdk = 17
-        targetSdk = 28
+        targetSdk = 17
         // API 17-20：desugaring 要求 legacy multidex
         multiDexEnabled = true
     }
