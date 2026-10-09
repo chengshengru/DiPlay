@@ -60,7 +60,11 @@ dependencies {
     // API 17-18 设备通过运行时保护跳过该功能
     implementation libs.androidx.app
     implementation libs.bouncycastle
-    implementation libs.jmdns
+    // vendored JmDNS 3.6.3：修复 API17 多播端口复用（SO_REUSEADDR 先于 bind），
+    // 替换 org.jmdns:jmdns 二进制，避免类重复
+    implementation project(':legacy-mdns')
     testImplementation libs.junit
     testImplementation 'org.robolectric:robolectric:4.9'
+    // LegacyMdnsPortReuseTest 用 ASM 复现 Android 4.2 多播构造顺序
+    testImplementation 'org.ow2.asm:asm:9.9'
 }

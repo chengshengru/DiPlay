@@ -28,6 +28,8 @@ include(":common")
 include(":mobile")
 include(":automotive")
 include(":shared")
+// vendored JmDNS 3.6.3（含 API17 多播 SO_REUSEADDR 补丁），替换 org.jmdns:jmdns 二进制
+include(":legacy-mdns")
 include(":maphost")
 project(":maphost").projectDir = file("samples/maphost")
 include(":home")

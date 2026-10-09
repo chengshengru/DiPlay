@@ -65,5 +65,6 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation("org.robolectric:robolectric:4.9")
     testImplementation("org.mockito:mockito-core:5.2.0")
-    testImplementation(libs.jmdns)
+    // 测试用同一 vendored JmDNS（避免与 shared 运行时里的实现重复类）
+    testImplementation(project(":legacy-mdns"))
 }

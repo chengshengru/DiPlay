@@ -4888,6 +4888,8 @@ class CarPlayHostActivity : ComponentActivity() {
         val multiWindow = isMultiWindowActive()
         val hideTop = hideTopBar && !multiWindow
         val hideBottom = hideBottomBar && !multiWindow
+        // API < 20：WindowInsetsControllerCompat 不实现系统栏可见性，回退到老式窗口标志。
+        if (LegacyFullscreen.apply(window, hideTop, hideBottom)) return
         WindowCompat.setDecorFitsSystemWindows(window, !(hideTop && hideBottom))
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         if (hideTop) {

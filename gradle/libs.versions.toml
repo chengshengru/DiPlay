@@ -11,7 +11,7 @@ appAutomotive = "1.2.0"
 app = "1.2.0"
 junit = "4.13.2"
 bouncycastle = "1.70"
-jmdns = "3.5.8"
+# jmdns 改用 vendored 模块 :legacy-mdns（JmDNS 3.6.3 + API17 多播 SO_REUSEADDR 补丁）
 desugarJdk = "2.0.4"
 multidex = "2.0.1"
 constraintlayout = "2.1.4"
@@ -34,7 +34,6 @@ androidx-app-automotive = { group = "androidx.car.app", name = "app-automotive",
 androidx-app = { group = "androidx.car.app", name = "app", version.ref = "app" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 bouncycastle = { group = "org.bouncycastle", name = "bcprov-jdk15on", version.ref = "bouncycastle" }
-jmdns = { group = "org.jmdns", name = "jmdns", version.ref = "jmdns" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugarJdk" }
 androidx-multidex = { group = "androidx.multidex", name = "multidex", version = "2.0.1" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
