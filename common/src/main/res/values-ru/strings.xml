@@ -749,4 +749,8 @@
     <string name="settings_discard_pending_message">Разрешение, частота кадров, подключение и остальные изменённые настройки ещё не сохранены. «Сохранить и переподключиться» применяет их.</string>
     <string name="settings_discard_pending_confirm">Отменить</string>
 
+    <string name="fps_counter_millis">%1$d ms</string>
+    <string name="fps_counter_no_value">–</string>
+    <string name="fps_counter_text">%1$d FPS\nRX %2$d · %3$s</string>
+    <string name="fps_counter_waiting">-- FPS</string>
 </resources>
