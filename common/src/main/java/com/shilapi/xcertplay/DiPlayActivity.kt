@@ -74,7 +74,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 internal enum class SettingsCategory {
-    OVERVIEW, CONNECTION, DISPLAY, AUDIO, NAVIGATION, VEHICLE, DIAGNOSTICS, ADVANCED,
+    OVERVIEW, CONNECTION, DISPLAY, AUDIO, NAVIGATION, VEHICLE, LANGUAGE, ABOUT, DIAGNOSTICS, ADVANCED,
 }
 
 /** A settings card. Every entry needs one category in [SettingsInformationArchitecture]; see AGENTS.md. */
@@ -98,13 +98,15 @@ internal enum class SettingsSection {
     CLUSTER_MAP,
     BYD_NAVIGATION,
     PERMISSIONS_AND_HELP,
-    ABOUT,
     LANGUAGE,
 }
 
 internal object SettingsInformationArchitecture {
+    // main #422：LANGUAGE 与 ABOUT 独立分类页；Overview 不再并载两张卡片（作者：TRAE AI）。
     val sectionsByCategory: Map<SettingsCategory, Set<SettingsSection>> = mapOf(
-        SettingsCategory.OVERVIEW to setOf(SettingsSection.ABOUT, SettingsSection.LANGUAGE),
+        SettingsCategory.OVERVIEW to emptySet(),
+        SettingsCategory.LANGUAGE to setOf(SettingsSection.LANGUAGE),
+        SettingsCategory.ABOUT to emptySet(),
         SettingsCategory.CONNECTION to setOf(
             SettingsSection.CONNECTION_SETUP,
             SettingsSection.AUTOMATIC_CONNECTION,
@@ -124,8 +126,8 @@ internal object SettingsInformationArchitecture {
             SettingsSection.CLUSTER_MAP,
             SettingsSection.EXPERIMENTAL_DISPLAY,
             SettingsSection.ADVANCED_MEDIA,
-            SettingsSection.AMBIENT_LIGHTING,
             SettingsSection.NAVIGATION_WHEEL,
+            SettingsSection.AMBIENT_LIGHTING,
         ),
     )
 }
@@ -819,6 +821,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private fun navigateBack() {
         val returnCategory = connectionSettingsReturnCategory
         when {
+            // main #422：about 是独立页面，返回设置页 Overview（作者：TRAE AI）。
+            page == "about" -> {
+                page = "settings"
+                settingsCategory = SettingsCategory.OVERVIEW
+            }
             page == "connection" && returnCategory != null -> {
                 page = "settings"
                 settingsCategory = returnCategory
@@ -1036,8 +1043,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             addView(label(title, 16, if (selected) ACCENT else TEXT, true),
                 LinearLayout.LayoutParams(0, -1, 1f))
             setOnClickListener {
-                settingsCategory = category
-                render()
+                openSettingsCategory(category)
             }
         }
     }
@@ -1048,9 +1054,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         SettingsCategory.DISPLAY -> R.drawable.ic_dp_display
         SettingsCategory.AUDIO -> R.drawable.ic_dp_audio
         SettingsCategory.NAVIGATION -> R.drawable.ic_dp_navigation
-        SettingsCategory.VEHICLE -> R.drawable.ic_dp_vehicle
+        SettingsCategory.VEHICLE -> R.drawable.ic_dp_car
         SettingsCategory.DIAGNOSTICS -> R.drawable.ic_dp_diagnostics
         SettingsCategory.ADVANCED -> R.drawable.ic_dp_advanced
+        SettingsCategory.LANGUAGE -> R.drawable.ic_dp_language
+        SettingsCategory.ABOUT -> R.drawable.ic_dp_about
     }
 
     private fun settingsCategoryTitle(category: SettingsCategory): String = getString(when (category) {
@@ -1062,6 +1070,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         SettingsCategory.VEHICLE -> R.string.settings_vehicle
         SettingsCategory.DIAGNOSTICS -> R.string.diagnostics
         SettingsCategory.ADVANCED -> R.string.settings_advanced
+        SettingsCategory.LANGUAGE -> R.string.language_section_title
+        SettingsCategory.ABOUT -> R.string.about
     })
 
     private fun settingsCategoryContent(content: LinearLayout) {
@@ -1074,6 +1084,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             SettingsCategory.VEHICLE -> vehicleSettings(content)
             SettingsCategory.DIAGNOSTICS -> diagnosticsSettings(content)
             SettingsCategory.ADVANCED -> advancedSettings(content)
+            SettingsCategory.LANGUAGE -> {
+                settingsPageTitle(content, getString(R.string.language_section_title), getString(R.string.settings_language_summary))
+                renderSections(content, SettingsInformationArchitecture.sectionsByCategory.getValue(SettingsCategory.LANGUAGE))
+            }
+            SettingsCategory.ABOUT -> about(content)
         }
     }
 
@@ -1093,7 +1108,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             SettingsCategory.AUDIO to R.string.settings_audio_summary,
             SettingsCategory.NAVIGATION to R.string.settings_navigation_summary,
             SettingsCategory.VEHICLE to R.string.settings_vehicle_summary,
+            SettingsCategory.LANGUAGE to R.string.settings_language_summary,
+            SettingsCategory.ABOUT to R.string.about_diplay,
+            SettingsCategory.DIAGNOSTICS to R.string.settings_diagnostics_summary,
+            SettingsCategory.ADVANCED to R.string.settings_advanced_subtitle,
         )
+        val categoryGap = dp(SETTINGS_BLOCK_GAP_DP)
         val twoColumns = isExpandedSettingsLayout && resources.configuration.let {
             SettingsLayoutPolicy.overviewHasTwoColumns(it.screenWidthDp, it.fontScale)
         }
@@ -1103,7 +1123,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             setup.addView(settingsSectionHeading(R.string.settings_your_setup))
             destinations.forEach { item ->
                 setup.addView(settingsSummaryCard(item.first, getString(item.second)),
-                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = categoryGap })
             }
             columns.addView(setup, LinearLayout.LayoutParams(0, -2, 1f))
             columns.addView(space(14), LinearLayout.LayoutParams(dp(14), 1))
@@ -1111,20 +1131,17 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             quick.addView(settingsSectionHeading(R.string.settings_quick_settings))
             quick.addView(quickSettingsCard())
             columns.addView(quick, LinearLayout.LayoutParams(0, -2, 1f))
-            content.addView(columns, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
+            content.addView(columns, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
         } else {
             content.addView(settingsSectionHeading(R.string.settings_your_setup))
             destinations.forEach { item ->
                 content.addView(settingsSummaryCard(item.first, getString(item.second)),
-                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = categoryGap })
             }
             content.addView(settingsSectionHeading(R.string.settings_quick_settings).apply { setPadding(0, dp(10), 0, dp(8)) })
-            content.addView(quickSettingsCard(), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(18) })
+            content.addView(quickSettingsCard(), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
         }
 
-        content.addView(settingsUtilitiesCard(), LinearLayout.LayoutParams(-1, -2).apply {
-            bottomMargin = dp(SETTINGS_BLOCK_GAP_DP)
-        })
         renderSections(content, SettingsInformationArchitecture.sectionsByCategory.getValue(SettingsCategory.OVERVIEW))
     }
 
@@ -1178,60 +1195,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
     }
 
-    private fun settingsUtilitiesCard(): LinearLayout = card().apply {
-        setPadding(0, 0, 0, 0)
-        addView(settingsUtilityRow(
-            SettingsCategory.DIAGNOSTICS,
-            R.drawable.ic_dp_diagnostics,
-            getString(R.string.settings_diagnostics_summary),
-        ), LinearLayout.LayoutParams(-1, dp(72)))
-        addView(View(this@DiPlayActivity).apply { setBackgroundColor(BORDER) },
-            LinearLayout.LayoutParams(-1, dp(1)).apply {
-                marginStart = dp(16)
-                marginEnd = dp(16)
-            })
-        addView(settingsUtilityRow(
-            SettingsCategory.ADVANCED,
-            R.drawable.ic_dp_advanced,
-            getString(R.string.settings_advanced_subtitle),
-            warning = true,
-        ), LinearLayout.LayoutParams(-1, dp(72)))
-    }
-
-    private fun settingsUtilityRow(
-        category: SettingsCategory,
-        icon: Int,
-        description: String,
-        warning: Boolean = false,
-    ): LinearLayout = row().apply {
-        val tint = if (warning) WARNING else ACCENT
-        gravity = Gravity.CENTER_VERTICAL
-        isClickable = true
-        isFocusable = true
-        contentDescription = getString(R.string.settings_open_category, settingsCategoryTitle(category))
-        UiCompat.setForeground(this, android.graphics.drawable.LayerDrawable(arrayOf(
-            UiCompat.ripple(RIPPLE, null, null), focusRing(12))))
-        setPadding(dp(16), 0, dp(16), 0)
-        addView(ImageView(this@DiPlayActivity).apply {
-            setImageResource(icon)
-            UiCompat.setImageTint(this, tint)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(14) })
-        addView(column().apply {
-            addView(label(settingsCategoryTitle(category), 17, if (warning) WARNING else TEXT, true))
-            addView(label(description, 13, MUTED).apply { setPadding(0, dp(2), 0, 0) })
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(ImageView(this@DiPlayActivity).apply {
-            setImageResource(R.drawable.ic_dp_chevron)
-            UiCompat.setImageTint(this, ACCENT)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginStart = dp(12) })
-        setOnClickListener {
-            settingsCategory = category
-            render()
-        }
-    }
-
     private fun quickSettingsCard(): LinearLayout = card().also(::buildQuickSettings).also(::normalizeSpacing)
 
     private fun buildQuickSettings(card: LinearLayout): Unit = card.run {
@@ -1254,6 +1217,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         setPadding(0, 0, 0, dp(10))
     }
 
+    // 分类页统一入口：ABOUT 是独立页面而不是分类卡片（main #422，作者：TRAE AI）。
+    private fun openSettingsCategory(category: SettingsCategory) {
+        if (category == SettingsCategory.ABOUT) page = "about"
+        else settingsCategory = category
+        render()
+    }
+
     private fun settingsSummaryCard(category: SettingsCategory, summary: String): LinearLayout = card().apply {
         setPadding(dp(16), dp(10), dp(16), dp(10))
         isClickable = true
@@ -1263,7 +1233,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         contentDescription = getString(R.string.settings_open_category, settingsCategoryTitle(category))
         addView(label(settingsCategoryTitle(category), 17, TEXT, true))
         addView(label(summary, 13, MUTED).apply { setPadding(0, dp(3), 0, 0) })
-        setOnClickListener { settingsCategory = category; render() }
+        setOnClickListener { openSettingsCategory(category) }
     }
 
     private fun settingsPageTitle(content: LinearLayout, title: String, subtitle: String) {
@@ -1985,10 +1955,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             card.addView(button(getString(R.string.bluetooth_settings), false) { openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }, matchButton(10, 60))
             card.addView(button(getString(R.string.wireless_connection_help), false) { wirelessHelp() }, matchButton(10, 60))
         }
-        filteredSection(content, SettingsSection.ABOUT,
-            getString(R.string.about), R.drawable.ic_dp_about) { card ->
-            card.addView(button(getString(R.string.about_diplay), false) { page = "about"; render() }, matchButton(0, 60))
-        }
+        // main #422：LANGUAGE 卡片挂到独立分类页，经 renderSections 过滤渲染（作者：TRAE AI）。
         languageSettings(content)
     }
 
