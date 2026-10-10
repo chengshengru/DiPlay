@@ -73,7 +73,7 @@ flowchart LR
 | `CarPlayDiscovery.kt`（分支 jmdns 3.5.8 适配版） | main 仍用 jmdns 3.5.8 库；分支已 vendored `legacy-mdns` | **不替换**：保留分支 legacy-mdns，仅叠加 main 对发现逻辑的修复 |
 | `IphoneUsbHost.kt` 的 requestWait 版本分支（守护线程 + queue poll） | main 的 `UsbRequestQueue.kt`（API 26+ 原生队列） | **混合**：API 26+ 路径直接采用 main 实现替换守护线程方案；API 17–25 保留守护线程路径 |
 | 分支 `MainActivity.kt` View 化实现 | main 的 Compose 实现 | **不替换**：技术栈不可逆，仅移植功能逻辑 |
-| 分支 `CrashFileLogger.kt`（分支自加） | main 的诊断上报增强（#499/#459） | **替换式合并**：以 main 结构为基线，保留分支的 API 17 文件路径回退 |
+| 分支 `CrashFileLogger.kt`（分支自加） | main 的诊断上报增强（#499/#459） | **无需替换**：2026-10-11 核实 #499 仅涉及 AndroidMediaSink 诊断通道（onAudioDiagnostic），不触碰 CrashFileLogger；分支保留自加实现 |
 
 3. **替换后必须做**：
    - 跑被替换功能的单元测试（main 版测试优先采用 main 的测试文件）；
@@ -88,11 +88,11 @@ flowchart LR
 |------|--------|-------------------|------|----------|------|
 | 一 | Concentus 软件 Opus 编码器 | `6a1e7b89`/`ea898e34` | ✅ 已完成 | 2026-10-10 | 分支提交 `bd722344`；另修复 3 个阻塞 `:shared` 测试编译的既有坏测试（setPassphrase 反射化、RemoteMfi 改 ServerSocket 桩） |
 | 一 | Opus 能力广告 | #483 `6d15669f` | ✅ 已完成 | 2026-10-10 | 分支提交 `bd722344`；AirPlayConfig.microphoneOpus + InfoPlist audioFormats 守卫 |
-| 一 | 音频诊断上报 | #499 `a6c8c4da` | ⬜ | | CrashFileLogger 替换式合并（见 0.3） |
-| 一 | 麦克风回退集成 | #468 `e2403839` | 🔶 进行中 | | 回退逻辑已随 `bd722344` 移植（MicrophoneUplink + AndroidMediaSink 调用点）；诊断集成部分待 #499 |
+| 一 | 音频诊断上报 | #499 `a6c8c4da` | ✅ 已完成 | 2026-10-11 | AndroidMediaSink：焦点回调丢弃时上报原因、进入/恢复通信模式写诊断报告（try 内构造 try 外发送，restore 失败读当前模式用 runCatching 兜底） |
+| 一 | 麦克风回退集成 | #468 `e2403839` | ✅ 已完成 | 2026-10-11 | 回退逻辑随 `bd722344` 移植；诊断集成部分（opusEncoderFactory 注入、编码器诊断 runCatching、OpusEncoderSupport 软件探测、AirPlayConfig/InfoPlist 新注释）核对分支已全部具备，#499 部分本次补齐 |
 | 一 | 回消参考对齐 | #421 `5fecbc08` | ✅ 已完成 | 2026-10-10 | 分支提交 `bd722344`；EchoReferenceTest 9/9 通过 |
-| 一 | 缓冲音频节流 | #484 `a4b8900d` | ⬜ | | |
-| 一 | prebuffer underrun 恢复 | #401 `f5452c5a`/`2f12d483` | ⬜ | | |
+| 一 | 缓冲音频节流 | #484 `a4b8900d` | ✅ 已完成 | 2026-10-11 | BufferedAudioStream：15s 下限后每帧暂停 1/4 帧时长（约 4 倍实时）；下限读实时队列而非计数器，播放/FLUSHBUFFERED 清空后自动恢复全速；测试按指示未移植 |
+| 一 | prebuffer underrun 恢复 | #401 `f5452c5a`/`2f12d483` | ✅ 已完成 | 2026-10-11 | AudioBufferProgress.shouldRebuffer 增加 floorBytes（阈值一半，修复"回弹"后精确零永不满足）；暂停时保留 PCM 计入 prebufferBytes+lastPcmWriteNs 记账修复；AudioBufferProgressTest 同步 main 版（纯 JUnit） |
 | 二 | NCM 接收帧修复 | #478 `515bc9ec` | ✅ 已完成 | 2026-10-10 | drainFrames 可选短包填充状态机；NcmUsbBridgeFramingTest 9/9 通过 |
 | 二 | USB 读阶梯重试 | #495 `422a7d8e` | ✅ 已完成 | 2026-10-10 | UsbReadQueuePolicy 重写为 main 最终版（queueCeiling+阶梯+submitUnchanged）；另修复 API 17–25 `queue(ByteBuffer)` NoSuchMethodError 隐患（queueRead 扩展走废弃双参重载）；UsbReadQueuePolicyTest 18/18、CompatibilityTest 11/11 通过 |
 | 二 | 16 KiB usbfs 上限（扩到 API 17–25） | `764e0ba1` | ✅ 已完成 | 2026-10-10 | forCurrentPlatform 守卫下探为 `< P`（比 main 的 26/27 更保守）；Android8UsbReadTest 12/12 通过；CarPlayController describeThrowable 与 Iap2IdentificationRejectionTest（5.3 第 3 条）一并移植 |
@@ -286,6 +286,12 @@ shared/.../media/AudioTrackRenderer*.kt         # prebuffer 重建 + 节流
 ```
 
 真机验证：API 17 车机上发起 CarPlay 通话/Siri，确认诊断报告中 `encoder=concentus` 且对侧能听到声音。
+
+### 4.5 完成记录（2026-10-11，分支 `port/wave1-audio-remaining`）
+
+- 遗留 4 项全部完成（见 0.4 进度表波次一各行）：#499 音频诊断上报、#468 诊断集成（核对分支已具备，仅补 #499 缺口）、#484 缓冲音频节流、#401 prebuffer 恢复+记账。
+- `AudioBufferProgress.shouldRebuffer` 签名新增 `floorBytes` 参数，调用点传 `startThresholdBytes / 2L`；`AudioBufferProgressTest` 同步 main 版（纯 JUnit，编译通过）。
+- 按用户指示跳过单元测试，仅编译验证：`:shared/:common:compileDebugKotlin`、`:shared:compileDebugUnitTestKotlin`、`:mobile:assembleDebug` 通过（JDK 17 + `--offline`）。
 
 ---
 
@@ -570,7 +576,7 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 - [ ] 复制 `org/concentus/**`（126 文件）并编译通过
 - [ ] 移植 `SoftwareOpusEncoder/OpusEncoderSupport/MicrophoneOpusEncoder` + 测试
 - [ ] `AudioFocusRequestCompat` 补 API 8–25 分支
-- [ ] Opus 能力广告（#483）+ 音频诊断（#499）+ 回消对齐（#421）+ 缓冲节流（#484）+ prebuffer 恢复（#401）
+- [x] Opus 能力广告（#483）+ 音频诊断（#499）+ 回消对齐（#421）+ 缓冲节流（#484）+ prebuffer 恢复（#401）
 - [ ] `:shared:testDebugUnitTest --tests "*Opus*" --tests "*Echo*"` 通过
 
 ### 波次二 USB

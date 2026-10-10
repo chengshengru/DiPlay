@@ -58,7 +58,16 @@ internal class AudioFocusCoordinator(
     private fun listenerFor(generation: Long) = AudioManager.OnAudioFocusChangeListener { change ->
         synchronized(this) {
             // Android may have queued callbacks before a request was abandoned or replaced.
-            if (generation != focusGeneration || request == null || active.isEmpty()) return@synchronized
+            if (generation != focusGeneration || request == null || active.isEmpty()) {
+                // main #499：静默丢弃会掩盖最关键的窗口——通话音轨关闭与媒体
+                // 重开之间，车机保持焦点时看起来什么都没发生。记录回调到达与未处理原因。
+                runCatching {
+                    report("Audio: focus change=$change dropped" +
+                        " stale=${generation != focusGeneration} noRequest=${request == null}" +
+                        " activeTracks=${active.size}")
+                }
+                return@synchronized
+            }
             runCatching { report("Audio: focus change=$change activeTracks=${active.size}") }
             when (change) {
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> setMediaVolume(DUCKED_VOLUME)
@@ -538,6 +547,12 @@ class AndroidMediaSink(
             manager.mode = AudioManager.MODE_IN_COMMUNICATION
             communicationModeStream = id
             Log.i("xcertplay-usb", "audio mode $savedAudioMode -> ${manager.mode} for telephony stream=$id")
+            // main #499：写入诊断报告而非仅 logcat：停留在语音通道的车机不放媒体，
+            // 没有 adb 就无法诊断。上报失败不得干扰模式切换，故放在最后且不可抛出。
+            runCatching {
+                onAudioDiagnostic("Audio: mode entered communication from=$savedAudioMode" +
+                    " now=${manager.mode} stream=$id")
+            }
         }
     }
 
@@ -547,12 +562,20 @@ class AndroidMediaSink(
             val active = communicationModeStream ?: return
             if (id != null && id != active) return
             communicationModeStream = null
-            try {
+            // main #499：诊断文本在 try 内构造、在 try 外发送：在 try 内上报会让
+            // 失败的回调被当成失败的音频模式恢复而被捕获。
+            val line = try {
                 manager.mode = savedAudioMode
                 Log.i("xcertplay-usb", "audio mode restored to ${manager.mode}")
+                "Audio: mode restored requested=$savedAudioMode now=${manager.mode} stream=$active"
             } catch (error: RuntimeException) {
                 Log.w("xcertplay-usb", "could not restore audio mode $savedAudioMode", error)
+                // 读取当前模式本身也可能抛出（模式设置失败时），用 runCatching 兜底。
+                val currentMode = runCatching { manager.mode.toString() }.getOrDefault("unknown")
+                "Audio: mode restore failed requested=$savedAudioMode now=$currentMode" +
+                    " error=${error.javaClass.simpleName}"
             }
+            runCatching { onAudioDiagnostic(line) }
         }
     }
 
@@ -1843,12 +1866,18 @@ private class AudioRenderer(
     private fun maintainPlaybackBuffer() {
         val track = track ?: return
         if (bufferProgress.shouldRebuffer(mappedChannel == AudioChannel.MEDIA, playbackStarted,
-                track.underrunCount > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition)) {
-            // The hardware buffer has actually drained. Pause without flushing or discarding PCM,
-            // then use the configured start threshold again when music resumes.
+                track.underrunCount > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition,
+                // main #401：电平回落到启动阈值一半即视为排空，重新武装 rebuffer。
+                startThresholdBytes / 2L)) {
+            // main #401：硬件缓冲已饿死到恢复下限。暂停但不 flush、不丢弃 PCM，
+            // 音乐恢复时重新使用配置的启动阈值。
             track.pause()
             playbackStarted = false
-            prebufferBytes = 0
+            // 暂停会保留已排队的 PCM。把它计入重启阈值，防止阻塞写入在
+            // 调用 play() 之前就把暂停中的音轨填满（main #401 记账修复）。
+            prebufferBytes = bufferProgress.queuedBytes(track.playbackHeadPosition)
+                .coerceAtMost(startThresholdBytes.toLong()).toInt()
+            lastPcmWriteNs = System.nanoTime()
             rebufferCount++
         }
         // A short final burst may never reach the start threshold. Play it after a bounded wait.

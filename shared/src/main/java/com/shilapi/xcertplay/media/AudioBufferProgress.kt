@@ -16,6 +16,9 @@ internal class AudioBufferProgress(private val frameBytes: Int) {
     }
 
     fun shouldRebuffer(isMedia: Boolean, playing: Boolean, underrunSinceStart: Boolean,
-        compressedQueueEmpty: Boolean, rawHead: Int): Boolean =
-        isMedia && playing && underrunSinceStart && compressedQueueEmpty && queuedBytes(rawHead) == 0L
+        compressedQueueEmpty: Boolean, rawHead: Int, floorBytes: Long): Boolean =
+        // main #401：精确零判定在"回弹"场景下永远不再满足（残余电平高于 0），
+        // 导致每次饿死窗口反复 underrun 而恢复流程不再触发；降到启动阈值一半即视为排空。
+        isMedia && playing && underrunSinceStart && compressedQueueEmpty &&
+            queuedBytes(rawHead) <= floorBytes
 }
