@@ -378,6 +378,9 @@ class WheelKeyService : AccessibilityService() {
 
         fun cancelLearning() { running?.onMain { clearLearning() } }
 
+        // 是否有按键学习进行中（main #422：外观重渲染需在学习期间延迟，作者：TRAE AI）。
+        fun isLearning(): Boolean = running?.learning != null
+
         fun settingsChanged() { running?.onMain { settingsChanged() } }
 
         fun enabledInSettings(context: Context): Boolean {

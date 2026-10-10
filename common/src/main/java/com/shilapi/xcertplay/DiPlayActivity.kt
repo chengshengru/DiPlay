@@ -16,6 +16,7 @@ import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -34,6 +35,7 @@ import android.widget.*
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.ViewCompat
 import androidx.core.view.doOnLayout
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -129,8 +131,17 @@ internal object SettingsInformationArchitecture {
 }
 
 /** DiAuto's visual language, with a connection flow for an independent CarPlay receiver. */
-class DiPlayActivity : ComponentActivity() {
+class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private val handler = Handler(Looper.getMainLooper())
+    // main #422：设置页日夜外观切换闭环（作者：TRAE AI）。
+    // appNight 为解析后的当前日夜态；palette 是对应的语义调色板，全部 UI 取色走它。
+    private var appNight = true
+    override val currentAppNight: Boolean get() = appNight
+    private var palette = DiPlayPalette.DARK
+    private var appearanceObserverRemoval: (() -> Unit)? = null
+    private var appearanceUpdatesResumed = false
+    private var appearanceRenderPending = false
+    private var appearanceButtonFocusPending = false
     private var windowLearning: WindowKeyLearning? = null
     private val windowLearningPresses = WheelKeyPresses()
     private val endWindowLearning = Runnable { cancelKeyLearning() }
@@ -229,6 +240,13 @@ class DiPlayActivity : ComponentActivity() {
     private val tick = object : Runnable {
         override fun run() { refreshStatus(); handler.postDelayed(this, 1000) }
     }
+    // 外观轮询：无 runtime 观察者事件时兜底检查（定时计划切换等）（作者：TRAE AI）。
+    private val appearancePoll = object : Runnable {
+        override fun run() {
+            checkForAppearanceChange()
+            if (appearanceUpdatesResumed) handler.postDelayed(this, APPEARANCE_POLL_MILLIS)
+        }
+    }
     private val bluetoothPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) choosePhone() else permissionHelp(getString(R.string.nearby_devices), getString(R.string.allow_nearby_devices_so_diplay_can_connect_to_your_paired))
     }
@@ -301,11 +319,9 @@ class DiPlayActivity : ComponentActivity() {
         com.shilapi.xcertplay.hud.BydNavigationOutputs.onAppOpened(applicationContext)
         WheelKeyService.restoreIfNeeded(this)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        UiCompat.setSystemBarColors(window, BG)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-            hide(WindowInsetsCompat.Type.statusBars())
-        }
+        // 外观接入：解析日夜态并应用到窗口背景/系统栏/全屏模式（作者：TRAE AI）。
+        refreshAppearance()
+        applyWindowAppearance()
         setupError = runCatching { DiPlayBootstrap.ensure(this, AirPlayPersistence.loadMfiTarget(this)) }.exceptionOrNull()?.let {
             android.util.Log.e("DiPlaySetup", "CarPlay authentication could not be loaded", it)
             getString(R.string.setup_error_auth)
@@ -442,6 +458,7 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        applyFullscreenMode()
         // Returning from another activity can bring the head unit's own density back.
         if (enforceInterfaceSize()) render()
         if (Build.VERSION.SDK_INT < 33 && AppLocale.preference(this) != languagePreferenceAtCreate) {
@@ -452,6 +469,8 @@ class DiPlayActivity : ComponentActivity() {
         // Back from the car settings: refresh the car hotspot reminder on the home page.
         if (!initialLaunch && !adbSwitchChangePending && !pausedForAdbSwitchChange &&
             (page == "home" || page == "settings" || page == "connection")) render()
+        // 恢复外观观察与轮询（作者：TRAE AI）。
+        startAppearanceUpdates()
         pausedForAdbSwitchChange = false
         if (initialLaunch) {
             initialLaunch = false
@@ -463,6 +482,11 @@ class DiPlayActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        // 停止外观观察与轮询（作者：TRAE AI）。
+        appearanceUpdatesResumed = false
+        appearanceObserverRemoval?.invoke()
+        appearanceObserverRemoval = null
+        handler.removeCallbacks(appearancePoll)
         cancelKeyLearning()
         pausedForAdbSwitchChange = adbSwitchChangePending
         handler.removeCallbacks(tick)
@@ -470,6 +494,10 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        // 清理外观观察（作者：TRAE AI）。
+        appearanceObserverRemoval?.invoke()
+        appearanceObserverRemoval = null
+        handler.removeCallbacks(appearancePoll)
         hotspotJoinControls?.close()
         cancelUsbPermissionSetup()
         cancelKeyLearning()
@@ -488,6 +516,7 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+        applyFullscreenMode()
         if (updateInterfaceSize(newConfig)) return
         render()
     }
@@ -500,6 +529,7 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyFullscreenMode()
         // Some head units put their own density back without any other callback.
         if (hasFocus && enforceInterfaceSize()) render()
     }
@@ -509,10 +539,37 @@ class DiPlayActivity : ComponentActivity() {
             SettingsLayoutPolicy.isExpanded(it.screenWidthDp, it.screenHeightDp, it.fontScale)
         }
 
-    private fun render() {
+    private fun render() = render(appearanceOnly = false)
+
+    // 外观重渲染时保留焦点用的快照（main #422，作者：TRAE AI）。
+    private data class FocusSnapshot(
+        val tag: Any?,
+        val contentDescription: String?,
+        val label: String?,
+    )
+
+    private fun focusLabel(view: View): String? = when (view) {
+        is TextView -> view.text?.toString()
+        is ViewGroup -> descendants(view).filterIsInstance<TextView>()
+            .firstOrNull { it.text.isNotEmpty() }?.text?.toString()
+        else -> null
+    }
+
+    private fun render(appearanceOnly: Boolean, preferredFocusTag: Any? = null) {
         enforceInterfaceSize()
+        refreshAppearance()
+        applyWindowAppearance()
         // A pending assignment belongs to the widgets being replaced, never to another page.
-        cancelKeyLearning()
+        if (!appearanceOnly) cancelKeyLearning()
+        val focusSnapshot = if (appearanceOnly) {
+            currentFocus?.let { focused ->
+                FocusSnapshot(
+                    tag = preferredFocusTag ?: focused.tag,
+                    contentDescription = focused.contentDescription?.toString(),
+                    label = focusLabel(focused),
+                )
+            } ?: preferredFocusTag?.let { FocusSnapshot(it, null, null) }
+        } else null
         // A restore still waiting for layout keeps its target: the old page was never laid out.
         val sameDestination = renderedPage == page &&
             (page != "settings" || renderedSettingsCategory == settingsCategory)
@@ -561,6 +618,20 @@ class DiPlayActivity : ComponentActivity() {
         renderedPage = page
         renderedSettingsCategory = settingsCategory.takeIf { page == "settings" }
         refreshStatus()
+        // 外观重渲染后按快照恢复焦点（main #422，作者：TRAE AI）。
+        focusSnapshot?.let { snapshot ->
+            root.doOnLayout {
+                descendants(root).firstOrNull { candidate ->
+                    candidate.isFocusable && when {
+                        snapshot.tag != null -> candidate.tag == snapshot.tag
+                        snapshot.contentDescription != null ->
+                            candidate.contentDescription?.toString() == snapshot.contentDescription
+                        snapshot.label != null -> focusLabel(candidate) == snapshot.label
+                        else -> false
+                    }
+                }?.requestFocus()
+            }
+        }
         pendingScrollY = previousScrollY
         // A stopped window still dispatches pre-draw but skips layout, so wait for a real layout;
         // the listener stays on this view and goes away with it.
@@ -590,6 +661,140 @@ class DiPlayActivity : ComponentActivity() {
         }
     }
 
+    // ===== 外观切换闭环（main #422，作者：TRAE AI）=====
+    // API < 20：WindowInsetsControllerCompat 不实现系统栏可见性，回退到老式窗口标志。
+    private fun applyFullscreenMode() {
+        val multiWindow = Build.VERSION.SDK_INT >= 24 && isInMultiWindowMode
+        val hideTop = AirPlayPersistence.loadHideTopBar(this) && !multiWindow
+        val hideBottom = AirPlayPersistence.loadHideBottomBar(this) && !multiWindow
+        if (LegacyFullscreen.apply(window, hideTop, hideBottom)) return
+        WindowCompat.setDecorFitsSystemWindows(window, !(hideTop && hideBottom))
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.isAppearanceLightStatusBars = palette.systemBarIconsAreDark
+        controller.isAppearanceLightNavigationBars = palette.systemBarIconsAreDark
+        if (hideTop) {
+            controller.hide(WindowInsetsCompat.Type.statusBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.statusBars())
+        }
+        if (hideBottom) {
+            controller.hide(WindowInsetsCompat.Type.navigationBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.navigationBars())
+        }
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        ViewCompat.requestApplyInsets(window.decorView)
+    }
+
+    // 注册 runtime 观察者并启动兜底轮询；resume 期间挂起的重渲染在此补做。
+    private fun startAppearanceUpdates() {
+        appearanceUpdatesResumed = true
+        appearanceObserverRemoval?.invoke()
+        appearanceObserverRemoval = AppAppearanceRuntime.observeHost {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                checkForAppearanceChange()
+            } else {
+                handler.post { if (appearanceUpdatesResumed) checkForAppearanceChange() }
+            }
+        }
+        handler.removeCallbacks(appearancePoll)
+        handler.post(appearancePoll)
+        applyPendingAppearanceRender()
+    }
+
+    private fun checkForAppearanceChange() {
+        if (refreshAppearance()) {
+            requestAppearanceRender()
+        }
+    }
+
+    // 外观变化的重渲染入口；按键学习期间延迟，避免打断学习流程。
+    private fun requestAppearanceRender(focusAppearanceButton: Boolean = false) {
+        appearanceRenderPending = true
+        appearanceButtonFocusPending = appearanceButtonFocusPending || focusAppearanceButton
+        if (!appearanceUpdatesResumed || shouldDeferAppearanceRender(
+                windowKeyLearning = windowLearning != null,
+                serviceKeyLearning = WheelKeyService.isLearning(),
+            )
+        ) return
+        appearanceRenderPending = false
+        val restoreAppearanceButton = appearanceButtonFocusPending
+        appearanceButtonFocusPending = false
+        render(
+            appearanceOnly = true,
+            preferredFocusTag = APPEARANCE_BUTTON_TAG.takeIf { restoreAppearanceButton },
+        )
+    }
+
+    private fun applyPendingAppearanceRender() {
+        if (!appearanceRenderPending) return
+        handler.post {
+            if (appearanceRenderPending && appearanceUpdatesResumed &&
+                !shouldDeferAppearanceRender(
+                    windowKeyLearning = windowLearning != null,
+                    serviceKeyLearning = WheelKeyService.isLearning(),
+                )
+            ) {
+                requestAppearanceRender()
+            }
+        }
+    }
+
+    // 重取日夜态与调色板；返回 true 表示发生了变化需要重渲染。
+    private fun refreshAppearance(): Boolean {
+        val resolved = resolveAppNightNow()
+        if (resolved == appNight && palette === DiPlayPalette.of(resolved)) return false
+        appNight = resolved
+        palette = DiPlayPalette.of(resolved)
+        return true
+    }
+
+    // 窗口背景与系统栏跟随调色板；系统栏图标明暗随外观切换。
+    private fun applyWindowAppearance() {
+        window.setBackgroundDrawable(ColorDrawable(palette.background))
+        UiCompat.setSystemBarColors(window, palette.systemBar)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = palette.systemBarIconsAreDark
+            isAppearanceLightNavigationBars = palette.systemBarIconsAreDark
+        }
+        applyFullscreenMode()
+    }
+
+    // 外观切换按钮：点击在深色/浅色间切换并触发增量重渲染（main #422，作者：TRAE AI）。
+    private fun appearanceButton(): ImageButton = iconButton(
+        icon = if (appNight) R.drawable.ic_dp_night else R.drawable.ic_dp_day,
+        description = getString(if (appNight) R.string.settings_switch_to_light_appearance
+            else R.string.settings_switch_to_dark_appearance),
+    ) {
+        AirPlayPersistence.saveAppAppearance(
+            this,
+            if (appNight) AppAppearance.LIGHT else AppAppearance.DARK,
+        )
+        requestAppearanceRender(focusAppearanceButton = true)
+    }.apply {
+        tag = APPEARANCE_BUTTON_TAG
+    }
+
+    // 标题栏圆形图标按钮（焦点环 + 涟漪，遥控器可用）（main #422，作者：TRAE AI）。
+    private fun iconButton(icon: Int, description: String, click: () -> Unit) = ImageButton(this).apply {
+        setImageResource(icon)
+        imageTintList = ColorStateList.valueOf(ACCENT)
+        contentDescription = description
+        scaleType = ImageView.ScaleType.CENTER
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        minimumWidth = dp(48)
+        minimumHeight = dp(48)
+        stateListAnimator = null
+        background = android.graphics.drawable.RippleDrawable(
+            ColorStateList.valueOf(RIPPLE),
+            rounded(BUTTON, BORDER),
+            null,
+        )
+        foreground = focusRing()
+        setOnClickListener { click() }
+    }
+
     private fun standardHeader(compact: Boolean): LinearLayout = row().apply {
         gravity = Gravity.CENTER_VERTICAL
         addView(ImageView(this@DiPlayActivity).apply {
@@ -599,6 +804,10 @@ class DiPlayActivity : ComponentActivity() {
         addView(label(getString(R.string.diplay), if (compact) 18 else 26, TEXT, true).apply {
             setPadding(if (compact) dp(8) else dp(12), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, if (compact) dp(36) else dp(56), 1f))
+        // 标题栏右侧加入外观切换按钮（main #422，作者：TRAE AI）。
+        addView(appearanceButton(), LinearLayout.LayoutParams(dp(if (compact) 44 else 52), dp(if (compact) 44 else 52)).apply {
+            marginEnd = dp(if (compact) 8 else 12)
+        })
         if (page != "home" || !compact) {
             addView(button(if (page == "home") getString(R.string.car_home) else getString(R.string.back), false) {
                 if (page == "home") startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
@@ -639,6 +848,10 @@ class DiPlayActivity : ComponentActivity() {
         addView(label(getString(R.string.settings), if (compact) 20 else 26, TEXT, true).apply {
             setPadding(dp(12), 0, dp(12), 0)
         }, LinearLayout.LayoutParams(0, if (compact) dp(44) else dp(52), 1f))
+        // 标题栏右侧加入外观切换按钮（main #422，作者：TRAE AI）。
+        addView(appearanceButton(), LinearLayout.LayoutParams(dp(if (compact) 44 else 52), dp(if (compact) 44 else 52)).apply {
+            marginEnd = dp(if (compact) 8 else 12)
+        })
         addView(button(getString(R.string.settings_search), false) { showSettingsSearch() },
             LinearLayout.LayoutParams(if (compact) dp(92) else dp(140), if (compact) dp(44) else dp(52)))
     }
@@ -4561,7 +4774,7 @@ class DiPlayActivity : ComponentActivity() {
         typeface = if (bold) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.create("sans-serif", Typeface.NORMAL)
         setLineSpacing(dp(3).toFloat(), 1f)
     }
-    private fun button(title: String, primary: Boolean, click: () -> Unit) = SettingButton(this).apply {
+    private fun button(title: String, primary: Boolean, click: () -> Unit) = SettingButton(this, MUTED, ACCENT).apply {
         isAllCaps = false; textSize = 18f; setTextColor(if (primary) BG else TEXT)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         background = UiCompat.ripple(RIPPLE, rounded(if (primary) ACCENT else BUTTON, if (primary) ACCENT else BORDER), null)
@@ -4582,7 +4795,12 @@ class DiPlayActivity : ComponentActivity() {
      * start-aligned, muted value, chevron. Any other text stays a centred action button.
      * The plain text is unchanged, so callers and tests keep matching "Title · Value".
      */
-    private class SettingButton(context: android.content.Context) : Button(context) {
+    // 主/次要色由构造器传入：嵌套类无法访问宿主实例的动态取色属性（作者：TRAE AI）。
+    private class SettingButton(
+        context: android.content.Context,
+        private val muted: Int,
+        private val accent: Int,
+    ) : Button(context) {
         var action = false
 
         override fun setText(text: CharSequence?, type: BufferType?) {
@@ -4594,13 +4812,13 @@ class DiPlayActivity : ComponentActivity() {
                 return
             }
             val styled = android.text.SpannableString(text).apply {
-                setSpan(android.text.style.ForegroundColorSpan(MUTED), split, text.length,
+                setSpan(android.text.style.ForegroundColorSpan(muted), split, text.length,
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
             super.setText(styled, BufferType.SPANNABLE)
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
             setCompoundDrawablesRelativeWithIntrinsicBounds(null, null,
-                androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_dp_chevron)?.mutate()?.let { UiCompat.tint(it, ACCENT) }, null)
+                androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_dp_chevron)?.mutate()?.let { UiCompat.tint(it, accent) }, null)
         }
     }
     // Remote and D-pad users need to see where they are; touch mode never shows it.
@@ -4675,6 +4893,22 @@ class DiPlayActivity : ComponentActivity() {
     }
     // Rounded, not truncated: below 160 dpi dp(1) became 0 and every border vanished.
     private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
+
+    // ===== 调色板取色（main #422，作者：TRAE AI）=====
+    // 原固定深色常量改为动态委托：113 处调用点无需改动，重渲染后自动跟随日夜外观。
+    private val BG get() = palette.background
+    private val SURFACE get() = palette.surface
+    private val BUTTON get() = palette.button
+    private val BORDER get() = palette.outline
+    private val ACCENT get() = palette.accent
+    private val RAIL_SELECTED get() = palette.railSelected
+    private val RAIL_SELECTED_BORDER get() = palette.railSelectedOutline
+    private val TEXT get() = palette.primaryText
+    private val MUTED get() = palette.secondaryText
+    private val WARNING get() = palette.warning
+    private val READY get() = palette.success
+    private val RIPPLE get() = palette.ripple
+
     companion object {
         internal fun isLauncherIntent(intent: Intent): Boolean =
             intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER) &&
@@ -4683,19 +4917,9 @@ class DiPlayActivity : ComponentActivity() {
         private const val BYD_VEHICLE_TAG = "DiPlay-BYD13"
         private const val VEHICLE_VALIDATION_RETRY_MILLIS = 500L
         private const val ADB_KEY_SAVE_WAIT_MILLIS = 500L
-        private val BG = Color.rgb(12, 17, 27)
-        private val SURFACE = Color.rgb(21, 30, 44)
-        // One step lighter than a card, so a button reads as a button even where its 1 px border is faint.
-        private val BUTTON = Color.rgb(31, 43, 61)
-        private val BORDER = Color.rgb(42, 56, 75)
-        private val ACCENT = com.shilapi.xcertplay.settings.SettingsTheme.CARD.accent
-        private val RAIL_SELECTED = Color.rgb(24, 54, 92)
-        private val RAIL_SELECTED_BORDER = Color.rgb(42, 82, 130)
-        private val TEXT = com.shilapi.xcertplay.settings.SettingsTheme.CARD.textPrimary
-        private val MUTED = com.shilapi.xcertplay.settings.SettingsTheme.CARD.textSecondary
-        private val WARNING = Color.rgb(255, 196, 128)
-        private val READY = Color.rgb(127, 205, 154)
-        private const val RIPPLE = 0x336F9FD9
+        // 外观兜底轮询间隔与外观按钮焦点标签（main #422）。
+        private const val APPEARANCE_POLL_MILLIS = 2_000L
+        private const val APPEARANCE_BUTTON_TAG = "app_appearance_button"
         private const val VALUE_SEPARATOR = " · "
         private const val SEARCH_HIGHLIGHT_MILLIS = 900L
         private const val SPACER = "spacer"
