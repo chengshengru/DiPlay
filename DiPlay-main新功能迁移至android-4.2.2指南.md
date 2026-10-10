@@ -677,7 +677,7 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 ### 收尾
 - [ ] 分支全量构建：`./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleDebug`
 - [ ] 真机验收矩阵（第 12.3 节）逐项签字
-- [ ] 更新分支版 `CHANGELOG` 注明各功能对应 main PR 号
+- [x] 更新分支版 `CHANGELOG` 注明各功能对应 main PR 号（0.2.16-api17 段落，随版本同步完成）
 
 ---
 

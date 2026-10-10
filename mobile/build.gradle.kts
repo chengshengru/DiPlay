@@ -21,8 +21,8 @@ android {
         applicationId = "com.shihab.diplay"
         minSdk = 17
         targetSdk = 17
-        versionCode = 33
-        versionName = "0.2.14-api17"
+        versionCode = 35
+        versionName = "0.2.16-api17"
 
         // API 17-20：desugaring 要求 legacy multidex
         multiDexEnabled = true
