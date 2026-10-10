@@ -128,7 +128,7 @@ import kotlin.math.roundToInt
  *
  * Apple devices are discovered by vendor ID; CH341 uses the configured VID/PID below.
  */
-class CarPlayHostActivity : ComponentActivity() {
+class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private data class SettingsBaseline(
         val safeAreaRects: MutableMap<DisplaySize, SafeAreaRect?>,
         val customIconBytes: ByteArray?,
@@ -420,6 +420,10 @@ class CarPlayHostActivity : ComponentActivity() {
     private var menuOpen = false
     private var latestStage = "Preparing CarPlay"
     private var darkMode = false
+    // main B7：应用外观联动——主机页持有外观归属权并向运行时发布当前夜间态（作者：TRAE AI）。
+    override val currentAppNight: Boolean get() = appNight
+    private var appNight = true
+    private var hostAppearanceResumed = false
     private var paintWaitingScreen: () -> Unit = {}
     private var carPlayNightMode = CarPlayNightMode.SYSTEM
     private var nightSchedule = CarPlayNightSchedule()
@@ -433,6 +437,9 @@ class CarPlayHostActivity : ComponentActivity() {
             initialNight = darkMode,
             onNightChanged = { night ->
                 darkMode = night
+                // main B7：夜控结果发布到外观运行时并刷新应用外观（作者：TRAE AI）。
+                if (hostAppearanceResumed) AppAppearanceRuntime.publishHost(this, night)
+                refreshAppAppearance()
                 paintWaitingScreen()
                 paintSidePanelTheme()
                 applyClusterTurnOverlay()
@@ -875,6 +882,8 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // main B7：恢复期间本页持有外观归属权（作者：TRAE AI）。
+        hostAppearanceResumed = true
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
         val savedDelay = AirPlayPersistence.loadAmbientDelaySeconds(this)
@@ -890,6 +899,9 @@ class CarPlayHostActivity : ComponentActivity() {
                 nightSchedule)
         }
         nightModeController.resume(systemNight)
+        // main B7：发布主机页当前夜间态并按应用外观偏好刷新（作者：TRAE AI）。
+        AppAppearanceRuntime.publishHost(this, darkMode)
+        refreshAppAppearance()
         if (!menuOpen) {
             displayScalePercent = AirPlayPersistence.loadDisplayScalePercent(this)
             displayScaleTenths = CarPlayDisplayScale.sanitize((displayScalePercent + 5) / 10)
@@ -1298,6 +1310,9 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        // main B7：暂停即释放外观归属权（作者：TRAE AI）。
+        hostAppearanceResumed = false
+        AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
         super.onPause()
     }
@@ -1396,6 +1411,9 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onDestroy() {
         resetSidePanel()
         releaseSidePanelEffects()
+        // main B7：销毁时释放外观归属权（作者：TRAE AI）。
+        hostAppearanceResumed = false
+        AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
         pictureBinding?.close()
         pictureBinding = null
@@ -2171,6 +2189,45 @@ class CarPlayHostActivity : ComponentActivity() {
             sidePanelBattery?.setTextColor(SIDE_PANEL_SECONDARY)
             sidePanelTyreTexts.forEach { it.setTextColor(SIDE_PANEL_PRIMARY) }
             (sidePanelTyres?.getChildAt(0) as? TextView)?.setTextColor(SIDE_PANEL_SECONDARY)
+        }
+    }
+
+    // main B7：应用外观（DARK/LIGHT/AUTO）解析出的夜间态与主机页不同时，重建设置菜单
+    // 并重涂侧栏（作者：TRAE AI）。菜单色在分支仍为静态深色，重建主要恢复滚动与焦点。
+    private fun refreshAppAppearance() {
+        val nextNight = resolveAppNightNow(darkMode)
+        if (nextNight == appNight) return
+        appNight = nextNight
+
+        settingsMenu?.let { previous ->
+            val parent = previous.parent as? ViewGroup ?: return@let
+            val index = parent.indexOfChild(previous)
+            val visible = previous.visibility
+            val scrollY = findDescendant<ScrollView>(previous)?.scrollY ?: 0
+            val focusDescription = previous.findFocus()?.contentDescription?.toString()
+            parent.removeView(previous)
+            val replacement = buildSettingsMenu().apply { visibility = visible }
+            settingsMenu = replacement
+            parent.addView(replacement, index, FrameLayout.LayoutParams(-1, -1))
+            replacement.post {
+                findDescendant<ScrollView>(replacement)?.scrollTo(0, scrollY)
+                if (focusDescription != null) {
+                    findDescendants(replacement).firstOrNull {
+                        it.contentDescription?.toString() == focusDescription
+                    }?.requestFocus()
+                }
+            }
+        }
+        paintSidePanelTheme()
+    }
+
+    private inline fun <reified T : View> findDescendant(root: View): T? =
+        findDescendants(root).filterIsInstance<T>().firstOrNull()
+
+    private fun findDescendants(root: View): Sequence<View> = sequence {
+        yield(root)
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) yieldAll(findDescendants(root.getChildAt(index)))
         }
     }
 
