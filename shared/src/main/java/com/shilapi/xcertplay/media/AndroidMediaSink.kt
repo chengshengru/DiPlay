@@ -503,7 +503,7 @@ class AndroidMediaSink(
             if (config.audioType == "telephony") enterCommunicationMode(id)
             val uplink = microphoneUplinks.computeIfAbsent(id) {
                 MicrophoneUplink(config, onAudioDiagnostic,
-                    if (config.audioType == TELEPHONY_AUDIO_TYPE) callEchoReferences[id] else null)
+                    echoReference = if (config.audioType == TELEPHONY_AUDIO_TYPE) callEchoReferences[id] else null)
             }
             if (!uplink.start()) {
                 microphoneUplinks.remove(id, uplink)
