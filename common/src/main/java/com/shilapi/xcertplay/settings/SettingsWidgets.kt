@@ -122,20 +122,9 @@ object SettingsWidgets {
             isChecked = checked
             this.contentDescription = contentDescription
             isEnabled = enabled
-            if (theme.isOverlay) {
-                UiCompat.setShowText(this, false)
-                UiCompat.setThumbTint(this, ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(theme.accent, theme.textSecondary),
-                ))
-                UiCompat.setTrackTint(this, ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(theme.accentTrack, theme.trackOff),
-                ))
-            } else {
-                minHeight = theme.dp(context, 56)
-                UiCompat.setButtonTint(this, ColorStateList.valueOf(theme.accent))
-            }
+            // main 9c7fda97：全部开关统一用 60x34dp 大开关样式，远距离可读（作者：TRAE AI）。
+            applyLargeSwitchStyle(this, theme.accent, theme.textSecondary, theme.accentTrack, theme.trackOff)
+            if (!theme.isOverlay) minHeight = theme.dp(context, 56)
             setOnCheckedChangeListener { _, isChecked -> onChanged(isChecked) }
         }
 

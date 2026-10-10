@@ -865,7 +865,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         addView(ImageView(this@DiPlayActivity).apply {
             setImageResource(R.drawable.ic_carplay)
             contentDescription = getString(R.string.carplay)
-        }, LinearLayout.LayoutParams(if (compact) dp(24) else dp(36), if (compact) dp(24) else dp(36)))
+        }, LinearLayout.LayoutParams(if (compact) dp(30) else dp(36), if (compact) dp(30) else dp(36)))
         addView(label(getString(R.string.diplay), if (compact) 18 else 26, TEXT, true).apply {
             setPadding(if (compact) dp(8) else dp(12), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, if (compact) dp(36) else dp(56), 1f))
@@ -1989,8 +1989,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 ambientControls.visibility = if (nightModes[index] == CarPlayNightMode.AMBIENT) View.VISIBLE else View.GONE
                 scheduleControls.visibility = if (nightModes[index] == CarPlayNightMode.SCHEDULE) View.VISIBLE else View.GONE
             }
-            card.addView(label(getString(R.string.carplay_night_hint), 14, MUTED))
-            card.addView(label(getString(R.string.carplay_night_time_note), 14, MUTED).apply {
+            // main 9919585e：两句提示合并为一行；中文两句间不加空格（作者：TRAE AI）。
+            // API17 适配：Configuration.locales 是 API 24+，低版本走 locale（作者：TRAE AI）。
+            val locale = if (Build.VERSION.SDK_INT >= 24) resources.configuration.locales[0]
+                else @Suppress("DEPRECATION") resources.configuration.locale
+            val sentenceSeparator = if (locale.language == "zh") "" else " "
+            card.addView(label(getString(R.string.carplay_night_hint) + sentenceSeparator +
+                getString(R.string.carplay_night_time_note), 14, MUTED).apply {
                 setPadding(0, 0, 0, dp(18))
             })
             ambientControls.addView(label(getString(R.string.carplay_night_ambient_hint), 14, MUTED).apply {
@@ -4552,7 +4557,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val control = button(summary(), false) {}
         control.setOnClickListener {
             val fields = column().apply { setPadding(dp(24), dp(8), dp(24), dp(8)) }
-            fields.addView(label(getString(R.string.ambient_light_threshold_value), 16, MUTED))
+            // main bc1c6001：对话框标题已含字段含义，去掉冗余的"切换门槛 (lux)"行（作者：TRAE AI）。
             val input = EditText(this).apply {
                 setSingleLine()
                 inputType = android.text.InputType.TYPE_CLASS_NUMBER

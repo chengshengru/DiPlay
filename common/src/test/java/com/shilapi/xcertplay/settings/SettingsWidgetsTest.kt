@@ -67,10 +67,24 @@ class SettingsWidgetsTest {
         assertFalse(label.includeFontPadding)
         assertEquals(Color.rgb(170, 180, 190), label.currentTextColor)
         assertEquals(Color.rgb(127, 205, 154), row.switch.thumbTintList!!.getColorForState(
-            intArrayOf(android.R.attr.state_checked), 0))
+            intArrayOf(android.R.attr.state_enabled, android.R.attr.state_checked), 0))
         val heading = SettingsWidgets.createCategoryHeader(context, "Heading")
         assertEquals(Color.rgb(127, 205, 154), heading.currentTextColor)
         assertFalse(heading.includeFontPadding)
+    }
+
+    // main 9c7fda97：大开关 60x34dp 轨道与禁用态染色断言（作者：TRAE AI）。
+    @Test fun switchesUseTheLargeTrackAndMarkTheDisabledState() {
+        for (theme in SettingsTheme.entries) {
+            val switch = SettingsWidgets.createSwitchRow(context, "Title", "Details", false, theme, onChanged = {}).switch
+            switch.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+            assertTrue(switch.measuredWidth >= theme.dp(context, 60))
+            assertTrue(switch.measuredHeight >= theme.dp(context, 34))
+            val enabledOff = switch.trackTintList!!.getColorForState(intArrayOf(android.R.attr.state_enabled), 0)
+            val disabled = switch.trackTintList!!.getColorForState(intArrayOf(), 0)
+            assertEquals(theme.trackOff, enabledOff)
+            assertNotEquals(enabledOff, disabled)
+        }
     }
 
     @Test fun cardDescriptionsKeepMultilineSpacingAndTheirAccessibleTitle() {

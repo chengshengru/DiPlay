@@ -3077,22 +3077,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             val switch = Switch(this@CarPlayHostActivity).apply {
                 isChecked = locationReportingEnabled
                 contentDescription = getString(R.string.report_android_location_to_the_iphone)
-                // showText/thumbTintList/trackTintList 均为 API 21+，走 UiCompat 兼容 API 17
-                UiCompat.setShowText(this, false)
-                UiCompat.setThumbTint(
-                    this,
-                    ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(MENU_ACCENT, MENU_SECONDARY),
-                    ),
-                )
-                UiCompat.setTrackTint(
-                    this,
-                    ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
-                    ),
-                )
+                // main 9c7fda97：覆盖层开关统一用大开关样式（内部已做 API 17 适配）（作者：TRAE AI）。
+                SettingsWidgets.applyLargeSwitchStyle(this, MENU_ACCENT, MENU_SECONDARY, MENU_ACCENT_TRACK, MENU_TRACK_OFF)
                 setOnCheckedChangeListener { _, checked ->
                     onLocationReportingChanged(checked)
                 }
