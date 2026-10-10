@@ -536,10 +536,15 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (hasFocus && enforceInterfaceSize()) render()
     }
 
-    private val isExpandedSettingsLayout: Boolean
+    // main B6：自然完整布局判定（未勾选强制时的原始阈值结果）（作者：TRAE AI）。
+    private val isNaturallyExpandedSettingsLayout: Boolean
         get() = resources.configuration.let {
             SettingsLayoutPolicy.isExpanded(it.screenWidthDp, it.screenHeightDp, it.fontScale)
         }
+
+    // main B6：横屏强制完整布局——勾选后横屏始终用 rail 布局，竖屏自动回退（作者：TRAE AI）。
+    private val isExpandedSettingsLayout: Boolean
+        get() = SettingsLayoutPreferences.isActive(this) || isNaturallyExpandedSettingsLayout
 
     private fun render() = render(appearanceOnly = false)
 
@@ -590,7 +595,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         bydAdbControls = null
         adbSwitches.clear()
         adbStatus = null
-        val compact = isCompactLayout
+        // main B6：设置页横屏强制完整布局时不压缩间距（作者：TRAE AI）。
+        val compact = isCompactLayout && when (page) {
+            "settings" -> !SettingsLayoutPreferences.isActive(this)
+            else -> true
+        }
         val scroll = ScrollView(this).apply { setBackgroundColor(BG); isFillViewport = true; clipToPadding = false }
         rootScroll = scroll
         val content = column()
@@ -1612,6 +1621,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 InterfaceSize.showPicker(this)
             }, matchButton(12, 60))
             card.addView(label(getString(R.string.settings_interface_size_hint), 14, MUTED))
+            // main B6：横屏强制完整布局开关（仅自然紧凑布局时展示，作者：TRAE AI）。
+            if (!isNaturallyExpandedSettingsLayout) toggle(card, getString(R.string.settings_force_full_settings),
+                getString(R.string.settings_force_full_settings_hint), SettingsLayoutPreferences.forceFull(this)) {
+                SettingsLayoutPreferences.saveForceFull(this, it)
+                render()
+            }
         }
         filteredSection(content, SettingsSection.EXPERIMENTAL_DISPLAY,
             getString(R.string.settings_experimental_display), R.drawable.ic_dp_display) { card ->
