@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -13,11 +15,55 @@ import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
+import androidx.core.graphics.ColorUtils
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.UiCompat
 import com.shilapi.xcertplay.host.R
+import kotlin.math.roundToInt
 
 object SettingsWidgets {
+
+    /**
+     * 把平台 Switch（约 36x14dp 轨道）替换为 60x34dp 轨道 + 28dp 圆形拇指，
+     * 保证车载远距离可读（对应 main #420 大开关样式）。
+     * API 17 适配：thumbDrawable/trackDrawable/switchMinWidth 为 API 16/17+，可直接调用；
+     * showText 与 thumb/track tint 为 API 21+，走 UiCompat 守卫（低版本保持白色形状）。
+     */
+    fun applyLargeSwitchStyle(switch: Switch, thumbOn: Int, thumbOff: Int, trackOn: Int, trackOff: Int) {
+        val density = switch.resources.displayMetrics.density
+        fun px(value: Int) = (value * density).roundToInt()
+        // Switch 会把拇指拉伸到轨道全高，用 InsetDrawable 留出边距。
+        val thumbInset = px(3)
+        switch.thumbDrawable = InsetDrawable(
+            GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setSize(px(28), px(28))
+                setColor(Color.WHITE)
+            },
+            thumbInset,
+        )
+        switch.trackDrawable = GradientDrawable().apply {
+            cornerRadius = px(17).toFloat()
+            setSize(px(60), px(34))
+            setColor(Color.WHITE)
+            // 与平台开关一致的 30% 透明轨道，保证染色后观感一致。
+            alpha = (0.3f * 255).roundToInt()
+        }
+        switch.switchMinWidth = px(60)
+        UiCompat.setShowText(switch, false)
+        UiCompat.setThumbTint(switch, switchStates(thumbOn, thumbOff))
+        UiCompat.setTrackTint(switch, switchStates(trackOn, trackOff))
+    }
+
+    /** 开关拇指/轨道的三态颜色：禁用（30% 透明）、选中、默认。 */
+    private fun switchStates(on: Int, off: Int) = ColorStateList(
+        arrayOf(
+            intArrayOf(-android.R.attr.state_enabled),
+            intArrayOf(android.R.attr.state_checked),
+            intArrayOf(),
+        ),
+        intArrayOf(ColorUtils.setAlphaComponent(off, 0x61), on, off),
+    )
 
     private fun TextView.applyTextStyle(context: Context, theme: SettingsTheme, bold: Boolean = false) {
         if (theme.isOverlay) {
