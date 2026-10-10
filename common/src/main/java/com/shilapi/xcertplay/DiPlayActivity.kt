@@ -180,6 +180,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var reconnectBar: View? = null
     private var readinessCard: LinearLayout? = null
     private var searchIndexSink: MutableList<String>? = null
+    // main B3：内嵌搜索状态——常驻输入框、下拉结果弹层、索引与焦点恢复标记（作者：TRAE AI）。
+    private var settingsSearchBox: EditText? = null
+    private var settingsSearchPopup: PopupWindow? = null
+    private var settingsSearchIndex: List<SettingsSearchResult>? = null
+    private var settingsSearchQuery = ""
+    private var settingsSearchIndexing = false
+    private var settingsSearchRestoreFocus = false
     private var renderedReadiness: SettingsReadiness? = null
     private var renderedPage: String? = null
     private var renderedSettingsCategory: SettingsCategory? = null
@@ -496,6 +503,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     override fun onDestroy() {
+        // main B3：先收起搜索下拉弹层（作者：TRAE AI）。
+        settingsSearchPopup?.dismiss()
         // 清理外观观察（作者：TRAE AI）。
         appearanceObserverRemoval?.invoke()
         appearanceObserverRemoval = null
@@ -588,6 +597,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val restoreRailFocus = keepRailPosition &&
             (pendingRailFocus || settingsRailScroll?.hasFocus() == true)
         settingsRailScroll = null
+        // main B3：结果挂在旧头部上；若搜索继续，由新头部重新打开（作者：TRAE AI）。
+        settingsSearchPopup?.dismiss()
+        settingsSearchPopup = null
+        settingsSearchBox = null
+        if (page != "settings") clearSettingsSearchState()
         status = null; connectButton = null; disconnectButton = null; lastRunning = null; carButtonCard = null
         reconnectBar = null
         readinessCard = null
@@ -828,6 +842,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun navigateBack() {
+        // main B3：返回键先关闭打开的搜索，与系统搜索栏行为一致（作者：TRAE AI）。
+        if (page == "settings" && settingsSearchQuery.isNotEmpty()) {
+            closeSettingsSearch()
+            return
+        }
         val returnCategory = connectionSettingsReturnCategory
         when {
             // main #422：about 是独立页面，返回设置页 Overview（作者：TRAE AI）。
@@ -861,15 +880,15 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         gravity = Gravity.CENTER_VERTICAL
         addView(button(getString(R.string.back), false, ::navigateBack),
             LinearLayout.LayoutParams(if (compact) dp(78) else dp(112), if (compact) dp(44) else dp(52)))
+        // main B3：标题不再拉伸占满，搜索框常驻页首占满剩余宽度（作者：TRAE AI）。
         addView(label(getString(R.string.settings), if (compact) 20 else 26, TEXT, true).apply {
             setPadding(dp(12), 0, dp(12), 0)
-        }, LinearLayout.LayoutParams(0, if (compact) dp(44) else dp(52), 1f))
-        // 标题栏右侧加入外观切换按钮（main #422，作者：TRAE AI）。
-        addView(appearanceButton(), LinearLayout.LayoutParams(dp(if (compact) 44 else 52), dp(if (compact) 44 else 52)).apply {
+        }, LinearLayout.LayoutParams(-2, if (compact) dp(44) else dp(52)))
+        addView(settingsSearchField(compact), LinearLayout.LayoutParams(0, if (compact) dp(44) else dp(52), 1f).apply {
             marginEnd = dp(if (compact) 8 else 12)
         })
-        addView(button(getString(R.string.settings_search), false) { showSettingsSearch() },
-            LinearLayout.LayoutParams(if (compact) dp(92) else dp(140), if (compact) dp(44) else dp(52)))
+        // 标题栏右侧加入外观切换按钮（main #422，作者：TRAE AI）。
+        addView(appearanceButton(), LinearLayout.LayoutParams(dp(if (compact) 44 else 52), dp(if (compact) 44 else 52)))
     }
 
     private fun home(content: LinearLayout) {
@@ -1346,8 +1365,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun openSearchResult(result: SettingsSearchResult) {
-        settingsCategory = result.category
-        render()
+        // main B3：命中后先收起键盘与搜索状态，再进入目标分类（作者：TRAE AI）。
+        setSearchKeyboard(settingsSearchBox, false)
+        clearSettingsSearchState()
+        openSettingsCategory(result.category)
         val scroll = rootScroll ?: return
         val match = descendants(scroll).filterIsInstance<TextView>().firstOrNull {
             it.text.toString() == result.title || it.text.startsWith(result.title + VALUE_SEPARATOR)
@@ -1369,49 +1390,166 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (view is ViewGroup) for (i in 0 until view.childCount) yieldAll(descendants(view.getChildAt(i)))
     }
 
-    private fun showSettingsSearch() {
-        val index = buildSettingsSearchIndex()
-        val input = EditText(this).apply {
-            setSingleLine()
-            hint = getString(R.string.settings_search_hint)
-            // Landscape head units would otherwise cover the results with a full-screen editor.
-            imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or
-                android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+    /**
+     * main B3：设置页头部常驻搜索框，输入时下拉结果（作者：TRAE AI）。
+     * 索引在首个按键时构建；构建会触发整页重渲染，由替换后的新输入框接管查询、焦点与键盘。
+     */
+    private fun settingsSearchField(compact: Boolean): EditText = EditText(this).apply {
+        settingsSearchBox = this
+        setSingleLine()
+        hint = getString(R.string.settings_search_hint)
+        contentDescription = getString(R.string.settings_search)
+        textSize = if (compact) 16f else 18f
+        setTextColor(TEXT)
+        setHintTextColor(MUTED)
+        background = rounded(BUTTON, BORDER)
+        foreground = focusRing()
+        setPadding(dp(16), 0, dp(16), 0)
+        compoundDrawablePadding = dp(10)
+        setCompoundDrawablesRelativeWithIntrinsicBounds(
+            // API17 适配：Context.getDrawable 是 API 21+，低版本走 ContextCompat（作者：TRAE AI）。
+            androidx.core.content.ContextCompat.getDrawable(this@DiPlayActivity, R.drawable.ic_dp_search)?.mutate()?.apply { setTint(MUTED) }, null, null, null)
+        inputType = android.text.InputType.TYPE_CLASS_TEXT
+        // 横屏车机不然会用全屏编辑器盖住结果列表。
+        imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+            android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+        // 触摸焦点等待点击：打开设置页时不主动聚焦搜索框、不弹键盘。
+        isFocusableInTouchMode = settingsSearchRestoreFocus
+        setText(settingsSearchQuery)
+        setSelection(text.length)
+        setOnClickListener {
+            if (!isFocusableInTouchMode) {
+                isFocusableInTouchMode = true
+                requestFocus()
+                setSearchKeyboard(this, true)
+            }
+            showSettingsSearchResults()
         }
-        val results = mutableListOf<SettingsSearchResult>()
-        val adapter = android.widget.ArrayAdapter<String>(this, android.R.layout.simple_list_item_1)
-        val list = android.widget.ListView(this).apply { this.adapter = adapter }
-        val empty = label(getString(R.string.settings_search_empty), 15, MUTED).apply {
-            setPadding(dp(8), dp(12), dp(8), dp(12)); visibility = View.GONE
+        setOnFocusChangeListener { _, focused -> if (focused) showSettingsSearchResults() }
+        setOnEditorActionListener { _, actionId, event ->
+            val search = actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH ||
+                event?.keyCode == KeyEvent.KEYCODE_ENTER
+            if (!search) return@setOnEditorActionListener false
+            if (event == null || event.action == KeyEvent.ACTION_DOWN) settingsSearchResults().firstOrNull()?.let(::openSearchResult)
+            true
         }
-        fun update() {
-            results.clear(); results += searchSettings(index, input.text.toString())
-            adapter.clear()
-            adapter.addAll(results.map { "${it.title} — ${settingsCategoryTitle(it.category)}" })
-            empty.visibility = if (results.isEmpty() && input.text.isNotBlank()) View.VISIBLE else View.GONE
-        }
-        input.addTextChangedListener(object : android.text.TextWatcher {
-            override fun afterTextChanged(s: android.text.Editable?) = update()
+        addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) = onSettingsSearchChanged(this@apply)
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
         })
-        val body = column().apply {
-            setPadding(dp(20), dp(8), dp(20), 0)
-            addView(input)
-            addView(empty)
-            // Short screens keep the results above the keyboard.
-            addView(list, LinearLayout.LayoutParams(-1, dp(if (resources.configuration.screenHeightDp < 600) 160 else 320)))
+        if (settingsSearchRestoreFocus) {
+            settingsSearchRestoreFocus = false
+            post {
+                if (settingsSearchBox !== this) return@post
+                requestFocus()
+                setSearchKeyboard(this, true)
+                showSettingsSearchResults()
+            }
         }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(getString(R.string.settings_search))
-            .setView(body)
-            .setNegativeButton(getString(R.string.cancel), null)
-            .show()
-        list.setOnItemClickListener { _, _, position, _ ->
-            dialog.dismiss()
-            openSearchResult(results[position])
+    }
+
+    private fun onSettingsSearchChanged(box: EditText) {
+        if (box !== settingsSearchBox) return
+        settingsSearchQuery = box.text.toString()
+        if (settingsSearchQuery.isEmpty()) {
+            // 下次搜索时重建索引，让索引跟随期间变更过的设置项。
+            settingsSearchIndex = null
+            settingsSearchPopup?.dismiss()
+            return
         }
-        input.requestFocus()
+        if (settingsSearchIndex != null) {
+            showSettingsSearchResults()
+            return
+        }
+        if (settingsSearchIndexing) return
+        settingsSearchIndexing = true
+        // 不能在文本监听器里直接建索引：建索引会替换当前输入框。
+        handler.post {
+            settingsSearchIndexing = false
+            if (page != "settings" || settingsSearchQuery.isEmpty() || settingsSearchIndex != null) return@post
+            settingsSearchRestoreFocus = true
+            settingsSearchIndex = buildSettingsSearchIndex()
+        }
+    }
+
+    private fun settingsSearchResults(): List<SettingsSearchResult> =
+        settingsSearchIndex?.let { searchSettings(it, settingsSearchQuery) }.orEmpty()
+
+    private fun showSettingsSearchResults() {
+        val box = settingsSearchBox ?: return
+        if (settingsSearchIndex == null || settingsSearchQuery.isBlank() || !box.isAttachedToWindow) {
+            settingsSearchPopup?.dismiss()
+            return
+        }
+        val results = settingsSearchResults()
+        val list = column().apply { setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        if (results.isEmpty()) {
+            list.addView(label(getString(R.string.settings_search_empty), 15, MUTED).apply {
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+            })
+        }
+        results.forEach { list.addView(settingsSearchRow(it)) }
+        val width = box.width.coerceAtLeast(dp(320))
+        // 矮屏上让结果列表保持在键盘上方。
+        val maxHeight = dp(if (resources.configuration.screenHeightDp < 600) 180 else 360)
+        val existing = settingsSearchPopup?.takeIf { it.isShowing }
+        val scroll = (existing?.contentView as? ScrollView) ?: ScrollView(this)
+        scroll.removeAllViews()
+        scroll.addView(list)
+        scroll.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST))
+        val height = scroll.measuredHeight.coerceIn(1, maxHeight)
+        if (existing != null) {
+            existing.update(box, 0, dp(6), width, height)
+            return
+        }
+        settingsSearchPopup = PopupWindow(scroll, width, height, false).apply {
+            setBackgroundDrawable(rounded(SURFACE, BORDER))
+            elevation = dp(8).toFloat()
+            // 点击其他位置关闭列表但保留查询；点回搜索框重新打开。
+            isOutsideTouchable = true
+            inputMethodMode = PopupWindow.INPUT_METHOD_NEEDED
+            showAsDropDown(box, 0, dp(6), Gravity.END)
+        }
+    }
+
+    private fun settingsSearchRow(result: SettingsSearchResult): View = column().apply {
+        val category = settingsCategoryTitle(result.category)
+        isClickable = true
+        isFocusable = true
+        contentDescription = "${result.title}, $category"
+        foreground = android.graphics.drawable.LayerDrawable(arrayOf(
+            android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(RIPPLE), null, null), focusRing(12)))
+        minimumHeight = dp(56)
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(12), dp(8), dp(12), dp(8))
+        addView(label(result.title, 17, TEXT, true))
+        addView(label(category, 13, MUTED))
+        setOnClickListener { openSearchResult(result) }
+    }
+
+    private fun closeSettingsSearch() {
+        val box = settingsSearchBox
+        setSearchKeyboard(box, false)
+        clearSettingsSearchState()
+        box?.setText("")
+        box?.clearFocus()
+        box?.isFocusableInTouchMode = false
+    }
+
+    private fun clearSettingsSearchState() {
+        settingsSearchQuery = ""
+        settingsSearchIndex = null
+        settingsSearchRestoreFocus = false
+        settingsSearchPopup?.dismiss()
+    }
+
+    private fun setSearchKeyboard(view: View?, show: Boolean) {
+        view ?: return
+        val keyboard = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        if (show) keyboard.showSoftInput(view, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        else keyboard.hideSoftInputFromWindow(view.windowToken, 0)
     }
 
     private fun advancedSettings(content: LinearLayout) {
