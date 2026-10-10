@@ -1377,7 +1377,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         readinessCard = readiness
         renderedReadiness = null
         refreshReadiness()
-        content.addView(readiness, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(20) })
+        content.addView(readiness, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
         // main B4：Overview 页的连接向导入口（作者：TRAE AI）。
         content.addView(button(getString(R.string.setup_guide), false) { openSetupGuide(fromSettings = true) },
             LinearLayout.LayoutParams(-1, dp(56)).apply { bottomMargin = dp(6) })
@@ -1815,7 +1815,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 setPadding(0, dp(6), 0, 0)
             })
         }
-        content.addView(caution, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(18) })
+        content.addView(caution, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
         renderSections(content, SettingsInformationArchitecture.sectionsByCategory.getValue(SettingsCategory.ADVANCED))
         advancedVehicleDataSettings(content)
     }
@@ -1850,9 +1850,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private fun allSettingsSections(content: LinearLayout) {
         filteredSection(content, SettingsSection.CARPLAY_CONTROLS,
             getString(R.string.carplay_controls), R.drawable.ic_dp_controls) { card ->
-            val gestureFingers = listOf(2, 3, 4)
+            // main #487：新增 Off（0）选项，禁用下滑打开设置的手势（作者：TRAE AI）。
+            val gestureFingers = listOf(0, 2, 3, 4)
             choice(card, getString(R.string.settings_gesture_fingers_label),
-                gestureFingers.map { getString(R.string.settings_gesture_fingers_option, it) },
+                gestureFingers.map { if (it == 0) getString(R.string.settings_gesture_disabled) else getString(R.string.settings_gesture_fingers_option, it) },
                 gestureFingers.indexOf(AirPlayPersistence.loadSettingsGestureFingers(this)).coerceAtLeast(0),
                 reconnects = false) {
                 AirPlayPersistence.saveSettingsGestureFingers(this, gestureFingers[it])
@@ -5137,7 +5138,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         card.addView(heading)
         build(card)
         if (page == "settings") normalizeSpacing(card)
-        parent.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(18) })
+        parent.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
     }
     private fun audioFocusControls(parent: LinearLayout) {
         val enabled = AirPlayPersistence.loadAudioFocusEnabled(this)

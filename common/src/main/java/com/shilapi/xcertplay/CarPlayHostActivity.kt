@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Context
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
@@ -306,6 +307,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var remoteMfiServerInput: EditText? = null
     private var remoteMfiTokenInput: EditText? = null
     private var settingsBaseline: SettingsBaseline? = null
+    // main #500：菜单打开时的暂存设置签名（哈希而非原值，其中含热点口令），离开时判断是否有未保存的修改（作者：TRAE AI）。
+    private var menuSettingsSignature: Int? = null
     private var locationReportingSwitch: Switch? = null
     private var statusView: TextView? = null
     private var statusScrollView: ScrollView? = null
@@ -645,7 +648,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                     if (picturePanel != null) {
                         closePicturePanel()
                     } else if (menuOpen) {
-                        if (safeAreaEditorActive) closeSafeAreaEditor() else cancelSettingsEdits()
+                        if (safeAreaEditorActive) closeSafeAreaEditor() else leaveSettingsMenu()
                     } else {
                         showDiPlayHome()
                     }
@@ -935,7 +938,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             clusterMonitor = null
         }
         if (!menuOpen) gestureFingerCount = AirPlayPersistence.loadSettingsGestureFingers(this)
-        settingsGestureHint?.text = getString(R.string.open_diplay_settings_hint, gestureFingerCount)
+        settingsGestureHint?.text = settingsGestureHintText()
         ensureClusterPresentation()
         AirPlayPersistence.overlaySettingsListener = { runOnUiThread { applyClusterTurnOverlay() } }
         com.shilapi.xcertplay.hud.BydNavigationOutputs.setTurnOverlayListener(clusterTurnOverlayListener)
@@ -1535,7 +1538,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         }
         panel.addView(back, LinearLayout.LayoutParams(dp(300), dp(64)))
         val gestureHint = TextView(this).apply {
-            text = getString(R.string.open_diplay_settings_hint, gestureFingerCount)
+            text = settingsGestureHintText()
             gravity = Gravity.CENTER
         }
         panel.addView(gestureHint)
@@ -2659,11 +2662,12 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         val gestureButton = Button(this).apply {
             isAllCaps = false
             setOnClickListener {
-                gestureFingerCount = if (gestureFingerCount >= 4) 2 else gestureFingerCount + 1
-                text = getString(R.string.settings_gesture_fingers, gestureFingerCount)
+                // main #487：0 = 禁用手势；循环为 0→2→3→4→0（作者：TRAE AI）。
+                gestureFingerCount = when (gestureFingerCount) { 0 -> 2; 4 -> 0; else -> gestureFingerCount + 1 }
+                text = settingsGestureButtonText()
             }
         }
-        gestureButton.text = getString(R.string.settings_gesture_fingers, gestureFingerCount)
+        gestureButton.text = settingsGestureButtonText()
         content.addView(gestureButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
         val openDiPlaySettingsButton = Button(this).apply {
@@ -2674,8 +2678,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_TRACK_OFF))
             minHeight = dp(52)
             setOnClickListener {
-                cancelSettingsEdits()
-                showDiPlayHome("settings")
+                // main #500：跳转完整设置页前确认丢弃（作者：TRAE AI）。
+                leaveSettingsMenu { showDiPlayHome("settings") }
             }
         }
         content.addView(
@@ -2746,6 +2750,15 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         return overlay
     }
 
+    // main #487：手势数 0（禁用）时提示与按钮显示专用文案（作者：TRAE AI）。
+    private fun settingsGestureHintText(): String =
+        if (gestureFingerCount == 0) getString(R.string.settings_gesture_disabled_hint)
+        else getString(R.string.open_diplay_settings_hint, gestureFingerCount)
+
+    private fun settingsGestureButtonText(): String =
+        if (gestureFingerCount == 0) getString(R.string.settings_gesture_disabled_action)
+        else getString(R.string.settings_gesture_fingers, gestureFingerCount)
+
     private fun persistMenuSettings() {
         AirPlayPersistence.saveSettingsGestureFingers(this, gestureFingerCount)
         AirPlayPersistence.saveWirelessEnabled(this, wirelessEnabled)
@@ -2780,6 +2793,17 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         AirPlayPersistence.saveHideBottomBar(this, hideBottomBar)
         AirPlayPersistence.saveSafeAreaDrawOutside(this, safeAreaDrawOutside)
     }
+
+    /** main #500：镜像 [persistMenuSettings]——凡在那里暂存的字段都必须参与签名（作者：TRAE AI）。 */
+    private fun menuSettingsSignature(): Int = listOf(
+        gestureFingerCount, wirelessEnabled, mfiTarget, mfiI2cPath, remoteMfiServer, remoteMfiToken,
+        wirelessHotspotMode, existingWifiSsid, existingWifiPassphrase, manualHotspotSsid,
+        manualHotspotPassphrase, manualHotspotBand, manualHotspotChannel, manualHotspotSecurity,
+        locationReportingEnabled, autoStartOnBoot, advancedAudioChannelMapping, displayScaleTenths,
+        displayScalePercent, fps, widthPhysicalMm, physicalSizeBasis, hevcEnabled,
+        hevcSoftwareDecoderEnabled, manufacturer, model, oemLabel, debugLogsEnabled, rightHandDrive,
+        carPlayDock, hideTopBar, hideBottomBar, safeAreaDrawOutside,
+    ).joinToString("|").hashCode()
 
     private fun captureSettingsBaseline(): SettingsBaseline {
         val safeAreaSize = currentActivitySize()
@@ -5187,6 +5211,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         controller?.sendTouch(emptyList())
         loadPersistedSettings()
         settingsBaseline = captureSettingsBaseline()
+        menuSettingsSignature = menuSettingsSignature()
         // Rebuild controls from saved values so a cancelled edit cannot reappear on reopening.
         settingsMenu?.let { previous ->
             val parent = previous.parent as ViewGroup
@@ -5245,12 +5270,37 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         finishSettingsMenu("Settings changes discarded", reconnect = false)
     }
 
+    /**
+     * main #500：不主动声明丢弃的出口——返回手势与跳转完整设置页的链接。关闭控件的文案本身
+     * 已说明会丢弃，USB 插入也不算司机离开，因此这两处仍直接调用 [cancelSettingsEdits] 不弹询问。
+     * [onLeft] 只在菜单真正关闭后运行，避免有导航发生在对话框背后（作者：TRAE AI）。
+     */
+    private fun leaveSettingsMenu(onLeft: () -> Unit = {}) {
+        if (!menuOpen) return
+        if (menuSettingsSignature?.let { it != menuSettingsSignature() } == true) {
+            // 对话框明暗跟随菜单外观，与 DiPlay 其它对话框一致。
+            AlertDialog.Builder(this, if (appNight) R.style.Theme_Xcertplay_Dialog_Dark else R.style.Theme_Xcertplay_Dialog_Light)
+                .setTitle(getString(R.string.settings_discard_pending_title))
+                .setMessage(getString(R.string.settings_discard_pending_message))
+                .setPositiveButton(getString(R.string.save_and_reconnect)) { _, _ -> saveSettingsAndReconnect() }
+                .setNegativeButton(getString(R.string.settings_discard_pending_confirm)) { _, _ ->
+                    cancelSettingsEdits()
+                    onLeft()
+                }
+                .show()
+            return
+        }
+        cancelSettingsEdits()
+        onLeft()
+    }
+
     private fun finishSettingsMenu(prefix: String, reconnect: Boolean) {
         if (!menuOpen) return
         menuOpen = false
+        menuSettingsSignature = null
         settingsMenu?.visibility = View.GONE
         gestureOverlay?.visibility = View.VISIBLE
-        settingsGestureHint?.text = getString(R.string.open_diplay_settings_hint, gestureFingerCount)
+        settingsGestureHint?.text = settingsGestureHintText()
         updateDebugOverlays()
         logLines.clear()
         appendLog(
@@ -5405,7 +5455,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 gestureTracking = false
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (event.pointerCount == gestureFingerCount && !gestureSequenceActive) {
+                // main #487：手势数 0 表示禁用，不进入追踪（作者：TRAE AI）。
+                if (gestureFingerCount > 0 && event.pointerCount == gestureFingerCount && !gestureSequenceActive) {
                     gestureSequenceActive = true
                     gestureTracking = true
                     gestureStartX = pointerCentroid(event, horizontal = true)

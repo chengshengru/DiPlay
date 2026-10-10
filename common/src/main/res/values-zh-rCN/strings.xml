@@ -801,4 +801,12 @@
     <string name="update_verifying">正在校验…</string>
     <string name="update_install">安装 %1$s</string>
     <string name="update_failed">更新失败</string>
+    <string name="settings_gesture_disabled">关闭</string>
+    <string name="settings_gesture_disabled_hint">已关闭向下滑动打开快捷菜单的手势。</string>
+    <string name="settings_gesture_disabled_action">快捷菜单 · 关闭下滑（点按切换）</string>
+
+    <string name="settings_discard_pending_title">要放弃更改吗？</string>
+    <string name="settings_discard_pending_message">你刚更改的分辨率、帧率、连接以及其余设置尚未保存。“保存并重新连接”会应用它们。</string>
+    <string name="settings_discard_pending_confirm">放弃</string>
+
 </resources>

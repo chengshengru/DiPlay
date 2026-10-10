@@ -753,4 +753,12 @@
     <string name="update_verifying">Перевірка…</string>
     <string name="update_install">Установити %1$s</string>
     <string name="update_failed">Не вдалося оновити</string>
+    <string name="settings_gesture_disabled">Вимкнено</string>
+    <string name="settings_gesture_disabled_hint">Жест проведення вниз для відкриття швидкого меню вимкнено.</string>
+    <string name="settings_gesture_disabled_action">Швидке меню · свайп вимкнено (торкніться, щоб змінити)</string>
+
+    <string name="settings_discard_pending_title">Відкинути зміни?</string>
+    <string name="settings_discard_pending_message">Роздільна здатність, частота кадрів, підключення та інші змінені налаштування ще не збережені. «Зберегти та перепідключитися» застосує їх.</string>
+    <string name="settings_discard_pending_confirm">Відкинути</string>
+
 </resources>

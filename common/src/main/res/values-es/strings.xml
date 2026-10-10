@@ -741,4 +741,12 @@
     <string name="update_verifying">Verificando…</string>
     <string name="update_install">Instalar %1$s</string>
     <string name="update_failed">Error de actualización</string>
+    <string name="settings_gesture_disabled">Desactivado</string>
+    <string name="settings_gesture_disabled_hint">El gesto de deslizar hacia abajo está desactivado.</string>
+    <string name="settings_gesture_disabled_action">Menú rápido · deslizamiento desactivado (toca para cambiar)</string>
+
+    <string name="settings_discard_pending_title">¿Descartar los cambios?</string>
+    <string name="settings_discard_pending_message">La resolución, la velocidad de fotogramas, la conexión y los demás ajustes que acabas de cambiar todavía no se han guardado. Guardar y reconectar los aplica.</string>
+    <string name="settings_discard_pending_confirm">Descartar</string>
+
 </resources>

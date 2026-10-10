@@ -8,6 +8,7 @@ import android.os.Looper
 import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -500,6 +501,36 @@ class AdaptiveSettingsUiTest {
             val workers = CopyOnWriteArrayList<Thread>()
             var entered = CountDownLatch(1)
         }
+    }
+
+    // main #490：Overview 必须链接到除自身外的每个分类（作者：TRAE AI）。
+    @Test fun overviewLinksToEveryOtherCategory() {
+        val screen = openSettings()
+        (SettingsCategory.entries - SettingsCategory.OVERVIEW).forEach { category ->
+            val title = ReflectionHelpers.callInstanceMethod<String>(screen, "settingsCategoryTitle",
+                ReflectionHelpers.ClassParameter(SettingsCategory::class.java, category))
+            assertTrue(category.name, descendants(screen.window.decorView).any {
+                it.contentDescription == screen.getString(R.string.settings_open_category, title)
+            })
+        }
+    }
+
+    // main #491：标题栏操作控件（返回/搜索框/外观按钮）共享同一高度（作者：TRAE AI）。
+    @Test fun headerActionsShareOneHeight() = assertHeaderActionsShareOneHeight()
+
+    @Test
+    @Config(sdk = [29], qualifiers = "en-w400dp-h700dp-port")
+    fun compactHeaderActionsShareOneHeight() = assertHeaderActionsShareOneHeight()
+
+    private fun assertHeaderActionsShareOneHeight() {
+        val screen = openSettings()
+        val appearance = descendants(screen.window.decorView).single { it.tag == "app_appearance_button" }
+        val actions = (appearance.parent as ViewGroup).let { header ->
+            (0 until header.childCount).map(header::getChildAt)
+                .filter { it is android.widget.Button || it is EditText || it === appearance }
+        }
+        assertTrue(actions.size >= 3)
+        assertEquals(1, actions.map { it.layoutParams.height }.toSet().size)
     }
 
     private fun openSettings(): DiPlayActivity = Robolectric.buildActivity(
