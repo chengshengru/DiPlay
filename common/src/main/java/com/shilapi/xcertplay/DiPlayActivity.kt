@@ -45,6 +45,14 @@ import com.shilapi.xcertplay.compat.PermissionCompat
 // main B4：连接向导逻辑与 DiLink 代际识别（作者：TRAE AI）。
 import com.shilapi.xcertplay.setup.DiLinkGeneration
 import com.shilapi.xcertplay.setup.SetupGuide
+// main B5：应用内更新（作者：TRAE AI）。
+import androidx.core.content.FileProvider
+import com.shilapi.xcertplay.update.UpdateCatalog
+import com.shilapi.xcertplay.update.UpdateClient
+import com.shilapi.xcertplay.update.UpdateChecksums
+import com.shilapi.xcertplay.update.UpdateRelease
+import com.shilapi.xcertplay.update.UpdateVersion
+import java.io.IOException
 import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.airplay.ClusterTurnCardOverlay
@@ -186,6 +194,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     // main B4：连接向导当前步骤与来源（设置页入口 or 首启自动打开）（作者：TRAE AI）。
     private var setupStep = SetupGuide.STEP_CAR
     private var setupFromSettings = false
+    // main B5：应用内更新状态机（作者：TRAE AI）。
+    @Volatile private var updateStage = UpdateStage.IDLE
+    @Volatile private var updateGeneration = 0
+    @Volatile private var updateProgress: Int? = null
+    private var updateRelease: UpdateRelease? = null
+    private var updateFile: File? = null
+    private var updateMessage: String? = null
     // main B3：内嵌搜索状态——常驻输入框、下拉结果弹层、索引与焦点恢复标记（作者：TRAE AI）。
     private var settingsSearchBox: EditText? = null
     private var settingsSearchPopup: PopupWindow? = null
@@ -2345,11 +2360,159 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         content.addView(label(getString(R.string.carplay_at_home_in_your_car), 20, MUTED).apply { setPadding(0, dp(8), 0, dp(24)) })
         section(content, "${getString(R.string.about_public_preview_prefix)}${version()}") { card ->
             card.addView(label(getString(R.string.an_independent_carplay_receiver_for_android_head_units_wir), 17, TEXT))
+            // main B5：about 页应用内更新行（作者：TRAE AI）。
+            card.addView(updateRow())
         }
         section(content, getString(R.string.made_possible_by_open_source)) { card ->
             card.addView(label(getString(R.string.receiver_based_on_xcertplay_licensed_under_gpl_3_0_diplay), 16, MUTED))
         }
     }
+
+    // ===== main B5：应用内更新（检查/下载/校验/安装）（作者：TRAE AI）=====
+
+    private enum class UpdateStage { IDLE, CHECKING, AVAILABLE, DOWNLOADING, VERIFYING, READY, FAILED }
+
+    private fun updateRow(): View {
+        val container = column().apply { setPadding(0, dp(12), 0, 0) }
+        updateMessage?.let { container.addView(label(it, 14, MUTED)) }
+        when (updateStage) {
+            UpdateStage.IDLE, UpdateStage.FAILED ->
+                container.addView(button(getString(R.string.update_check), false) { checkForUpdates() },
+                    matchButton(if (updateMessage == null) 0 else 10, 60))
+            UpdateStage.CHECKING -> container.addView(label(getString(R.string.update_checking), 14, MUTED))
+            UpdateStage.AVAILABLE -> container.addView(
+                button(getString(R.string.update_download, updateRelease?.tagName.orEmpty()), true) { downloadUpdate() },
+                matchButton(10, 60))
+            UpdateStage.DOWNLOADING -> container.addView(label(getString(R.string.update_downloading, updateProgress ?: 0), 14, MUTED))
+            UpdateStage.VERIFYING -> container.addView(label(getString(R.string.update_verifying), 14, MUTED))
+            UpdateStage.READY -> container.addView(
+                button(getString(R.string.update_install, updateRelease?.tagName.orEmpty()), true) { installUpdate() },
+                matchButton(10, 60))
+        }
+        return container
+    }
+
+    private fun checkForUpdates() {
+        updateStage = UpdateStage.CHECKING
+        updateMessage = null
+        val generation = ++updateGeneration
+        render()
+        Thread({
+            val outcome = runCatching { latestRelease() }
+            runOnUiThread {
+                if (generation != updateGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                outcome.fold(
+                    { release ->
+                        if (release == null) {
+                            updateMessage = getString(R.string.update_up_to_date)
+                            updateStage = UpdateStage.IDLE
+                        } else {
+                            updateRelease = release
+                            updateStage = UpdateStage.AVAILABLE
+                        }
+                        render()
+                    },
+                    { failure ->
+                        Log.w("DiPlay-Update", "update check failed", failure)
+                        updateMessage = failure.message ?: getString(R.string.update_failed)
+                        updateStage = UpdateStage.FAILED
+                        render()
+                    },
+                )
+            }
+        }, "diplay-update-check").start()
+    }
+
+    private fun latestRelease(): UpdateRelease? {
+        val json = UpdateClient.fetchText(
+            UpdateClient.RELEASES_URL,
+            "application/vnd.github+json",
+            userAgent(),
+        )
+        val release = UpdateCatalog.parse(json) ?: return null
+        return release.takeIf { UpdateVersion.isNewer(it.tagName, version()) }
+    }
+
+    private fun downloadUpdate() {
+        val release = updateRelease ?: return
+        updateStage = UpdateStage.DOWNLOADING
+        updateProgress = null
+        updateMessage = null
+        val generation = ++updateGeneration
+        render()
+        Thread({
+            // 每次尝试独占自己的文件目录，跨 Activity 重建亦然。
+            val directory = File(cacheDir, "update/${java.util.UUID.randomUUID()}")
+            val outcome = runCatching {
+                val checksumsFile = File(directory, UpdateCatalog.CHECKSUMS_FILE)
+                UpdateClient.download(release.checksumsUrl, checksumsFile) { _, _ -> }
+                val apkFile = File(directory, release.apkName)
+                UpdateClient.download(release.apkUrl, apkFile) { written, total ->
+                    val percent = total?.takeIf { it > 0 }?.let { (written * 100 / it).toInt() } ?: return@download
+                    if (percent != updateProgress) {
+                        updateProgress = percent
+                        refreshUpdateUi(generation)
+                    }
+                }
+                updateStage = UpdateStage.VERIFYING
+                refreshUpdateUi(generation)
+                val expected = UpdateChecksums.parse(checksumsFile.readText())
+                val actual = UpdateChecksums.sha256Hex(apkFile)
+                if (!UpdateChecksums.matches(expected, release.apkName, actual)) {
+                    throw IOException("Checksum mismatch for ${release.apkName}")
+                }
+                apkFile
+            }.onFailure { directory.deleteRecursively() }
+            runOnUiThread {
+                if (generation != updateGeneration || isFinishing || isDestroyed) {
+                    directory.deleteRecursively()
+                    return@runOnUiThread
+                }
+                outcome.fold(
+                    { file ->
+                        updateFile = file
+                        updateStage = UpdateStage.READY
+                        render()
+                    },
+                    { failure ->
+                        Log.w("DiPlay-Update", "update download failed", failure)
+                        updateMessage = failure.message ?: getString(R.string.update_failed)
+                        updateStage = UpdateStage.FAILED
+                        render()
+                    },
+                )
+            }
+        }, "diplay-update-download").start()
+    }
+
+    private fun installUpdate() {
+        val file = updateFile ?: return
+        // Oreo 之前由安装器处理全局未知来源设置。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()) {
+            installApk(file)
+        } else {
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+        }
+    }
+
+    private fun installApk(file: File) {
+        val uri = FileProvider.getUriForFile(this, "$packageName.update-apks", file)
+        startActivity(
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            },
+        )
+    }
+
+    private fun refreshUpdateUi(generation: Int) {
+        runOnUiThread {
+            if (generation != updateGeneration || isFinishing || isDestroyed || page != "about") return@runOnUiThread
+            render()
+        }
+    }
+
+    private fun userAgent() = "DiPlay/${version()}"
 
     // An opted-in connection prepares the hotspot in the controller instead of stopping at this reminder.
     private fun carHotspotOff(): Boolean =

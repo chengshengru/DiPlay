@@ -793,4 +793,12 @@
     <string name="setup_badge_adb">需要網路 ADB</string>
     <string name="setup_done_title">準備就緒</string>
     <string name="setup_done_description">現在連線你的 iPhone。之後可在設定中再次開啟本精靈。</string>
+    <string name="update_check">檢查更新</string>
+    <string name="update_checking">正在檢查…</string>
+    <string name="update_up_to_date">已是最新版本</string>
+    <string name="update_download">下載 %1$s</string>
+    <string name="update_downloading">正在下載 · %1$d%%</string>
+    <string name="update_verifying">正在驗證…</string>
+    <string name="update_install">安裝 %1$s</string>
+    <string name="update_failed">更新失敗</string>
 </resources>

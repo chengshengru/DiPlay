@@ -834,4 +834,12 @@
     <string name="setup_badge_adb">Needs ADB over network</string>
     <string name="setup_done_title">You’re ready</string>
     <string name="setup_done_description">Connect your iPhone now. You can open this guide again from Settings.</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_checking">Checking…</string>
+    <string name="update_up_to_date">You\'re up to date</string>
+    <string name="update_download">Download %1$s</string>
+    <string name="update_downloading">Downloading · %1$d%%</string>
+    <string name="update_verifying">Verifying…</string>
+    <string name="update_install">Install %1$s</string>
+    <string name="update_failed">Update failed</string>
 </resources>

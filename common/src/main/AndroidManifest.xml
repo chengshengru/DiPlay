@@ -42,6 +42,16 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/diagnostic_report_paths" />
         </provider>
+        <!-- main B5：应用内更新 APK 的独立 FileProvider 身份（作者：TRAE AI） -->
+        <provider
+            android:name="com.shilapi.xcertplay.update.UpdateApkProvider"
+            android:authorities="${applicationId}.update-apks"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_apk_paths" />
+        </provider>
         <activity android:name="com.shilapi.xcertplay.DiPlayActivity"
             android:exported="true" android:launchMode="singleTop"
             android:resizeableActivity="true"

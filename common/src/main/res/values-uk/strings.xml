@@ -745,4 +745,12 @@
     <string name="setup_badge_adb">Потрібен ADB через мережу</string>
     <string name="setup_done_title">Усе готово</string>
     <string name="setup_done_description">Під’єднайте iPhone зараз. Цей майстер можна знову відкрити в налаштуваннях.</string>
+    <string name="update_check">Перевірити оновлення</string>
+    <string name="update_checking">Перевірка…</string>
+    <string name="update_up_to_date">У вас вже найновіша версія</string>
+    <string name="update_download">Завантажити %1$s</string>
+    <string name="update_downloading">Завантаження · %1$d%%</string>
+    <string name="update_verifying">Перевірка…</string>
+    <string name="update_install">Установити %1$s</string>
+    <string name="update_failed">Не вдалося оновити</string>
 </resources>
