@@ -1281,6 +1281,9 @@ class DiPlayActivity : ComponentActivity() {
             card.addView(button(getString(R.string.choose_save_location), false) { chooseReportDestination() }, matchButton(10, 60))
             val destination = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) getString(R.string.reports_save_to_downloads_diplay) else getString(R.string.choose_where_to_save_your_report)
             card.addView(label(destination + getString(R.string.nothing_is_sent_automatically_protocol_payloads_and_creden), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
+            // main #496：FPS 计数器，仅保存设置，回到投屏画面时生效，无需重连。
+            toggle(card, getString(R.string.settings_fps_counter), getString(R.string.settings_fps_counter_description),
+                AirPlayPersistence.loadFpsCounter(this)) { AirPlayPersistence.saveFpsCounter(this, it) }
         }
         filteredSection(content, SettingsSection.AUTOMATIC_CONNECTION,
             getString(R.string.automatic_connection), R.drawable.ic_dp_automation) { card ->
@@ -1447,6 +1450,20 @@ class DiPlayActivity : ComponentActivity() {
                 AirPlayPersistence.loadSmoothVideo(this)) {
                 AirPlayPersistence.saveSmoothVideo(this, it)
                 reconnectIfRunning()
+            }
+            // main #496：直接视频输出（实验性），立即重连并重建视频视图。
+            toggle(card, getString(R.string.settings_direct_video_output),
+                getString(R.string.settings_direct_video_output_description),
+                AirPlayPersistence.loadDirectVideoOutput(this)) {
+                AirPlayPersistence.saveDirectVideoOutput(this, it)
+                reconnectIfRunning()
+            }
+            // main #496：低延迟解码（实验性），下次连接时生效。
+            toggle(card, getString(R.string.settings_low_latency_decoder),
+                getString(R.string.settings_low_latency_decoder_description),
+                AirPlayPersistence.loadLowLatencyDecoder(this)) {
+                AirPlayPersistence.saveLowLatencyDecoder(this, it)
+                markReconnectNeeded()
             }
             toggle(card, getString(R.string.call_echo_cancellation), getString(R.string.call_echo_cancellation_description),
                 AirPlayPersistence.loadCallEchoCancellation(this)) {
@@ -2269,7 +2286,8 @@ class DiPlayActivity : ComponentActivity() {
             slider = SeekBar(context).apply {
                 max = steps.lastIndex
                 progress = steps.indexOf(current).coerceIn(steps.indices)
-                minHeight = dp(44)
+                // main d729cd89：ProgressBar.setMinHeight 需要 API 29；低版本改用 View.minimumHeight 保证触控目标高度。
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) minHeight = dp(44) else minimumHeight = dp(44)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                         val value = steps[progress.coerceIn(steps.indices)]

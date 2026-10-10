@@ -115,7 +115,7 @@ class ExistingWifiManager(
                     hosts = addresses
                     interfaceIndex = iface.index
                     interfaceName = name
-                    connectivity.registerNetworkCallback(NetworkRequest.Builder().clearCapabilities()
+                    connectivity.registerNetworkCallback(requestWithoutDefaultCapabilities()
                         .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                         .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(), callback)
                     callbackRegistered = true
@@ -182,4 +182,15 @@ class ExistingWifiManager(
             }
         }
     }
+
+    // main d729cd89：NetworkRequest.Builder.clearCapabilities 需要 API 30；低版本逐个移除默认能力。
+    private fun requestWithoutDefaultCapabilities(): NetworkRequest.Builder =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            NetworkRequest.Builder().clearCapabilities()
+        } else {
+            NetworkRequest.Builder()
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_TRUSTED)
+        }
 }
