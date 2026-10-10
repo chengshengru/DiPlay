@@ -341,7 +341,7 @@ class Iap2UsbSession internal constructor(
     private var closed = false
     private var failure: IphoneUsbException? = null
     private var pendingRead: UsbRequest? = null
-    private val readQueuePolicy = UsbReadQueuePolicy()
+    private val readQueuePolicy = UsbReadQueuePolicy.forCurrentPlatform()
     // API 17 迁移：requestWait(long) 重载是 API 26 新增。API 26+ 直接调用；
     // API 17-25 由守护线程调用阻塞式 requestWait()（API 12+），完成的请求经队列交给读者。
     private val legacyRequestWait = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
@@ -421,7 +421,7 @@ class Iap2UsbSession internal constructor(
             val queueResult = synchronized(stateLock) {
                 checkOpenLocked()
                 pendingRead = request
-                readQueuePolicy.queue(buffer, ::checkOpenLocked, request::queue)
+                readQueuePolicy.queue(buffer, ::checkOpenLocked) { request.queueRead(it) }
             }
             if (!queueResult.queued) {
                 throw IphoneUsbException.DeviceUnavailable(

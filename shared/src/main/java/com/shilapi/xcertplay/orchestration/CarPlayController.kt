@@ -2591,12 +2591,34 @@ class CarPlayController(
     private fun debugLog(message: String, error: Throwable) {
         Log.w(IphoneCarPlayConfiguration.TAG, message, error)
         try {
-            uiListener?.onDebugLog(
-                "$message: ${error.message ?: error.javaClass.simpleName}",
-            )
+            uiListener?.onDebugLog("$message: ${describeThrowable(error)}")
         } catch (callbackError: Exception) {
             Log.w(IphoneCarPlayConfiguration.TAG, "debug log callback failed", callbackError)
         }
+    }
+
+    /**
+     * 波次二（main 764e0ba1）：渲染异常及其 cause 链（每层带栈顶帧），使被包装的失败
+     * （例如 "USBMUX read failed" 掩盖真实原因）仅凭会话日志即可诊断，无需 logcat。
+     * 深度有上限；脱敏器仍会作用于结果。
+     */
+    private fun describeThrowable(error: Throwable): String {
+        val builder = StringBuilder()
+        var current: Throwable? = error
+        var depth = 0
+        while (current != null && depth < 5) {
+            if (depth > 0) builder.append(" <- ")
+            builder.append(current.javaClass.simpleName)
+            current.message?.let { builder.append(": ").append(it) }
+            current.stackTrace.firstOrNull()?.let { frame ->
+                builder.append(" @ ").append(frame.className.substringAfterLast('.'))
+                    .append('.').append(frame.methodName)
+                    .append('(').append(frame.fileName).append(':').append(frame.lineNumber).append(')')
+            }
+            current = current.cause
+            depth++
+        }
+        return builder.toString()
     }
 
     private fun onStatus(status: CarPlayStatus, generation: Int? = null) {
