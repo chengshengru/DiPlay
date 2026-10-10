@@ -127,7 +127,7 @@ flowchart LR
 | 六 | 下滑手势 Off 选项 | #487 `d05fcb25` | ✅ 已完成 | 2026-10-11 | 手势数 0=禁用：持久化 0 值语义 + ACTION_POINTER_DOWN 守卫 + 提示/按钮专用文案 + CarPlay 控件卡 Off 选项；3 条字符串 ×7 |
 | 六 | 重连条联动 | #482/`f256cd64` | ✅ 已完成 | 2026-10-11 | markReconnectNeeded 接线已随批次带入；补 #482 会话挂起重连条测试（PendingReconnect 挂起 + 重连条可见 + 不停止会话） |
 | 六 | 设置间距/对齐精修 | #486/#491/#490 | ✅ 已完成 | 2026-10-11 | #486/#420 布局代码已随 B2 基线（6ebb582）带入；#491 补 3 处 dp 字面量 → `SETTINGS_BLOCK_GAP_DP` + SettingsLayoutSourceRulesTest + headerActionsShareOneHeight；#490 AGENTS.md Settings layout 节 + overviewLinksToEveryOtherCategory；#420 HomeCompactLayoutTest 横竖屏排列断言 |
-| 七 | 7 语言字符串同步 | 各波次随附 | ⬜ | | `SettingsTranslationsTest` |
+| 七 | 7 语言字符串同步 | 各波次随附 | ✅ 已完成 | 2026-10-11 | 分支提交 `2deb9cc0`/`c33d6d35`；6 个 main 文案提交应用 + `fps_counter_*` ×6 语言补齐；`SettingsTranslationsTest` 1/1 通过；详见 10.1 |
 
 ### 0.5 每轮迁移的文档更新义务
 
@@ -534,6 +534,8 @@ shared/.../network/WifiP2pGroupManager.kt（叠加）
 
 ## 10. 波次七：本地化与文案同步
 
+> **✅ 波次七已完成**（2026-10-11，分支 `port/wave7-i18n`，2 个提交，见 10.1 完成记录）。
+
 main 在两批发布中为 7 个语言目录新增了数百条字符串。**移植每个功能时同步字符串**，不要攒到最后。
 
 规则（来自 `AGENTS.md`）：
@@ -544,6 +546,23 @@ main 在两批发布中为 7 个语言目录新增了数百条字符串。**移�
 4. 乌克兰语措辞修正（`b709f3ec`/`496afce4`，#399）一并应用；
 5. 中文标签对齐与共享头图标（`3d4329a3`/`bc1c6001`/`9919585e`/`9c7fda97` 等）按波次六 View 实现处理；
 6. 每波结束跑 `SettingsTranslationsTest` 确认无遗漏。
+
+### 10.1 完成记录（2026-10-11，分支 `port/wave7-i18n`）
+
+**main 提交应用（基线 `6ebb582`，提交 `2deb9cc0`）**：
+
+- **`b709f3ec`/`496afce4`（#399 乌克兰语措辞）**：`values-uk` 31+1 处 приборка→панель приладів；`wheel_key_service_description` 分支文本无 приборка 词，跳过。
+- **`bc1c6001`（亮度阈值简化）**：`strings_ambient_threshold.xml` ×7（values + 6 语言）title "Ambient light threshold"→"Brightness threshold"、hint 简化；`DiPlayActivity` 门槛对话框去掉冗余的"切换门槛 (lux)"标签行。
+- **`9919585e`（日夜模式提示合并）**：`strings_night_mode.xml` ×7 经 name 锚定整行替换与 main 对齐（`carplay_night_ambient`/`ambient_hint`/`time_note`，zh-rTW 另含 hint）；`DiPlayActivity` 两句提示合并为一行（中文两句间不加空格）；API 17 适配：`Configuration.locales` 是 API 24+，低版本走 deprecated `locale`；`NightModeSettingsTest` 同步 main 合并后单 label 断言。
+- **`3d4329a3`（中文标签对齐与共享头图标）**：compact logo `dp(24)`→`dp(30)`；`ic_dp_advanced.xml` 齿轮 pathData 整体替换为 main 新路径；⏭️ centreGlyphs 4 处改动依赖 main 自绘基线逻辑，分支无对应物，跳过。
+- **`9c7fda97`（更大开关）**：`applyLargeSwitchStyle`（60x34dp 轨道 + 28dp 拇指）已随波次六带入，本波接线 `SettingsWidgets.createSwitchRow` 全部开关 + `CarPlayHostActivity` 定位上报开关；API 17 适配：`showText`/`thumbTintList`/`trackTintList` 为 API 21+，经 `UiCompat` 守卫；`SettingsWidgetsTest` 拇指三态断言改 `state_enabled+state_checked`、新增大开关尺寸/禁用态染色测试；⏭️ CarPlayPicturePanel 分支实现不同（无 tint 代码），跳过。
+
+**字符串补齐（提交 `c33d6d35`）**：
+
+- 37 条 `settings_*`（B2 信息架构）经核查已随波次六在各语言 `strings_settings_layout.xml` 齐全——首轮摸底只对比了各目录 `strings.xml` 误判缺失，补译后资源合并报 Duplicate resources，按与 `SettingsTranslationsTest` 同口径（语言目录**全部** XML）复核确认真实缺失为 0，重复行已全部移除。**教训：字符串齐全性判定必须覆盖语言目录下全部 XML，不能只看 `strings.xml`。**
+- `fps_counter_*` 4 条（波次四 FPS 计数器）为真实缺失，补齐 ar/es/ru/uk/zh-rCN/zh-rTW ×6 语言，placeholder（`%1$d/%2$d/%3$s`）与默认语言一致。
+
+**验证**：`SettingsTranslationsTest` 1/1 通过（资源合并 + 纯字符串 JUnit）；`:common:compileDebugKotlin`、`:common:compileDebugUnitTestKotlin`、`:mobile:assembleDebug`（`--offline`，JDK 17）全部通过。
 
 ---
 
@@ -650,10 +669,10 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 - [x] 重连条接线（#482，测试补齐）
 - [x] 间距/对齐精修（#486/#491/#490/#420，布局随 B2 基线带入 + 测试/规则补齐）
 
-### 波次七 本地化
-- [ ] 全部 `settings_*` 字符串 7 语言齐全
-- [ ] `SettingsTranslationsTest` 通过
-- [ ] 实验性后缀各语言形式正确
+### 波次七 本地化 ✅（2026-10-11，分支 `port/wave7-i18n`，详见 10.1）
+- [x] 全部 `settings_*` 字符串 7 语言齐全（37 条 B2 架构字符串随波次六 `strings_settings_layout.xml` ×7 齐全）
+- [x] `SettingsTranslationsTest` 通过（1/1）
+- [x] 实验性后缀各语言形式正确（均沿用各语言既有形式，与 main 一致）
 
 ### 收尾
 - [ ] 分支全量构建：`./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleDebug`
