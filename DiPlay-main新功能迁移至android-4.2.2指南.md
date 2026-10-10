@@ -34,7 +34,7 @@
 
 | 锚点 | Commit（完整哈希） | 时间 | 说明 |
 |------|--------------------|------|------|
-| **main 基线** | `6ebb58218f90b0c0853b78013cb8431765ca77bb` | 2026-10-09 19:01 +0400 | Merge PR #533（release/0.2.16）；较 `ef4e3fe5` 仅新增发版说明/站点/版本号，无新功能代码，波次一至三功能终点仍为 `ef4e3fe5` |
+| **main 基线** | `6ebb58218f90b0c0853b78013cb8431765ca77bb` | 2026-10-09 19:01 +0400 | Merge PR #533（release/0.2.16）；较 `ef4e3fe5` 仅新增发版说明/站点/版本号，无新功能代码，波次一至四功能终点仍为 `ef4e3fe5` |
 | **分叉点** | `7887bb7bf2b52258e663a2a4ea1332382ed80ad8` | 2026-10-07 15:24 +0400 | v0.2.14 发布合并点，两分支共同祖先 |
 | **android-4.2.2 起点** | `6a08b07d2ee41f002d9f8b5151c94d7ed26d5fea` | 2026-10-09 20:42 +0800 | 分支已有 4 个移植提交（API 17 下移、legacy-mdns、热点恢复） |
 
@@ -106,10 +106,10 @@ flowchart LR
 | 三 | 显示变更保持会话 | #501 `d5d9d2fd` | ✅ 已完成 | 2026-10-11 | CarPlayHostActivity restoreSettingsBaseline 仅系统栏真变化时 applyFullscreenMode+refreshDisplaySizeAfterLayout；displayLayoutChanged 宽高比改用 windowWidth/windowHeight 基准（正方形协商画布不再误判 PiP） |
 | 三 | 内置热点蓝牙下发凭据文案 | `15c0e697` | ✅ 已完成 | 2026-10-11 | hotspot_mode_manual_desc 更新 ×7 语言 |
 | 三 | 连接设置修复集成 | `6eecada8` #517 | ✅ 已完成 | 2026-10-11 | VPN/热点安全部分与 4aee3f80 重叠已移植；Iap2IdentificationClient 拒绝消息列表诊断波次二已移植；ManualHotspotValidation 注释同步 |
-| 四 | 视频积压恢复界限 | #347 `21195488` | ⬜ | | |
-| 四 | 解码器一次多帧 | #456 `1df2cd2c` | ⬜ | | |
-| 四 | 低延迟解码 + 输出线程 + FPS 计数 | #496 `5dabc170`/`52004bfb` | ⬜ | | 守卫高通键；FPS 覆盖层 View 化 |
-| 四 | 解码器工作速率提示 | #417 `19d11af7` | ⬜ | | API 23+ 守卫 |
+| 四 | 视频积压恢复界限 | #347 `21195488` | ✅ 已完成 | 2026-10-11 | 新增 `VideoBacklogRecovery.kt`（episode 状态机，SOFT/HARD 界限）；`VideoDecodeQueue` 整文件替换为 main 版（backlogAfterCurrent/discardCurrentChain）；`VideoRecoveryFrameAge` 防作废 IDR 重启；AudioRenderer 拷贝 PCM 后立即 releaseOutputBuffer、writePcm 移锁外 |
+| 四 | 解码器一次多帧 | #456 `1df2cd2c` | ✅ 已完成 | 2026-10-11 | `videoDecoderAttempts` 有序尝试列表（低延迟带速率→低延迟→默认带速率→默认调优→最小→软件）；`PICTURE_ORDER_PARAMETER` 仅 API 31+ 且解码器声明时设置；framesAtOnce=主屏+无镜像标签+平滑视频 |
+| 四 | 低延迟解码 + 输出线程 + FPS 计数 | #496 `5dabc170`/`52004bfb` | ✅ 已完成 | 2026-10-11 | 高通厂商键（configure 抛 BAD_VALUE 由尝试列表回退）；`dedicatedOutputThread` 以 THREAD_PRIORITY_DISPLAY 即时释放帧，`outputLock`+`dequeuing` 协调编解码器交接；`FpsCounterOverlay` 已是 View 版直接复制；新增直接视频输出/低延迟解码/FPS 计数器三项设置 ×7 语言；`carPlayVideoSurfaceMode` 加 directVideoOutput；HostActivity 接线（FPS 启停/重建检查/日志）；CarPlayVideoSurfaceTest 同步 main 断言 |
+| 四 | 解码器工作速率提示 | #417 `19d11af7` | ✅ 已完成 | 2026-10-11 | `videoOperatingRate` 仅主屏取帧率设置；API 17 适配：`KEY_OPERATING_RATE` 加 `SDK_INT >= M` 守卫（main minSdk 25 无守卫）；被拒后 `dropOperatingRate` 记忆跳过 |
 | 五 | BYD 氛围灯音乐跟随 | #345 `60300d89`/`34cf4e19` | ⬜ | | |
 | 五 | 导航播报方向盘音量 | #344 `ba8cdca1` | ⬜ | | |
 | 五 | Platform-21 仪表路由 | #348 `52bbad46` | ⬜ | | API 17 隐藏入口 |
@@ -430,6 +430,20 @@ common/.../FpsCounterOverlay.kt            # View 版覆盖层，可直接用（
 
 真机：API 17 车机播放 CarPlay 视频 10 分钟，观察积压恢复日志与 FPS 覆盖层。
 
+### 7.5 完成记录（2026-10-11，分支 `port/wave4-video`，提交 `37c1cd4a`）
+
+- 4 项功能全部移植完成（见 0.4 进度表波次四各行），并附带 `d729cd89` 的 API 29/30 调用规避：
+  - `ExistingWifiManager`：`clearCapabilities()`（API 30）低版本改为逐个 `removeCapability` 默认能力；
+  - `DiPlayActivity` 设置滑杆：`minHeight`（API 29）低版本改用 `minimumHeight`。
+- **移植方式**：分支 `AndroidMediaSink.kt` 与 main 的 diff 混入非波次四改动（AmbientMusicController、AudioFocusRequestCompat 等分支没有的实现），**不能整文件替换**，按 hunk 外科手术式只移植视频逻辑；`VideoDecodeQueue.kt` 差异恰为波次四内容，整文件替换；`VideoBacklogRecovery.kt`/`LiveVideoMeter.kt`/`FpsCounterOverlay.kt` 为纯逻辑/View 实现，直接复制 main 版。
+- API 17 适配要点落实情况：
+  - 要点 1（`getInputBuffer(index)`）：核实分支自 `3b67c80b` 起就直接使用 `getInputBuffer(index)` 且无兼容层，属分支既有状态，不在本次范围、未改动。
+  - 要点 2（低延迟键守卫）：厂商键依赖 configure 抛 BAD_VALUE 后由尝试列表回退（main 原生逻辑）；`findLowLatencyDecoder`/`listsPictureOrder` 保留 main 的 R/S 守卫。
+  - 要点 3（FPS 计数器）：main 版即 TextView View 实现，直接复制。
+  - 要点 4（工作速率）：`KEY_OPERATING_RATE` 显式加 `SDK_INT >= M`（API 23）守卫。
+- 设置项归属：直接视频输出/低延迟解码 → Advanced（ADVANCED_MEDIA 卡），FPS 计数器 → Diagnostics 卡；三项均按 AGENTS.md 约定（重连语义写入描述，`reconnectIfRunning`/`markReconnectNeeded` 对应）。
+- 按用户指示跳过单元测试，仅做编译验证：`:shared:compileDebugKotlin`、`:common:compileDebugKotlin`、`:mobile:assembleDebug` 全部通过（JDK 17 + `--offline`）。
+
 ---
 
 ## 8. 波次五：车辆/HUD 集成
@@ -592,11 +606,12 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 - [x] Android 17 权限守卫为 no-op；VPN 授权崩溃修复移植
 - [x] 热点安全设置保留（WPA3 选项按 API 守卫）
 
-### 波次四 视频
-- [ ] 积压恢复（#347）+ 一次多帧（#456）+ 专用输出线程（#496）
-- [ ] 低延迟/工作速率键 API 守卫 + 回退
-- [ ] FPS 计数器 View 化
-- [ ] `getInputBuffer(index)` 全部替换为 `getInputBuffers()`
+### 波次四 视频 ✅（2026-10-11 完成，跳过单元测试，编译验证通过）
+- [x] 积压恢复（#347）+ 一次多帧（#456）+ 专用输出线程（#496）
+- [x] 低延迟/工作速率键 API 守卫 + 回退（KEY_OPERATING_RATE 加 >= M 守卫）
+- [x] FPS 计数器（main 版已是 View 实现，直接复制）
+- [x] `getInputBuffer(index)`：核实为分支既有状态，不在本波次范围
+- [x] d729cd89 API 29/30 调用规避（clearCapabilities / minHeight）
 
 ### 波次五 车辆
 - [ ] 氛围灯（#345）+ 方向盘音量（#344）+ DiLink3 ETA（#458）+ 开机修复（#441）
