@@ -847,19 +847,16 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     // 标题栏圆形图标按钮（焦点环 + 涟漪，遥控器可用）（main #422，作者：TRAE AI）。
     private fun iconButton(icon: Int, description: String, click: () -> Unit) = ImageButton(this).apply {
         setImageResource(icon)
-        imageTintList = ColorStateList.valueOf(ACCENT)
+        // API17 适配：imageTintList/stateListAnimator/RippleDrawable/foreground 是 API 21+/23+，全部走 UiCompat（作者：TRAE AI）。
+        UiCompat.setImageTint(this, ACCENT)
         contentDescription = description
         scaleType = ImageView.ScaleType.CENTER
         setPadding(dp(12), dp(12), dp(12), dp(12))
         minimumWidth = dp(48)
         minimumHeight = dp(48)
-        stateListAnimator = null
-        background = android.graphics.drawable.RippleDrawable(
-            ColorStateList.valueOf(RIPPLE),
-            rounded(BUTTON, BORDER),
-            null,
-        )
-        foreground = focusRing()
+        UiCompat.clearStateListAnimator(this)
+        background = UiCompat.ripple(RIPPLE, rounded(BUTTON, BORDER), null)
+        UiCompat.setForeground(this, focusRing())
         setOnClickListener { click() }
     }
 
@@ -952,8 +949,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     private fun setupGuide(content: LinearLayout) {
         val step = setupStep.coerceIn(SetupGuide.STEP_CAR, SetupGuide.STEP_DONE)
+        // API17 适配：TextView.setLetterSpacing 是 API 21+，走 UiCompat（作者：TRAE AI）。
         content.addView(label(getString(R.string.setup_step_of, step + 1, SetupGuide.STEP_COUNT), 13, ACCENT, true)
-            .apply { letterSpacing = .12f })
+            .apply { UiCompat.setLetterSpacing(this, .12f) })
         // 顶部步骤进度条：已完成与当前步高亮。
         val progress = row().apply { setPadding(0, dp(10), 0, dp(20)) }
         repeat(SetupGuide.STEP_COUNT) { index ->
@@ -1658,12 +1656,14 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         setTextColor(TEXT)
         setHintTextColor(MUTED)
         background = rounded(BUTTON, BORDER)
-        foreground = focusRing()
+        // API17 适配：View.setForeground 是 API 23+，走 UiCompat（作者：TRAE AI）。
+        UiCompat.setForeground(this, focusRing())
         setPadding(dp(16), 0, dp(16), 0)
         compoundDrawablePadding = dp(10)
         setCompoundDrawablesRelativeWithIntrinsicBounds(
-            // API17 适配：Context.getDrawable 是 API 21+，低版本走 ContextCompat（作者：TRAE AI）。
-            androidx.core.content.ContextCompat.getDrawable(this@DiPlayActivity, R.drawable.ic_dp_search)?.mutate()?.apply { setTint(MUTED) }, null, null, null)
+            // API17 适配：Context.getDrawable 是 API 21+，低版本走 ContextCompat；setTint 是 API 21+，走 UiCompat（作者：TRAE AI）。
+            androidx.core.content.ContextCompat.getDrawable(this@DiPlayActivity, R.drawable.ic_dp_search)?.mutate()
+                ?.let { UiCompat.tint(it, MUTED) }, null, null, null)
         inputType = android.text.InputType.TYPE_CLASS_TEXT
         // 横屏车机不然会用全屏编辑器盖住结果列表。
         imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or
@@ -1761,11 +1761,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
         settingsSearchPopup = PopupWindow(scroll, width, height, false).apply {
             setBackgroundDrawable(rounded(SURFACE, BORDER))
-            elevation = dp(8).toFloat()
+            // API17 适配：PopupWindow.setElevation 是 API 21+，走 UiCompat（作者：TRAE AI）。
+            UiCompat.setPopupElevation(this, dp(8).toFloat())
             // 点击其他位置关闭列表但保留查询；点回搜索框重新打开。
             isOutsideTouchable = true
             inputMethodMode = PopupWindow.INPUT_METHOD_NEEDED
-            showAsDropDown(box, 0, dp(6), Gravity.END)
+            // API17 适配：showAsDropDown(view,x,y,gravity) 是 API 19+，低版本用调用方换算的 x 做 END 对齐（作者：TRAE AI）。
+            UiCompat.showAsDropDown(this, box, 0, dp(6), Gravity.END, box.width - width)
         }
     }
 
@@ -1774,8 +1776,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         isClickable = true
         isFocusable = true
         contentDescription = "${result.title}, $category"
-        foreground = android.graphics.drawable.LayerDrawable(arrayOf(
-            android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(RIPPLE), null, null), focusRing(12)))
+        // API17 适配：RippleDrawable 是 API 21+、foreground 是 API 23+，走 UiCompat（作者：TRAE AI）。
+        UiCompat.setForeground(this, android.graphics.drawable.LayerDrawable(arrayOf(
+            UiCompat.ripple(RIPPLE, null, null), focusRing(12))))
         minimumHeight = dp(56)
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(12), dp(8), dp(12), dp(8))

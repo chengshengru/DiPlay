@@ -12,6 +12,7 @@ import android.view.ViewOutlineProvider
 import android.view.Window
 import android.widget.CompoundButton
 import android.widget.ImageView
+import android.widget.PopupWindow
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
@@ -53,6 +54,20 @@ internal object UiCompat {
     /** ImageView.setImageTintList is API 21+. */
     fun setImageTint(image: ImageView, color: Int) {
         if (Build.VERSION.SDK_INT >= 21) image.imageTintList = ColorStateList.valueOf(color)
+    }
+
+    /** PopupWindow.setElevation is API 21+. */
+    fun setPopupElevation(popup: PopupWindow, elevation: Float) {
+        if (Build.VERSION.SDK_INT >= 21) popup.elevation = elevation
+    }
+
+    /**
+     * PopupWindow.showAsDropDown(view, x, y, gravity) is API 19+. Below that, drop with the x the
+     * caller computed for the alignment the gravity would have produced.
+     */
+    fun showAsDropDown(popup: PopupWindow, anchor: View, x: Int, y: Int, gravity: Int, fallbackX: Int) {
+        if (Build.VERSION.SDK_INT >= 19) popup.showAsDropDown(anchor, x, y, gravity)
+        else popup.showAsDropDown(anchor, fallbackX, y)
     }
 
     /** TextView.setLetterSpacing is API 21+. */
