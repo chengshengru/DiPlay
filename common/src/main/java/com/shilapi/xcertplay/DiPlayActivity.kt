@@ -368,12 +368,17 @@ class DiPlayActivity : ComponentActivity() {
     private fun notifyPreviousCrash() {
         if (crashNoticeShown) return
         val public = CrashFileLogger.publicCrashFile()
-        if (!public.isFile && !CrashFileLogger.lastCrashFile(this).isFile) return
+        val last = CrashFileLogger.lastCrashFile(this)
+        // 只提示真实存在的文件路径：公共目录 /sdcard/DiPlay 的写入可能因存储未挂载
+        // 或权限失败而缺失，此时应指向应用私有目录的副本，避免 Toast 指向不存在的 sdcard 路径。
+        val target = when {
+            public.isFile -> public
+            last.isFile -> last
+            else -> return
+        }
         crashNoticeShown = true
         // Reuses the existing "saved to path" string to avoid adding untranslated resources.
-        // Point at the public /sdcard/DiPlay/ copy, which is retrievable even when the app
-        // (the head unit's launcher UI) is dead.
-        android.widget.Toast.makeText(this, getString(R.string.diagnostic_report_saved_to_path, public.absolutePath), android.widget.Toast.LENGTH_LONG).show()
+        android.widget.Toast.makeText(this, getString(R.string.diagnostic_report_saved_to_path, target.absolutePath), android.widget.Toast.LENGTH_LONG).show()
     }
 
     override fun onStop() {
