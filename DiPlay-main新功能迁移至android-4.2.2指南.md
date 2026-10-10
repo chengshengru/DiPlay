@@ -86,11 +86,11 @@ flowchart LR
 
 | 波次 | 功能项 | 对应 main PR/提交 | 状态 | 完成日期 | 备注 |
 |------|--------|-------------------|------|----------|------|
-| 一 | Concentus 软件 Opus 编码器 | `6a1e7b89`/`ea898e34` | ⬜ | | |
-| 一 | Opus 能力广告 | #483 `6d15669f` | ⬜ | | |
-| 一 | 音频诊断上报 | #499 `a6c8c4da` | ⬜ | | |
-| 一 | 麦克风回退集成 | #468 `e2403839` | ⬜ | | |
-| 一 | 回消参考对齐 | #421 `5fecbc08` | ⬜ | | |
+| 一 | Concentus 软件 Opus 编码器 | `6a1e7b89`/`ea898e34` | ✅ 已完成 | 2026-10-10 | 分支提交 `bd722344`；另修复 3 个阻塞 `:shared` 测试编译的既有坏测试（setPassphrase 反射化、RemoteMfi 改 ServerSocket 桩） |
+| 一 | Opus 能力广告 | #483 `6d15669f` | ✅ 已完成 | 2026-10-10 | 分支提交 `bd722344`；AirPlayConfig.microphoneOpus + InfoPlist audioFormats 守卫 |
+| 一 | 音频诊断上报 | #499 `a6c8c4da` | ⬜ | | CrashFileLogger 替换式合并（见 0.3） |
+| 一 | 麦克风回退集成 | #468 `e2403839` | 🔶 进行中 | | 回退逻辑已随 `bd722344` 移植（MicrophoneUplink + AndroidMediaSink 调用点）；诊断集成部分待 #499 |
+| 一 | 回消参考对齐 | #421 `5fecbc08` | ✅ 已完成 | 2026-10-10 | 分支提交 `bd722344`；EchoReferenceTest 9/9 通过 |
 | 一 | 缓冲音频节流 | #484 `a4b8900d` | ⬜ | | |
 | 一 | prebuffer underrun 恢复 | #401 `f5452c5a`/`2f12d483` | ⬜ | | |
 | 二 | NCM 接收帧修复 | #478 `515bc9ec` | ⬜ | | |
