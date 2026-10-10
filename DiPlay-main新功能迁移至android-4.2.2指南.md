@@ -93,9 +93,9 @@ flowchart LR
 | 一 | 回消参考对齐 | #421 `5fecbc08` | ✅ 已完成 | 2026-10-10 | 分支提交 `bd722344`；EchoReferenceTest 9/9 通过 |
 | 一 | 缓冲音频节流 | #484 `a4b8900d` | ⬜ | | |
 | 一 | prebuffer underrun 恢复 | #401 `f5452c5a`/`2f12d483` | ⬜ | | |
-| 二 | NCM 接收帧修复 | #478 `515bc9ec` | ⬜ | | |
-| 二 | USB 读阶梯重试 | #495 `422a7d8e` | ⬜ | | |
-| 二 | 16 KiB usbfs 上限（扩到 API 17–25） | `764e0ba1` | ⬜ | | |
+| 二 | NCM 接收帧修复 | #478 `515bc9ec` | ✅ 已完成 | 2026-10-10 | drainFrames 可选短包填充状态机；NcmUsbBridgeFramingTest 9/9 通过 |
+| 二 | USB 读阶梯重试 | #495 `422a7d8e` | ✅ 已完成 | 2026-10-10 | UsbReadQueuePolicy 重写为 main 最终版（queueCeiling+阶梯+submitUnchanged）；另修复 API 17–25 `queue(ByteBuffer)` NoSuchMethodError 隐患（queueRead 扩展走废弃双参重载）；UsbReadQueuePolicyTest 18/18、CompatibilityTest 11/11 通过 |
+| 二 | 16 KiB usbfs 上限（扩到 API 17–25） | `764e0ba1` | ✅ 已完成 | 2026-10-10 | forCurrentPlatform 守卫下探为 `< P`（比 main 的 26/27 更保守）；Android8UsbReadTest 12/12 通过；CarPlayController describeThrowable 与 Iap2IdentificationRejectionTest（5.3 第 3 条）一并移植 |
 | 三 | 热点地址族恢复 | #474 `7b6f4585`/`39c052f5` | ⬜ | | 🔁 候选：替换 `LegacyHotspotRecovery.kt` |
 | 三 | Android 17 本地网络权限守卫 | #465 `203a38aa` | ⬜ | | API 17 下 no-op |
 | 三 | VPN 授权崩溃修复 | `4aee3f80` | ⬜ | | |
