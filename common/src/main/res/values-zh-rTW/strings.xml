@@ -25,7 +25,7 @@
     <string name="marker_up">上</string>
     <string name="marker_down">下</string>
     <string name="marker_centre_default">置中 · 預設</string>
-    <string name="hotspot_mode_manual_desc">使用車機內建的熱點。若車機支援，請在車機設定中選擇 5 GHz。</string>
+    <string name="hotspot_mode_manual_desc">使用車載熱點連線無線 CarPlay。無需在 iPhone 上手動加入熱點；DiPlay 會透過藍牙傳送熱點資訊。如有 5 GHz，請在車機設定中選擇。</string>
     <string name="hotspot_mode_p2p_desc">替代方案。需要開啟車機 Wi-Fi 開關；2.4 GHz 連線可能會卡頓。</string>
     <string name="hotspot_details_off">熱點已關閉 · 請在車機設定中開啟。</string>
     <string name="hotspot_details_saved">詳細資訊已儲存 · 連線前請確認車載熱點已開啟。</string>
@@ -159,6 +159,8 @@
     <string name="connect">連線</string>
     <string name="connect_phone">連線手機</string>
     <string name="connect_when_diplay_opens">開啟 DiPlay 時連線</string>
+    <string name="connect_when_iphone_bluetooth_connects">所選 iPhone 重新連上藍牙時自動連線</string>
+    <string name="connect_when_iphone_bluetooth_connects_description">車機喚醒後，所選 iPhone 連上藍牙時開啟 DiPlay 並啟動無線 CarPlay。部分車機會限制背景啟動。</string>
     <string name="connect_with_usb">透過 USB 連線</string>
     <string name="connect_your_iphone_with_a_usb_cable">請使用 USB 傳輸線連線 iPhone</string>
     <string name="connecting_bluetooth">正在連線藍牙</string>
@@ -384,6 +386,7 @@
     <string name="use_software_hevc_decoder">使用 HEVC 軟體解碼器</string>
     <string name="use_usage_content_type_routing_instead_of_stream_type">使用 usage / content-type 路由取代串流類型</string>
     <string name="use_your_last_connection_type_and_selected_iphone">使用上次的連線方式和已選擇的 iPhone。</string>
+    <string name="vpn_authorization_unavailable">此車機無法開啟 VPN 授權畫面。請返回 DiPlay 檢查連線權限，或使用無線連線。</string>
     <string name="vpn_consent_was_denied">VPN 授權遭拒</string>
     <string name="waiting_for_iphone_over_usb">正在等待透過 USB 連線的 iPhone</string>
     <string name="waiting_for_mfi_coprocessor">正在等待 MFi 協同處理器</string>
@@ -711,4 +714,8 @@
     <string name="settings_external_wifi_found_device">發現裝置：%1$s</string>
     <string name="settings_external_wifi_not_available">請先連線到 Wi-Fi 網路</string>
     <string name="settings_external_wifi_device_label">%1$s（%2$s:%3$d）</string>
+    <string name="bt_suspend_delay">藍牙暫停延時</string>
+    <string name="bt_suspend_delay_option">連線 %1$d 秒後</string>
+    <string name="bt_suspend_during_carplay">CarPlay 期間暫停車機藍牙 · 需要 ADB</string>
+    <string name="bt_suspend_during_carplay_description">手機與車機保持免提連線時，來電會同時彈出車機藍牙電話和 CarPlay 電話。開啟後：CarPlay 連線期間透過 ADB 暫停車機藍牙，來電只在 CarPlay 回應；藍牙關閉期間，CarPlay 通話改走中控喇叭和車機麥克風，不再走電話免提。CarPlay 結束或下次無線連線握手前會自動恢復藍牙。配對不受影響。變更在下次連線時生效。</string>
 </resources>

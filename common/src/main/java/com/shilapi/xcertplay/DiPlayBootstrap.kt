@@ -82,4 +82,9 @@ internal object DiPlayPreferences {
     fun saveAutoConnect(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean("auto_connect", value).apply()
     }
+    // main #439：已选 iPhone 蓝牙重连时自动唤醒 DiPlay（默认关闭）。
+    fun connectOnPhoneBluetooth(context: Context) = prefs(context).getBoolean("connect_on_phone_bluetooth", false)
+    fun saveConnectOnPhoneBluetooth(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean("connect_on_phone_bluetooth", value).apply()
+    }
 }

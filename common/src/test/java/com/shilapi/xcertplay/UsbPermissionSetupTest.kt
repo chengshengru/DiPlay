@@ -139,8 +139,9 @@ class UsbPermissionSetupTest {
         assertEquals("other.package/.Service:$target", runShell(script).trim())
     }
 
-    @Test fun progressCancelUnblocksWorkerAndSuppressesLateDialogs() = cancelledUiAttempt {
-        it.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+    // 分支既有修复：Robolectric 4.9 下双参重载导致隐式 it 歧义，显式命名参数。
+    @Test fun progressCancelUnblocksWorkerAndSuppressesLateDialogs() = cancelledUiAttempt { dialog ->
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
     }
 
     @Test fun activityStopCancelsWorkerAndSuppressesLateDialogs() = cancelledUiAttempt { _, activity ->

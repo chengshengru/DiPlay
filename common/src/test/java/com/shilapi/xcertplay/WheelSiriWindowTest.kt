@@ -199,7 +199,8 @@ class WheelSiriWindowTest {
         settings.setTheme(android.R.style.Theme_Material_NoActionBar)
         WheelZoomSettings.setSiriKey(settings, false)
         AirPlayPersistence.saveClusterMapEnabled(settings, true)
-        val displayId = ShadowDisplayManager.addDisplay("w1920dp-h720dp-mdpi", 5)
+        // 分支既有修复：Robolectric 4.9 的 addDisplay 只有单参重载。
+        val displayId = ShadowDisplayManager.addDisplay("w1920dp-h720dp-mdpi")
         shadowOf(settings.getSystemService(DisplayManager::class.java).getDisplay(displayId)).apply {
             setName(DiLink4ClusterDisplay.NAME)
             setFlags(Display.FLAG_PRESENTATION)

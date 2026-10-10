@@ -106,7 +106,8 @@ class ClusterMapPresentationTest {
 
     private fun display(name: String, spec: String = "w960dp-h360dp"): Int {
         // Display.TYPE_VIRTUAL (5) is hidden from the public Android SDK.
-        val id = ShadowDisplayManager.addDisplay(spec, 5)
+        // 分支既有修复：Robolectric 4.9 的 addDisplay 只有单参重载。
+        val id = ShadowDisplayManager.addDisplay(spec)
         shadowOf(manager.getDisplay(id)).apply {
             setName(name)
             setFlags(Display.FLAG_PRESENTATION)

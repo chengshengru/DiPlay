@@ -26,7 +26,7 @@
     <string name="marker_up">Up</string>
     <string name="marker_down">Down</string>
     <string name="marker_centre_default">Centre · default</string>
-    <string name="hotspot_mode_manual_desc">Use the car’s own hotspot. Select 5 GHz in car settings if available.</string>
+    <string name="hotspot_mode_manual_desc">Use the car’s hotspot for wireless CarPlay. You do not need to join it manually on your iPhone; DiPlay sends the hotspot details over Bluetooth. Select 5 GHz in car settings if available.</string>
     <string name="hotspot_mode_p2p_desc">Alternative setup. Requires the car’s Wi-Fi switch on; a 2.4 GHz connection may stutter.</string>
     <string name="hotspot_details_off">Hotspot is off · Turn it on in car settings.</string>
     <string name="hotspot_details_saved">Details saved · Check that the car hotspot is on before connecting.</string>
@@ -166,6 +166,8 @@
     <string name="connect">Connect</string>
     <string name="connect_phone">Connect phone</string>
     <string name="connect_when_diplay_opens">Connect when DiPlay opens</string>
+    <string name="connect_when_iphone_bluetooth_connects">Connect when the selected iPhone reconnects</string>
+    <string name="connect_when_iphone_bluetooth_connects_description">After the car wakes, open DiPlay and start wireless CarPlay when the selected iPhone connects over Bluetooth. Some head units restrict background launches.</string>
     <string name="connect_with_usb">Connect with USB</string>
     <string name="connect_your_iphone_with_a_usb_cable">Connect your iPhone with a USB cable</string>
     <string name="connecting_bluetooth">Connecting Bluetooth</string>
@@ -423,6 +425,7 @@
     <string name="use_software_hevc_decoder">Use software HEVC decoder</string>
     <string name="use_usage_content_type_routing_instead_of_stream_type">Use usage / content-type routing instead of stream type</string>
     <string name="use_your_last_connection_type_and_selected_iphone">Use your last connection type and selected iPhone.</string>
+    <string name="vpn_authorization_unavailable">This head unit cannot open VPN authorization. Return to DiPlay to check connection permissions or use wireless.</string>
     <string name="vpn_consent_was_denied">VPN consent was denied</string>
     <string name="waiting_for_iphone_over_usb">Waiting for iPhone over USB</string>
     <string name="waiting_for_mfi_coprocessor">Waiting for MFi coprocessor</string>
@@ -748,4 +751,8 @@
     <string name="settings_external_wifi_found_device">Found device: %1$s</string>
     <string name="settings_external_wifi_not_available">Connect to a Wi-Fi network first</string>
     <string name="settings_external_wifi_device_label">%1$s (%2$s:%3$d)</string>
+    <string name="bt_suspend_delay">Bluetooth pause delay</string>
+    <string name="bt_suspend_delay_option">%1$d s after connecting</string>
+    <string name="bt_suspend_during_carplay">Pause car Bluetooth during CarPlay · needs ADB</string>
+    <string name="bt_suspend_during_carplay_description">The phone keeps its hands-free link to the car, so a call rings on both the car Bluetooth phone and CarPlay. While CarPlay runs, pause the car Bluetooth over ADB so calls ring on CarPlay only; with Bluetooth off, CarPlay calls play on the cabin speaker and microphone instead of the phone SCO. Bluetooth turns back on when CarPlay ends and before the next wireless handshake. Pairing is never touched. Changes apply on the next connection.</string>
 </resources>

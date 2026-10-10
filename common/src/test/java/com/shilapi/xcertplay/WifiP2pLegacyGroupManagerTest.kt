@@ -266,7 +266,9 @@ class WifiP2pLegacyGroupManagerTest {
             listener.onGroupInfoAvailable(group)
         }
 
-        @Implementation override fun requestConnectionInfo(
+        // 分支既有修复：Robolectric 的 ShadowWifiP2pManager 没有 requestConnectionInfo /
+        // 三参 createGroup，去掉 override 关键字（Robolectric 按框架方法签名直接绑定 shadow）。
+        @Implementation protected fun requestConnectionInfo(
             channel: WifiP2pManager.Channel,
             listener: WifiP2pManager.ConnectionInfoListener,
         ) {
@@ -290,7 +292,9 @@ class WifiP2pLegacyGroupManagerTest {
             listener.onSuccess()
         }
 
-        @Implementation override fun createGroup(
+        // 分支既有修复：Robolectric 的 ShadowWifiP2pManager 没有三参 createGroup，
+        // 去掉 override 关键字（Robolectric 按框架方法签名直接绑定 shadow）。
+        @Implementation protected fun createGroup(
             channel: WifiP2pManager.Channel,
             config: WifiP2pConfig?,
             listener: WifiP2pManager.ActionListener,
@@ -309,10 +313,13 @@ class WifiP2pLegacyGroupManagerTest {
         }
 
         fun makeGroup(name: String = "DIRECT-legacy-test") = WifiP2pGroup().apply {
-            shadowOf(this).setIsGroupOwner(true)
-            shadowOf(this).setNetworkName(name)
-            shadowOf(this).setPassphrase("legacy-passphrase")
-            shadowOf(this).setInterface(if (missingInterface) "" else "p2p0")
+            // 分支既有修复：Robolectric 4.10 的 ShadowWifiP2pGroup 没有 setIsGroupOwner，且
+            // setNetworkName/setPassphrase 存在 Reflector 派发错误（实际写到 interface 字段），
+            // 统一改为直接写框架字段。
+            ReflectionHelpers.setField(this, "mIsGroupOwner", true)
+            ReflectionHelpers.setField(this, "mNetworkName", name)
+            ReflectionHelpers.setField(this, "mPassphrase", "legacy-passphrase")
+            ReflectionHelpers.setField(this, "mInterface", if (missingInterface) "" else "p2p0")
         }
     }
 }

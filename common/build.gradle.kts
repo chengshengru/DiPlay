@@ -63,7 +63,8 @@ dependencies {
     implementation(libs.androidx.media3.ui)
 
     testImplementation(libs.junit)
-    testImplementation("org.robolectric:robolectric:4.9")
+    // Robolectric 4.10 支持 SDK 16-33，可对 API 17（Android 4.2.2）做 JVM 单元测试
+    testImplementation("org.robolectric:robolectric:4.10")
     testImplementation("org.mockito:mockito-core:5.2.0")
     // 测试用同一 vendored JmDNS（避免与 shared 运行时里的实现重复类）
     testImplementation(project(":legacy-mdns"))

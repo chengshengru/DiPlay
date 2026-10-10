@@ -13,8 +13,11 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <!-- API 17 迁移：移除 BLUETOOTH_CONNECT（API 31+）；基础蓝牙权限安装时授予 -->
-    <!-- <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" /> -->
+    <!-- main #465：Android 17（API 37）本地网络权限；低版本系统忽略未知权限，对 API 17 无害 -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <!-- main #439：蓝牙唤醒 iPhone 重连在 API 31+ 需要 BLUETOOTH_CONNECT 运行时权限；
+         低版本系统忽略未知权限，对 API 17 无害。 -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission
         android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />

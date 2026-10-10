@@ -64,7 +64,8 @@ dependencies {
     // 替换 org.jmdns:jmdns 二进制，避免类重复
     implementation project(':legacy-mdns')
     testImplementation libs.junit
-    testImplementation 'org.robolectric:robolectric:4.9'
+    // Robolectric 4.10 支持 SDK 16-33，可对 API 17（Android 4.2.2）做 JVM 单元测试
+    testImplementation 'org.robolectric:robolectric:4.10'
     // LegacyMdnsPortReuseTest 用 ASM 复现 Android 4.2 多播构造顺序
     testImplementation 'org.ow2.asm:asm:9.9'
 }

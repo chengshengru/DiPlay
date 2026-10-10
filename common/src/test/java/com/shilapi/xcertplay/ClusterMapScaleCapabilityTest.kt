@@ -38,7 +38,8 @@ class ClusterMapScaleCapabilityTest {
         activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
         activity.javaClass.getDeclaredField("hevcEnabled").apply { isAccessible = true }.set(activity, false)
         ShadowMediaCodecList.reset()
-        displayId = ShadowDisplayManager.addDisplay("w1920dp-h720dp-mdpi", 5)
+        // 分支既有修复：Robolectric 4.9 的 addDisplay 只有单参重载。
+        displayId = ShadowDisplayManager.addDisplay("w1920dp-h720dp-mdpi")
         val display = app.getSystemService(DisplayManager::class.java).getDisplay(displayId)
         shadowOf(display).apply { setName(DiLink51ClusterLayout.BASE); setFlags(Display.FLAG_PRESENTATION) }
         AirPlayPersistence.saveClusterMapEnabled(activity, true)
@@ -118,7 +119,7 @@ class ClusterMapScaleCapabilityTest {
 
     private fun projectionDisplay(width: Int, height: Int) {
         ShadowDisplayManager.removeDisplay(displayId)
-        displayId = ShadowDisplayManager.addDisplay("w${width}dp-h${height}dp-mdpi", 5)
+        displayId = ShadowDisplayManager.addDisplay("w${width}dp-h${height}dp-mdpi")
         val display = activity.getSystemService(DisplayManager::class.java).getDisplay(displayId)
         shadowOf(display).apply { setName(DiLink4ClusterDisplay.NAME); setFlags(Display.FLAG_PRESENTATION) }
     }
