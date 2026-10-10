@@ -3,7 +3,11 @@ package com.shilapi.xcertplay.network
 import android.net.wifi.p2p.WifiP2pManager
 import java.io.IOException
 
-internal enum class P2pCreationMode { ALIGNED_5_GHZ, ALIGNED_2_GHZ, FIXED_5_GHZ, FIXED_2_GHZ, SYSTEM_DEFAULT, PREFERRED_CHANNEL }
+internal enum class P2pCreationMode {
+    ALIGNED_5_GHZ, ALIGNED_2_GHZ, FIXED_5_GHZ, FIXED_2_GHZ, SYSTEM_DEFAULT, PREFERRED_CHANNEL,
+    /** 仅指定频段的请求（API 29+）：由车机在该频段内自选信道（main #432）。 */
+    BAND_5_GHZ, BAND_2_GHZ,
+}
 
 internal data class P2pCreationRequest(val mode: P2pCreationMode, val frequencyMHz: Int? = null)
 
@@ -25,9 +29,14 @@ internal object P2pStartupRecovery {
 
     /** A band-only request still needs channel selection, which some BYD drivers cannot do. */
     fun plan(stationFrequency: Int?, preferred: P2pCreationRequest? = null,
-             preferredChannel: Int = WifiP2pChannels.AUTO): List<P2pCreationRequest> = buildList {
+             preferredChannel: Int = WifiP2pChannels.AUTO,
+             bandRequests: Boolean = true): List<P2pCreationRequest> = buildList {
         WifiP2pChannels.frequencyMhz(preferredChannel)?.let {
             add(P2pCreationRequest(P2pCreationMode.PREFERRED_CHANNEL, it))
+            return@buildList
+        }
+        WifiP2pChannels.band(preferredChannel)?.let {
+            addAll(bandPlan(stationFrequency, it, bandRequests))
             return@buildList
         }
         val aligned24 = stationFrequency != null && stationFrequency in 2412..2462 &&
@@ -63,14 +72,33 @@ internal object P2pStartupRecovery {
         if (none { it.mode == P2pCreationMode.SYSTEM_DEFAULT }) add(P2pCreationRequest(P2pCreationMode.SYSTEM_DEFAULT))
     }
 
+    /**
+     * Auto 限定在一个频段内：绝不离开该频段、绝不使用记住的 Auto 结果，
+     * 也绝不以可能换到另一频段的未固定默认配置收尾。先让车机自选（频段请求）；
+     * 拒绝该请求的车机随后按显式非 DFS 信道尝试（main #432）。
+     */
+    private fun bandPlan(stationFrequency: Int?, band: WifiP2pBand, bandRequests: Boolean): List<P2pCreationRequest> {
+        val five = band == WifiP2pBand.FIVE_GHZ
+        val aligned = stationFrequency?.let(::rememberedFrequency)?.takeIf { band.contains(it.frequencyMHz) }
+        val fixedMode = if (five) P2pCreationMode.FIXED_5_GHZ else P2pCreationMode.FIXED_2_GHZ
+        val fixed = if (five) listOf(5180, 5745, 5220, 5785) else listOf(2437, 2412, 2462)
+        return buildList {
+            // 与车机自身 Wi-Fi 网络同信道：共享射频不必跳频。
+            aligned?.let { add(P2pCreationRequest(if (five) P2pCreationMode.ALIGNED_5_GHZ else P2pCreationMode.ALIGNED_2_GHZ, it.frequencyMHz)) }
+            if (bandRequests) add(P2pCreationRequest(if (five) P2pCreationMode.BAND_5_GHZ else P2pCreationMode.BAND_2_GHZ))
+            fixed.filter { it != aligned?.frequencyMHz }.forEach { add(P2pCreationRequest(fixedMode, it)) }
+        }
+    }
+
     fun create(
         stationFrequency: Int?,
         beforeRetry: () -> Unit,
         preferred: P2pCreationRequest? = null,
         preferredChannel: Int = WifiP2pChannels.AUTO,
+        bandRequests: Boolean = true,
         request: (P2pCreationRequest) -> Unit,
     ): P2pCreationRequest {
-        val modes = plan(stationFrequency, preferred, preferredChannel)
+        val modes = plan(stationFrequency, preferred, preferredChannel, bandRequests)
         var lastRejection: P2pCreateRejected? = null
         for ((index, mode) in modes.withIndex()) {
             var retriedBusy = false

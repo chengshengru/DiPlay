@@ -217,6 +217,8 @@ class AndroidMediaSink(
     // Each downlink publishes its own reference; a mic must match that stream and sample rate.
     private val callEchoReferences = ConcurrentHashMap<AudioStreamId, EchoReference>()
     private val appContext = context?.applicationContext
+    // main #345：氛围灯音乐跟随的 sink 令牌（作者：TRAE AI）
+    private val ambientSinkToken = AmbientMusicController.openSink(appContext)
     private val audioManager = appContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val audioFocusCoordinator = AudioFocusCoordinator(
         appContext,
@@ -590,6 +592,8 @@ class AndroidMediaSink(
     }
 
     fun close() {
+        // main #345：释放氛围灯 sink（作者：TRAE AI）
+        AmbientMusicController.closeSink(ambientSinkToken)
         synchronized(videoOwnershipLock) {
             videoClosed = true
             videoDecoders.entries.toList().forEach { (type, decoder) -> retire(type, decoder) }
@@ -674,6 +678,8 @@ class AndroidMediaSink(
             navigationStreamType,
             mediaBufferMillis,
             onAudioDiagnostic,
+            // main #345：氛围灯 sink 令牌（作者：TRAE AI）
+            ambientSinkToken = ambientSinkToken,
             // main #307：蓝牙被我们暂停时通话走外放。
             speakerphoneCall = format.audioType == "telephony" &&
                 appContext != null && BydBluetoothSuspend.isSuspendedByUs(appContext),
@@ -1606,6 +1612,8 @@ private class AudioRenderer(
     private val navigationStreamType: Int,
     private val mediaBufferMillis: Int,
     private val report: (String) -> Unit,
+    // main #345：氛围灯 sink 令牌；仅 MEDIA 声道渲染器使用（作者：TRAE AI）
+    private val ambientSinkToken: Long,
     // main #307：蓝牙被我们暂停时通话走外放（无 SCO 链路）。
     private val speakerphoneCall: Boolean = false,
     /** Receives the played call audio so the call microphone can cancel its echo. */
@@ -1619,6 +1627,9 @@ private class AudioRenderer(
 
     private var trackAttributes: AudioAttributes? = null
     private var mappedChannel: AudioChannel? = null
+    // main #344：导航播报流追踪令牌与实际 legacy 流类型（作者：TRAE AI）
+    private val navigationPlaybackToken = NavigationPlayback.open()
+    private var actualLegacyStreamType: Int? = null
     private val queue = LinkedBlockingQueue<AudioPacket>(MAX_QUEUED_PACKETS)
     @Volatile private var running = true
     @Volatile private var started = false
@@ -1645,6 +1656,10 @@ private class AudioRenderer(
     private val maxArrivalGapMs = AtomicLong()
     private val frameBytes = if (format.channels >= 2) 4 else 2
     private var totalWrittenFrames = 0L
+    // main #345：氛围灯 PCM 包络与低音分析器（作者：TRAE AI）
+    private val ambientEnvelope = AmbientMusicEnvelope()
+    private val ambientBass = AmbientMusicBassAnalyzer(format.sampleRate, format.channels)
+    private var ambientRendererToken = 0L
     private var writtenFramesThisWindow = 0L
     private var writeErrorsThisWindow = 0
     private var lastWriteErrorCode: Int? = null
@@ -1688,6 +1703,10 @@ private class AudioRenderer(
     }
 
     override fun close() {
+        // main #345：释放氛围灯渲染器（作者：TRAE AI）
+        AmbientMusicController.closeRenderer(ambientRendererToken)
+        // main #344：注销导航播报追踪（作者：TRAE AI）
+        NavigationPlayback.close(navigationPlaybackToken)
         running = false
         thread.interrupt()
     }
@@ -1795,6 +1814,8 @@ private class AudioRenderer(
         val selection = mappedSelection()
         mappedChannel = selection.channel
         val streamOverride = channelOverride(selection.channel)
+        // main #344：记录实际 legacy 流类型供方向盘音量路由使用（作者：TRAE AI）
+        actualLegacyStreamType = streamOverride.takeIf { it != 0 }
         var attributes = audioAttributesFor(selection, streamOverride)
         trackAttributes = attributes
         val plan = MediaAudioBuffer.plan(selection.channel == AudioChannel.MEDIA,
@@ -1825,6 +1846,8 @@ private class AudioRenderer(
                 createFallback = {
                     diagnosticStage = "track-fallback-build"
                     routeLabel = "streamType=$streamType(fallback=usage)"
+                    // main #344：回退到 usage 路由后无法确定 legacy 流类型（作者：TRAE AI）
+                    actualLegacyStreamType = null
                     Log.w(TAG, "streamType=$streamType rejected by this ROM; falling back to usage-based track")
                     attributes = audioAttributesFor(selection)
                     AudioTrack.Builder()
@@ -1837,6 +1860,12 @@ private class AudioRenderer(
             )
         }
         track = built
+        // main #345：MEDIA 声道渲染器注册氛围灯包络回调（作者：TRAE AI）
+        if (mappedChannel == AudioChannel.MEDIA) {
+            ambientRendererToken = AmbientMusicController.openRenderer(ambientSinkToken, ambientEnvelope) {
+                built.playbackHeadPosition to (running && built.playState == AudioTrack.PLAYSTATE_PLAYING)
+            }
+        }
         diagnosticStage = "track-attributes"
         trackAttributes = audioTrackAttributesForFocus(built, attributes)
         diagnosticStage = "track-capacity"
@@ -2177,12 +2206,20 @@ private class AudioRenderer(
                 break
             }
             if (count < writeLength) partialWritesThisWindow++
-            written += count
             val framesWritten = count / frameBytes
+            // main #345：氛围灯需要 PCM 时采集包络（作者：TRAE AI）
+            if (mappedChannel == AudioChannel.MEDIA && AmbientMusicController.wantsPcm(ambientRendererToken)) {
+                ambientEnvelope.append(totalWrittenFrames, framesWritten.toLong(),
+                    AmbientMusicEnvelope.pcmRms(data, offset + written, count),
+                    ambientBass.rms(data, offset + written, count))
+            }
+            written += count
             totalWrittenFrames += framesWritten
             writtenFramesThisWindow += framesWritten
             bufferProgress.written(count)
             lastPcmWriteNs = System.nanoTime()
+            // main #344：播放中上报导航播报状态（作者：TRAE AI）
+            if (playbackStarted) reportNavigationPlayback(track)
             if (!playbackStarted) {
                 prebufferBytes += count
                 if (prebufferBytes >= startThresholdBytes) {
@@ -2206,6 +2243,20 @@ private class AudioRenderer(
         underrunsAtPlaybackStart = track.underrunCount
         track.play()
         playbackStarted = true
+        // main #344：起播时立即上报导航播报状态（作者：TRAE AI）
+        reportNavigationPlayback(track)
+    }
+
+    /** main #344：向导航播报追踪器上报缓冲时长，供方向盘音量路由判定；异常绝不影响音频。 */
+    private fun reportNavigationPlayback(track: AudioTrack) {
+        if (!running) return
+        val priorityVoice = mappedChannel == AudioChannel.PHONE || mappedChannel == AudioChannel.ASSISTANT
+        if (mappedChannel != AudioChannel.NAVIGATION && !priorityVoice) return
+        runCatching {
+            val pendingFrames = bufferProgress.queuedBytes(track.playbackHeadPosition) / frameBytes
+            val bufferedMillis = (pendingFrames * 1000L + format.sampleRate - 1L) / format.sampleRate
+            NavigationPlayback.played(navigationPlaybackToken, actualLegacyStreamType, bufferedMillis, priorityVoice)
+        }
     }
 
     private fun maintainPlaybackBuffer() {
@@ -2313,6 +2364,10 @@ private class AudioRenderer(
 
     @Synchronized
     private fun release() {
+        // main #344：注销导航播报追踪（作者：TRAE AI）
+        NavigationPlayback.close(navigationPlaybackToken)
+        // main #345：释放氛围灯渲染器（作者：TRAE AI）
+        AmbientMusicController.closeRenderer(ambientRendererToken)
         abandonAudioFocus()
         val codec = codec
         this.codec = null

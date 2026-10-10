@@ -20,6 +20,8 @@ import com.shilapi.xcertplay.airplay.AirPlayKnobState
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.glance.CarPlayGlance
 import com.shilapi.xcertplay.host.R
+// main #344：导航播报方向盘音量路由（作者：TRAE AI）
+import com.shilapi.xcertplay.media.NavigationPlayback
 import com.shilapi.xcertplay.hud.BydNavigationOutputs
 import com.shilapi.xcertplay.hud.BydOutputSettings
 
@@ -40,6 +42,8 @@ import com.shilapi.xcertplay.hud.BydOutputSettings
  */
 class WheelKeyService : AccessibilityService() {
     private val keys = WheelZoomKeys()
+    // main #344：导航播报音量按键策略（作者：TRAE AI）
+    private val navigationKeys = NavigationWheelKeyPolicy()
     private val joystick = WheelJoystick()
     private val siriKey = WheelSiriKey()
     private val handler = Handler(Looper.getMainLooper())
@@ -53,6 +57,8 @@ class WheelKeyService : AccessibilityService() {
         if (keys.timeOut() && eligibleRoute() != null) announce(zoomOn = false)
     }
     // This read is nonblocking: no ADB, input-device query or network lock in the periodic poll.
+    // main #344：导航播报快照读取（作者：TRAE AI）
+    internal var navigationPlayback: () -> com.shilapi.xcertplay.media.NavigationPlaybackSnapshot = { NavigationPlayback.snapshot() }
     internal var mapRoute: () -> Any? = { CarPlayBackgroundSession.snapshot()?.controller?.dashboardMapRoute() }
     internal var session: () -> Any? = { CarPlayBackgroundSession.snapshot()?.controller?.activeAirPlaySessionToken() }
     internal var knob: (AirPlayKnobState) -> Boolean = { CarPlayBackgroundSession.snapshot()?.controller?.sendKnob(it) == true }
@@ -85,6 +91,8 @@ class WheelKeyService : AccessibilityService() {
 
     override fun onServiceConnected() {
         running = this
+        // main #344：服务连接即记录无障碍授权，供 ADB 恢复使用（作者：TRAE AI）
+        NavigationWheelSettings.recordAuthorization(this)
         CarPlayCallKeys.install(this)
         refreshEligibility()
         handler.removeCallbacks(pollEligibility)
@@ -129,6 +137,8 @@ class WheelKeyService : AccessibilityService() {
             rearmTimedMode()
             return true
         }
+        // main #344：已消费的导航音量按下必须配对处理抬起（作者：TRAE AI）
+        if (navigationKeys.owns(event.keyCode, event.deviceId, event.downTime)) return navigationKey(event)
         if (CarPlayCallKeys.onKey(this, event.keyCode, down)) return true
         if (BydOutputSettings.carPlayCallControls(this) &&
             CarPlayMediaButton.opensSiriWhileCarPlay(event.keyCode) && session() != null) {
@@ -173,7 +183,8 @@ class WheelKeyService : AccessibilityService() {
             },
         )
         when (action) {
-            WheelZoomKeys.Action.PASS -> return false
+            // main #344：放大键放行时先尝试导航音量路由（作者：TRAE AI）
+            WheelZoomKeys.Action.PASS -> return navigationKey(event)
             WheelZoomKeys.Action.CONSUME -> Unit
             WheelZoomKeys.Action.MODE_ON -> announce(zoomOn = true)
             WheelZoomKeys.Action.MODE_OFF -> announce(zoomOn = false)
@@ -185,6 +196,41 @@ class WheelKeyService : AccessibilityService() {
     }
 
     private fun eligibleRoute(): Any? = if (WheelZoomSettings.enabled(this)) mapRoute() else null
+
+    // main #344：导航播报音量按键处理（作者：TRAE AI）
+    private fun navigationKey(event: KeyEvent): Boolean = navigationKeys.onKey(
+        event.action, event.keyCode, event.deviceId, event.downTime, event.repeatCount,
+        eligible = navigationStream() != null,
+    ) { delta -> adjustNavigation(delta) }
+
+    // main #344：判定当前是否可安全调节导航音量流；返回 null 表示不可。
+    private fun navigationStream(): Int? {
+        if (!NavigationWheelSettings.enabled(this) || running !== this || inCall(this) || session() == null) return null
+        val playback = navigationPlayback()
+        if (!playback.active || playback.priorityVoiceActive) return null
+        // usage 路由或被拒绝的 legacy 路由无法确定安全音量流。
+        return playback.legacyStreamType?.takeIf { it in 1..20 && it != AudioManager.STREAM_MUSIC }
+    }
+
+    // main #344：按 delta 调整导航音量流；失败时保留按键给车机。
+    private fun adjustNavigation(delta: Int): Boolean {
+        val stream = navigationStream() ?: return false
+        val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+        return try {
+            val minimum = navigationWheelMinimum(stream, android.os.Build.VERSION.SDK_INT) {
+                if (android.os.Build.VERSION.SDK_INT >= 28) audio.getStreamMinVolume(it) else 0
+            }
+            val current = audio.getStreamVolume(stream)
+            val maximum = audio.getStreamMaxVolume(stream)
+            val target = navigationWheelTarget(current, minimum, maximum, delta) ?: return false
+            if (navigationStream() != stream) return false
+            audio.setStreamVolume(stream, target, AudioManager.FLAG_SHOW_UI)
+            audio.getStreamVolume(stream) == target
+        } catch (error: Exception) {
+            Log.w(TAG, "navigation volume unavailable for stream $stream", error)
+            false
+        }
+    }
 
     private fun refreshEligibility() {
         val joystickAllowed = WheelZoomSettings.joystick(this)
@@ -350,6 +396,8 @@ class WheelKeyService : AccessibilityService() {
             val allowed = applyServiceSettings(context, adb::shell) {
                 mayAsk || wanted(context)
             }
+            // main #344：ADB 授权成功后记录，供导航音量恢复（作者：TRAE AI）
+            if (allowed && mayAsk) NavigationWheelSettings.recordAuthorization(context)
             if (allowed) Log.i(TAG, "wheel key service allowed over adb")
             if (allowed) access else LocalAdb.Access.UNREACHABLE
         }
@@ -396,7 +444,7 @@ class WheelKeyService : AccessibilityService() {
          * only through it, and without it BYD's window manager opens its own phone app instead.
          */
         internal fun wanted(context: Context): Boolean = WheelZoomSettings.anyEnabled(context) ||
-            BydOutputSettings.carPlayCallControls(context)
+            BydOutputSettings.carPlayCallControls(context) || NavigationWheelSettings.restoreAllowed(context)
 
         /**
          * Android takes the service off the allowed list when the app is force-stopped (BYD's system does
