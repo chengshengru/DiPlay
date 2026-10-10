@@ -70,6 +70,10 @@ internal object UiCompat {
         if (Build.VERSION.SDK_INT >= 19) view.accessibilityLiveRegion = mode
     }
 
+    /** View.isAttachedToWindow is API 19+. Below that a non-null window token means attached. */
+    fun isAttachedToWindow(view: View): Boolean =
+        if (Build.VERSION.SDK_INT >= 19) view.isAttachedToWindow else view.windowToken != null
+
     /** Window.setStatusBarColor/setNavigationBarColor are API 21+. */
     fun setSystemBarColors(window: Window, color: Int) {
         if (Build.VERSION.SDK_INT >= 21) {
@@ -105,6 +109,19 @@ internal object UiCompat {
             seekBar.progressTintList = ColorStateList.valueOf(accent)
             seekBar.thumbTintList = ColorStateList.valueOf(accent)
         }
+    }
+
+    /** SeekBar.secondaryProgressTintList/progressBackgroundTintList are API 21+. */
+    fun setSeekBarSecondaryTints(seekBar: SeekBar, secondary: ColorStateList, background: ColorStateList) {
+        if (Build.VERSION.SDK_INT >= 21) {
+            seekBar.secondaryProgressTintList = secondary
+            seekBar.progressBackgroundTintList = background
+        }
+    }
+
+    /** TextView.setFontFeatureSettings is API 21+. */
+    fun setFontFeatureSettings(text: TextView, settings: String) {
+        if (Build.VERSION.SDK_INT >= 21) text.fontFeatureSettings = settings
     }
 
     /** Drawable.setTint is API 21+. Below that tint through a colour filter, which is API 1. */

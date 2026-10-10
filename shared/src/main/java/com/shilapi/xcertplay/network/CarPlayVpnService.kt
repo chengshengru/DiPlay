@@ -92,15 +92,21 @@ class CarPlayVpnService : VpnService() {
             }
             require(hostMac.size == 6) { "hostMac must be 6 bytes" }
 
-            val tunFd = Builder()
+            var builder = Builder()
                 .addAddress(linkLocal, LINK_PREFIX)
                 .addRoute(LINK_LOCAL_ROUTE, LINK_PREFIX)
                 .setSession(SESSION_NAME)
                 .setMtu(TUN_MTU)
-                .setBlocking(true)
-                // An empty app list routes every UID through this VPN. Scope it before establish;
-                // rejection must reach the existing attachment cleanup, never an unscoped retry.
-                .addAllowedApplication(packageName)
+            // setBlocking 与 addAllowedApplication 均为 API 21+；API 17/18/19/20 设备直接调用会抛
+            // NoSuchMethodError（attach 的 catch Exception 无法捕获 Error），必须做版本分支。
+            if (android.os.Build.VERSION.SDK_INT >= 21) {
+                builder = builder
+                    .setBlocking(true)
+                    // An empty app list routes every UID through this VPN. Scope it before establish;
+                    // rejection must reach the existing attachment cleanup, never an unscoped retry.
+                    .addAllowedApplication(packageName)
+            }
+            val tunFd = builder
                 .establish()
                 ?: throw IOException("VpnService.establish returned null")
             tun = tunFd

@@ -2419,14 +2419,21 @@ class CarPlayHostActivity : ComponentActivity() {
             val switch = Switch(this@CarPlayHostActivity).apply {
                 isChecked = locationReportingEnabled
                 contentDescription = getString(R.string.report_android_location_to_the_iphone)
-                showText = false
-                thumbTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT, MENU_SECONDARY),
+                // showText/thumbTintList/trackTintList 均为 API 21+，走 UiCompat 兼容 API 17
+                UiCompat.setShowText(this, false)
+                UiCompat.setThumbTint(
+                    this,
+                    ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(MENU_ACCENT, MENU_SECONDARY),
+                    ),
                 )
-                trackTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
+                UiCompat.setTrackTint(
+                    this,
+                    ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
+                    ),
                 )
                 setOnCheckedChangeListener { _, checked ->
                     onLocationReportingChanged(checked)
@@ -2523,9 +2530,8 @@ class CarPlayHostActivity : ComponentActivity() {
         val seekBar = SeekBar(this).apply {
             max = (values.size - 1).coerceAtLeast(0)
             progress = selectedIndex
-            splitTrack = false
-            progressTintList = ColorStateList.valueOf(MENU_ACCENT)
-            thumbTintList = ColorStateList.valueOf(MENU_ACCENT)
+            // splitTrack/progressTintList/thumbTintList 均为 API 21+，走 UiCompat 兼容 API 17
+            UiCompat.setSeekBarTints(this, MENU_ACCENT)
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -3013,9 +3019,13 @@ class CarPlayHostActivity : ComponentActivity() {
                 text = label
                 textSize = 18f
                 setTextColor(MENU_SECONDARY)
-                buttonTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT, MENU_SECONDARY),
+                // setButtonTintList 是 API 21+，API 17 设备直接调用会抛 NoSuchMethodError，走 UiCompat 兜底
+                UiCompat.setButtonTint(
+                    this,
+                    ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(MENU_ACCENT, MENU_SECONDARY),
+                    ),
                 )
                 tag = mode
                 isChecked = wirelessHotspotMode == mode
@@ -4635,7 +4645,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun observeVideoWindow(texture: TextureView) {
         val probe = object : ViewTreeObserver.OnPreDrawListener {
             override fun onPreDraw(): Boolean {
-                if (!texture.isAttachedToWindow) return true
+                // isAttachedToWindow 是 API 19+，API 17 设备直接调用会抛 NoSuchMethodError，走 UiCompat 兜底
+                if (!UiCompat.isAttachedToWindow(texture)) return true
                 removeVideoSurfaceProbe()
                 if (isDestroyed || videoView !== texture) return true
                 val mode = carPlayVideoSurfaceMode(texture.isHardwareAccelerated, smoothVideo)
