@@ -2335,19 +2335,25 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                             }
                         }
                         if (!diLink4 || AirPlayPersistence.loadClusterSafeAreaRect(this) == null) {
-                            val across = CarPlayClusterDisplay.horizontalSteps.toList()
-                            choice(card, getString(if (turnCard) R.string.turn_card_horizontal else R.string.car_marker_horizontal), across.map { markerStepLabel(it, getString(R.string.marker_left), getString(R.string.marker_right)) },
-                                across.indexOf(AirPlayPersistence.loadClusterMarkerHorizontalStep(this)).coerceAtLeast(0)) {
-                                AirPlayPersistence.saveClusterMarkerHorizontalStep(this, across[it])
-                            }
-                            val upDown = CarPlayClusterDisplay.verticalSteps.toList()
-                            choice(card, getString(if (turnCard) R.string.turn_card_vertical else R.string.car_marker_vertical), upDown.map { markerStepLabel(it, getString(R.string.marker_up), getString(R.string.marker_down)) },
-                                upDown.indexOf(AirPlayPersistence.loadClusterMarkerVerticalStep(this)).coerceAtLeast(0)) {
-                                AirPlayPersistence.saveClusterMarkerVerticalStep(this, upDown[it])
-                            }
+                            // main #494：marker 位置改为 1% 步进滑块；旧 10% 档位值自动迁移到以
+                            // 滑块中心（50/45）为基准的 1% 网格上（作者：TRAE AI）。
+                            card.addView(overlaySliderRow(
+                                getString(if (turnCard) R.string.turn_card_horizontal else R.string.car_marker_horizontal),
+                                CarPlayClusterDisplay.markerXPercents,
+                                AirPlayPersistence.loadClusterMarkerXPercent(this),
+                            ) { it -> overlayOffsetLabel(it, getString(R.string.marker_left), getString(R.string.marker_right), 50) }
+                                .also { it.onSave = { v -> AirPlayPersistence.saveClusterMarkerXPercent(this, v) } }
+                                .also { it.onCommit = { markReconnectNeeded() } })
+                            card.addView(overlaySliderRow(
+                                getString(if (turnCard) R.string.turn_card_vertical else R.string.car_marker_vertical),
+                                CarPlayClusterDisplay.markerYPercents,
+                                AirPlayPersistence.loadClusterMarkerYPercent(this),
+                            ) { it -> overlayOffsetLabel(it, getString(R.string.marker_up), getString(R.string.marker_down), 45) }
+                                .also { it.onSave = { v -> AirPlayPersistence.saveClusterMarkerYPercent(this, v) } }
+                                .also { it.onCommit = { markReconnectNeeded() } })
                             card.addView(button(getString(if (turnCard) R.string.reset_turn_card_to_centre else R.string.reset_car_marker_to_centre), false) {
-                                AirPlayPersistence.saveClusterMarkerHorizontalStep(this, 0)
-                                AirPlayPersistence.saveClusterMarkerVerticalStep(this, 0)
+                                AirPlayPersistence.saveClusterMarkerXPercent(this, 50)
+                                AirPlayPersistence.saveClusterMarkerYPercent(this, 45)
                                 render()
                                 markReconnectNeeded()
                             }, matchButton(10, 56))
@@ -3105,6 +3111,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         private val describe: (Int) -> String,
     ) : LinearLayout(context) {
         var onSave: (Int) -> Unit = {}
+        // main #494：手指离开滑块时触发一次，用于需要重连的保存（作者：TRAE AI）。
+        var onCommit: () -> Unit = {}
         val slider: SeekBar
 
         init {
@@ -3126,7 +3134,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                         if (fromUser) onSave(value)
                     }
                     override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-                    override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+                    override fun onStopTrackingTouch(seekBar: SeekBar?) { onCommit() }
                 })
             }
             addView(slider, LinearLayout.LayoutParams(-1, dp(44)))
@@ -4265,8 +4273,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private fun clusterSafeAreaControls(card: LinearLayout) {
         val rect = AirPlayPersistence.loadClusterSafeAreaRect(this)
             ?: DiLink4ClusterDisplay.defaultSafeAreaRect(
-                AirPlayPersistence.loadClusterMarkerHorizontalStep(this),
-                AirPlayPersistence.loadClusterMarkerVerticalStep(this))
+                markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+                markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this))
         card.addView(label(getString(R.string.safe_area_mapping_summary,
             rect.width, rect.height, rect.left, rect.top, 1920, 720), 14, MUTED))
         card.addView(actionButton(getString(R.string.cluster_safe_area_edit), false) {
@@ -4285,8 +4293,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val previewOwner = Any()
         val initial = AirPlayPersistence.loadClusterSafeAreaRect(this)
             ?: DiLink4ClusterDisplay.defaultSafeAreaRect(
-                AirPlayPersistence.loadClusterMarkerHorizontalStep(this),
-                AirPlayPersistence.loadClusterMarkerVerticalStep(this))
+                markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+                markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this))
         val editor = SafeAreaEditorView(this).apply {
             setBackgroundColor(Color.rgb(35, 39, 45))
             setRect(initial, 1920, 720)

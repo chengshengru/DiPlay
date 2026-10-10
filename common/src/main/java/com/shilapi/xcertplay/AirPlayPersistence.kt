@@ -87,6 +87,9 @@ object AirPlayPersistence {
     private const val KEY_CLUSTER_CONTENT = "cluster_content"
     private const val KEY_CLUSTER_MARKER_X = "cluster_marker_horizontal_step"
     private const val KEY_CLUSTER_MARKER_Y = "cluster_marker_vertical_step"
+    // main #494：1% 网格新键；旧键保留用于一次性迁移（作者：TRAE AI）。
+    private const val KEY_CLUSTER_MARKER_X_PERCENT = "cluster_marker_x_percent"
+    private const val KEY_CLUSTER_MARKER_Y_PERCENT = "cluster_marker_y_percent"
     private const val KEY_CLUSTER_TURN_CARD_OVERLAY_POSITION = "cluster_turn_card_overlay_position"
     private const val KEY_CLUSTER_TURN_CARD_OVERLAY_SIZE = "cluster_turn_card_overlay_size"
     private const val KEY_CLUSTER_TURN_CARD_OVERLAY_X = "cluster_turn_card_overlay_x_percent"
@@ -881,6 +884,44 @@ object AirPlayPersistence {
     fun saveClusterMarkerVerticalStep(context: Context, step: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_CLUSTER_MARKER_Y, step.coerceIn(CarPlayClusterDisplay.verticalSteps)).apply()
+    }
+
+    // main #494：全屏 marker 与小窗一样使用 1% 网格。旧 10% 档位值按滑块显示的中心（50/45）迁移，
+    // 未动过的 marker 读出即默认值（作者：TRAE AI）。
+    fun loadClusterMarkerXPercent(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.contains(KEY_CLUSTER_MARKER_X_PERCENT)) {
+            return ClusterTurnCardOverlay.snap(prefs.getInt(KEY_CLUSTER_MARKER_X_PERCENT, 50), CarPlayClusterDisplay.markerXPercents)
+        }
+        val step = prefs.getInt(KEY_CLUSTER_MARKER_X, 0)
+        return ClusterTurnCardOverlay.snap(
+            50 + step * CarPlayClusterDisplay.MARKER_STEP_PERCENT,
+            CarPlayClusterDisplay.markerXPercents,
+        )
+    }
+
+    fun saveClusterMarkerXPercent(context: Context, percent: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_CLUSTER_MARKER_X_PERCENT,
+                ClusterTurnCardOverlay.snap(percent, CarPlayClusterDisplay.markerXPercents)).apply()
+    }
+
+    fun loadClusterMarkerYPercent(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.contains(KEY_CLUSTER_MARKER_Y_PERCENT)) {
+            return ClusterTurnCardOverlay.snap(prefs.getInt(KEY_CLUSTER_MARKER_Y_PERCENT, 45), CarPlayClusterDisplay.markerYPercents)
+        }
+        val step = prefs.getInt(KEY_CLUSTER_MARKER_Y, 0)
+        return ClusterTurnCardOverlay.snap(
+            45 + step * CarPlayClusterDisplay.MARKER_STEP_PERCENT,
+            CarPlayClusterDisplay.markerYPercents,
+        )
+    }
+
+    fun saveClusterMarkerYPercent(context: Context, percent: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_CLUSTER_MARKER_Y_PERCENT,
+                ClusterTurnCardOverlay.snap(percent, CarPlayClusterDisplay.markerYPercents)).apply()
     }
 
     // Cluster mapping has its own key; never reuse the main display mapping at the same resolution.

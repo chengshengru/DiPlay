@@ -1144,9 +1144,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             adbClusterConfigured = true
             clusterStreamOnDisplay = true
             return DiLink4ClusterDisplay.streamConfig(AirPlayPersistence.loadClusterContent(this),
-                AirPlayPersistence.loadClusterMarkerHorizontalStep(this),
-                AirPlayPersistence.loadClusterMarkerVerticalStep(this),
-                AirPlayPersistence.loadClusterSafeAreaRect(this)).also {
+                safeAreaRect = AirPlayPersistence.loadClusterSafeAreaRect(this),
+                markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+                markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this)).also {
                 MapMirrors.streamAspect = it.widthPixels.toDouble() / it.heightPixels
                 appendLog("Cluster activity: requesting stream 111 at ${it.widthPixels}x${it.heightPixels}; safeArea=${it.safeArea} drawOutside=${it.safeAreaDrawOutside}; ADB task routing")
             }
@@ -1167,9 +1167,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 if (DiLink4ClusterDisplay.matches(display.name, size.x, size.y)) {
                     return DiLink4ClusterDisplay.streamConfig(
                         AirPlayPersistence.loadClusterContent(this),
-                        AirPlayPersistence.loadClusterMarkerHorizontalStep(this),
-                        AirPlayPersistence.loadClusterMarkerVerticalStep(this),
-                        AirPlayPersistence.loadClusterSafeAreaRect(this),
+                        safeAreaRect = AirPlayPersistence.loadClusterSafeAreaRect(this),
+                        markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+                        markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this),
                     ).also { MapMirrors.streamAspect = it.widthPixels.toDouble() / it.heightPixels }
                 }
                 val requestedScale = AirPlayPersistence.loadClusterMapScalePercent(this)
@@ -1177,9 +1177,11 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                     size.x,
                     size.y,
                     scale,
-                    AirPlayPersistence.loadClusterMarkerHorizontalStep(this),
-                    AirPlayPersistence.loadClusterMarkerVerticalStep(this),
+                    0,
+                    0,
                     AirPlayPersistence.loadClusterContent(this),
+                    markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+                    markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this),
                 )
                 val requested = streamAt(requestedScale)
                 // The smaller-map preset enlarges the encoded canvas beyond this panel. Probe
