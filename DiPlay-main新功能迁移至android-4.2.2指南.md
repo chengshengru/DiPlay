@@ -110,14 +110,14 @@ flowchart LR
 | 四 | 解码器一次多帧 | #456 `1df2cd2c` | ✅ 已完成 | 2026-10-11 | `videoDecoderAttempts` 有序尝试列表（低延迟带速率→低延迟→默认带速率→默认调优→最小→软件）；`PICTURE_ORDER_PARAMETER` 仅 API 31+ 且解码器声明时设置；framesAtOnce=主屏+无镜像标签+平滑视频 |
 | 四 | 低延迟解码 + 输出线程 + FPS 计数 | #496 `5dabc170`/`52004bfb` | ✅ 已完成 | 2026-10-11 | 高通厂商键（configure 抛 BAD_VALUE 由尝试列表回退）；`dedicatedOutputThread` 以 THREAD_PRIORITY_DISPLAY 即时释放帧，`outputLock`+`dequeuing` 协调编解码器交接；`FpsCounterOverlay` 已是 View 版直接复制；新增直接视频输出/低延迟解码/FPS 计数器三项设置 ×7 语言；`carPlayVideoSurfaceMode` 加 directVideoOutput；HostActivity 接线（FPS 启停/重建检查/日志）；CarPlayVideoSurfaceTest 同步 main 断言 |
 | 四 | 解码器工作速率提示 | #417 `19d11af7` | ✅ 已完成 | 2026-10-11 | `videoOperatingRate` 仅主屏取帧率设置；API 17 适配：`KEY_OPERATING_RATE` 加 `SDK_INT >= M` 守卫（main minSdk 25 无守卫）；被拒后 `dropOperatingRate` 记忆跳过 |
-| 五 | BYD 氛围灯音乐跟随 | #345 `60300d89`/`34cf4e19` | ⬜ | | |
-| 五 | 导航播报方向盘音量 | #344 `ba8cdca1` | ⬜ | | |
-| 五 | Platform-21 仪表路由 | #348 `52bbad46` | ⬜ | | API 17 隐藏入口 |
-| 五 | DiLink3 到达时间 AMap 形式 | #458 `0e54b3ea` | ⬜ | | |
-| 五 | ADB 开机自启修复 | #441 `eac7a3d9` | ⬜ | | |
-| 五 | 侧栏拖拽/把手/轮胎 | #480 `ef11e819`/`4dda8598` | ⬜ | | 跳过 resize 模糊 |
-| 五 | Wi-Fi Direct 频段选择 | #432 `00523988` | ⬜ | | 走 Api17 legacy 路径 |
-| 五 | CarPlay 音频走车机蓝牙（实验） | #432 `593ac236` | ⬜ | | 默认关 |
+| 五 | BYD 氛围灯音乐跟随 | #345 `60300d89`/`34cf4e19` | ✅ 已完成 | 2026-10-11 | 分支提交 `c0098328`；Ambient* 全套（AmbientLightMode/AmbientMusicFollow 等）+ 设置入口，音乐跟随挂音频管线 |
+| 五 | 导航播报方向盘音量 | #344 `ba8cdca1` | ✅ 已完成 | 2026-10-11 | NavigationWheel* + WheelKeyService 接线；播报期间方向盘键调导航流音量 |
+| 五 | Platform-21 仪表路由 | #348 `52bbad46` | ✅ 已完成 | 2026-10-11 | LegacyClusterLayout 移植；API 17 隐藏入口（守卫 `SDK_INT >= 21` 才显示路由选项） |
+| 五 | DiLink3 到达时间 AMap 形式 | #458 `0e54b3ea` | ✅ 已完成 | 2026-10-11 | ETA 格式化为 AMap 文案形式，随 #348 集群路由接线 |
+| 五 | ADB 开机自启修复 | #441 `eac7a3d9` | ✅ 已完成 | 2026-10-11 | BydBootStartRepair 移植；诊断报告接线 |
+| 五 | 侧栏拖拽/把手/轮胎 | #480 `ef11e819`/`4dda8598` | ✅ 已完成 | 2026-10-11 | main 版已是 View 代码，整体移植（拖拽/把手/tab/轮胎）；⏭️ 跳过 resize 模糊（Android 12 RenderEffect）；appNight→分支 darkMode；新增 paintSidePanelTheme() 挂 onNightChanged；tab 触摸经 forwardSidePanelTabTouch→onHostTouch 复用分支手势层 |
+| 五 | Wi-Fi Direct 频段选择 | #432 `00523988` | ✅ 已完成 | 2026-10-11 | WifiP2pBand 枚举 + AUTO_5_GHZ/AUTO_2_4_GHZ；P2pStartupRecovery.bandPlan；WifiP2pGroupManager `bandRequests = !legacyChannels`——API 17 走 WifiP2pLegacyChannelsApi17 只试频段内显式信道；设置入口 + 描述 ×7 语言 |
+| 五 | CarPlay 音频走车机蓝牙（实验） | #432 `593ac236` | ✅ 已完成 | 2026-10-11 | disableAudioOutput 接线 + AirPlayPersistence.load/saveCarBluetoothAudio（默认关）；诊断 logCarBluetoothAudio() 用 BluetoothCompat.getAdapter 适配 API 17（getSystemService(Class) 为 API 23+）；字符串 ×7 语言 |
 | 六 | Light/Dark/Auto 外观 | #422/#420/#346 | ⬜ | | View 重写 |
 | 六 | DiLink 设置向导 | #416 `4dbc509f` | ⬜ | | UI View 重写 |
 | 六 | GitHub 更新检查 | #413 `f4e7d06f` | ⬜ | | FileProvider 注册 |
@@ -479,6 +479,15 @@ shared/.../network/WifiP2pGroupManager.kt（叠加）
 ./gradlew :common:testDebugUnitTest --tests "*NavigationWheel*"
 ```
 
+### 8.4 完成记录（2026-10-11，分支 `port/wave5-vehicle`，提交 `c0098328`）
+
+- 8 项功能全部移植完成（见 0.4 进度表波次五各行），62 文件变更、+3267/-72。
+- **#480 侧栏**：main 版已是 View 代码，字段块与函数块整体移植进分支 `CarPlayHostActivity.kt`；⏭️ 全链路剔除 resize 模糊（`startSidePanelBlur`/`endSidePanelBlur`/`releaseSidePanelEffects` 的 RenderEffect 部分，Android 12 API）；main 的 `appNight` 改用分支 `darkMode` 字段；分支无 overlayPalette/MENU_PRIMARY 配色体系，新增 `SIDE_PANEL_CARD/PRIMARY/SECONDARY` 三个 darkMode 派生 getter + `paintSidePanelTheme()` 挂到 `nightModeController.onNightChanged`；tab 触摸经 `forwardSidePanelTabTouch` → 分支 `onHostTouch` 复用手势层；companion 新增 `SIDE_PANEL_CLOSE_SHARE`/`SIDE_PANEL_TAB_HINT_MILLIS`。
+- **#432 频段**：`WifiP2pChannels` 加 `WifiP2pBand` 枚举（2.4G 2412..2484 / 5G 5150..5895）与 `AUTO_5_GHZ=-5`/`AUTO_2_4_GHZ=-2` 伪信道；`P2pStartupRecovery` 加 `bandRequests` 参数与 `bandPlan()`；`WifiP2pGroupManager` 以 `bandRequests = !legacyChannels` 接线——**API 17 自动走 `WifiP2pLegacyChannelsApi17` 只试频段内显式信道**，config builder 用 `setGroupOperatingBand`，组校验加 band.contains 检查。
+- **#432 蓝牙音频**：`disableAudioOutput` 接线 + `AirPlayPersistence.load/saveCarBluetoothAudio`（默认关）；API 17 适配——`getSystemService(Class)` 是 API 23+，诊断 `logCarBluetoothAudio()` 改用 `BluetoothCompat.getAdapter`，`getProfileProxy` 返回值检查，A2DP/HFP 双探测（即时 + 30s 后）。
+- 设置字符串 4 条（`settings_wifi_direct_auto_band`/`settings_wifi_direct_band_note`/`settings_car_bluetooth_audio`/`settings_car_bluetooth_audio_description`）同步 ×7 语言，xmllint 验证通过。
+- 按用户指示跳过单元测试，仅做编译验证：`:shared:compileDebugKotlin`、`:common:compileDebugKotlin`、`:mobile:assembleDebug` 全部通过（JDK 17 + `--offline`）。
+
 ---
 
 ## 9. 波次六：UI 功能（需 View 重写）
@@ -613,11 +622,12 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 - [x] `getInputBuffer(index)`：核实为分支既有状态，不在本波次范围
 - [x] d729cd89 API 29/30 调用规避（clearCapabilities / minHeight）
 
-### 波次五 车辆
-- [ ] 氛围灯（#345）+ 方向盘音量（#344）+ DiLink3 ETA（#458）+ 开机修复（#441）
-- [ ] Platform-21 路由（#348）守卫隐藏
-- [ ] 侧栏 View 重写、模糊跳过、轮胎 ADB 读取
-- [ ] Wi-Fi Direct 频段走 Api17 legacy 路径
+### 波次五 车辆 ✅（2026-10-11，`c0098328`，详见 8.4）
+- [x] 氛围灯（#345）+ 方向盘音量（#344）+ DiLink3 ETA（#458）+ 开机修复（#441）
+- [x] Platform-21 路由（#348）守卫隐藏
+- [x] 侧栏 View 重写、模糊跳过、轮胎 ADB 读取
+- [x] Wi-Fi Direct 频段走 Api17 legacy 路径
+- [x] CarPlay 音频走车机蓝牙（#432 `593ac236`，默认关，BluetoothCompat 适配）
 
 ### 波次六 UI
 - [ ] 外观 Light/Dark/Auto（#422/#420/#346）
