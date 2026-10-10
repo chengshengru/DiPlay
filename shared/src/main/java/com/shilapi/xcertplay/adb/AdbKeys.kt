@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.adb
 
 import android.content.Context
+import android.os.Build
 import java.io.File
 import java.math.BigInteger
 import java.nio.ByteBuffer
@@ -32,7 +33,9 @@ object AdbKeys {
     /** Loads the key from app-private storage, or makes one on first use. */
     @Synchronized
     fun load(context: Context): KeyPair {
-        val dir = File(context.noBackupFilesDir, DIR)
+        // Context.getNoBackupFilesDir 是 API 21+；API 17-20 车机回退到私有 files 目录。
+        val baseDir = if (Build.VERSION.SDK_INT >= 21) context.noBackupFilesDir else context.filesDir
+        val dir = File(baseDir, DIR)
         val privateFile = File(dir, PRIVATE)
         val publicFile = File(dir, PUBLIC)
         runCatching {

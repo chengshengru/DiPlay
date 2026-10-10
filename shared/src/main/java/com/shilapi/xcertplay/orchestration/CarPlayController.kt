@@ -90,6 +90,7 @@ import com.shilapi.xcertplay.transport.NcmFunctionDiscovery
 import com.shilapi.xcertplay.transport.NcmUsbBridge
 import java.io.Closeable
 import java.io.IOException
+import java.lang.reflect.InvocationTargetException
 import java.net.InetAddress
 import java.net.Inet6Address
 import java.util.Locale
@@ -767,7 +768,9 @@ class CarPlayController(
         availabilityPollGeneration.incrementAndGet()
         phase = Phase.MFI
         onStatus(CarPlayStatus.DiscoveringMfi)
-        val offlineDirectory = java.io.File(appContext.noBackupFilesDir, LocalMfiAuthenticationClient.DIRECTORY)
+        // Context.getNoBackupFilesDir 是 API 21+；API 17-20 车机回退到私有 files 目录。
+        val backupDir = if (Build.VERSION.SDK_INT >= 21) appContext.noBackupFilesDir else appContext.filesDir
+        val offlineDirectory = java.io.File(backupDir, LocalMfiAuthenticationClient.DIRECTORY)
         when (config.mfiTarget) {
             MfiTarget.LOCAL -> openLocalMfi(offlineDirectory)
             MfiTarget.USB_CH341 -> {
@@ -2322,7 +2325,14 @@ class CarPlayController(
     private fun isBluetoothDeviceConnected(device: BluetoothDevice): Boolean = try {
         val method = BluetoothDevice::class.java.getMethod("isConnected")
         method.invoke(device) as? Boolean == true
-    } catch (error: ReflectiveOperationException) {
+    // ReflectiveOperationException 是 Java 7 类（Android API 19+ 才有）。
+    // API 17 的验证器无法解析 catch 子句引用的异常类型，会整类拒绝导致 VerifyError，
+    // 因此改为列举这些反射调用可能抛出的具体异常（均为 API 1 存在）。
+    } catch (error: NoSuchMethodException) {
+        false
+    } catch (error: IllegalAccessException) {
+        false
+    } catch (error: InvocationTargetException) {
         false
     } catch (error: RuntimeException) {
         Log.w(IphoneCarPlayConfiguration.TAG, "Could not read Bluetooth connection state", error)

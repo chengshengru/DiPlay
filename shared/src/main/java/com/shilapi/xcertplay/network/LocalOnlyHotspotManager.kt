@@ -12,6 +12,7 @@ import android.os.Looper
 import androidx.annotation.RequiresApi
 import com.shilapi.xcertplay.transport.Iap2WirelessSecurity
 import java.io.IOException
+import java.lang.reflect.InvocationTargetException
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
@@ -211,11 +212,13 @@ class LocalOnlyHotspotManager(context: Context, private val onDiagnostic: (Strin
                 WifiManager::class.java.getMethod(method, SoftApConfiguration::class.java, Executor::class.java,
                     WifiManager.LocalOnlyHotspotCallback::class.java).invoke(wifiManager, builder.build(), executor, callback)
                 return preferredChannel
-            } catch (failure: ReflectiveOperationException) {
-                if (failure.cause != null && failure.cause !is SecurityException && failure.cause !is UnsupportedOperationException) {
-                    throw IOException("LocalOnlyHotspot custom startup failed", failure.cause)
-                }
-                // Unsupported firmware retains the ordinary Android-generated AP.
+            // ReflectiveOperationException 是 API 19+ 类，API 17 验证器会整类拒绝，改用具体异常。
+            } catch (failure: NoSuchMethodException) {
+                handleHotspotReflectionFailure(failure)
+            } catch (failure: IllegalAccessException) {
+                handleHotspotReflectionFailure(failure)
+            } catch (failure: InvocationTargetException) {
+                handleHotspotReflectionFailure(failure)
             } catch (_: SecurityException) {
                 // No privileged permission is requested to enable this optional path.
             }
@@ -223,6 +226,17 @@ class LocalOnlyHotspotManager(context: Context, private val onDiagnostic: (Strin
         // Main-loop callback delivery survives cancellation to close late reservations.
         wifiManager.startLocalOnlyHotspot(callback, main)
         return null
+    }
+
+    /**
+     * 与原 `catch (ReflectiveOperationException)` 分支等价的失败处理：
+     * 反射调用本身带非安全/非不支持的 cause 时视为启动失败抛出，否则回退到普通热点路径。
+     */
+    private fun handleHotspotReflectionFailure(failure: Exception) {
+        if (failure.cause != null && failure.cause !is SecurityException && failure.cause !is UnsupportedOperationException) {
+            throw IOException("LocalOnlyHotspot custom startup failed", failure.cause)
+        }
+        // Unsupported firmware retains the ordinary Android-generated AP.
     }
 
     private fun awaitRadioInfo(
@@ -489,11 +503,12 @@ class LocalOnlyHotspotManager(context: Context, private val onDiagnostic: (Strin
                 "SoftApConfiguration.getChannel",
                 allowAuto = true,
             )
-        } catch (failure: ReflectiveOperationException) {
-            throw IOException(
-                "Android ${Build.VERSION.RELEASE} does not expose SoftApConfiguration.getChannel",
-                failure,
-            )
+        } catch (failure: NoSuchMethodException) {
+            throw wrapReflectionFailure(failure, "SoftApConfiguration.getChannel")
+        } catch (failure: IllegalAccessException) {
+            throw wrapReflectionFailure(failure, "SoftApConfiguration.getChannel")
+        } catch (failure: InvocationTargetException) {
+            throw wrapReflectionFailure(failure, "SoftApConfiguration.getChannel")
         }
         return channel to readLegacySoftApBandLabel(configuration, channel)
     }
@@ -501,11 +516,10 @@ class LocalOnlyHotspotManager(context: Context, private val onDiagnostic: (Strin
     private fun readWifiConfigurationChannel(configuration: WifiConfiguration): Int {
         val channel = try {
             WifiConfiguration::class.java.getField("apChannel").getInt(configuration)
-        } catch (failure: ReflectiveOperationException) {
-            throw IOException(
-                "Android ${Build.VERSION.RELEASE} does not expose WifiConfiguration.apChannel",
-                failure,
-            )
+        } catch (failure: NoSuchFieldException) {
+            throw wrapReflectionFailure(failure, "WifiConfiguration.apChannel")
+        } catch (failure: IllegalAccessException) {
+            throw wrapReflectionFailure(failure, "WifiConfiguration.apChannel")
         }
         return requireChannel(channel, "WifiConfiguration.apChannel", allowAuto = true)
     }
@@ -519,7 +533,9 @@ class LocalOnlyHotspotManager(context: Context, private val onDiagnostic: (Strin
         val band = try {
             (WifiConfiguration::class.java.getField("apBand").get(configuration) as? Number)
                 ?.toInt()
-        } catch (_: ReflectiveOperationException) {
+        } catch (_: NoSuchFieldException) {
+            null
+        } catch (_: IllegalAccessException) {
             null
         }
         return when (band) {
@@ -537,11 +553,19 @@ class LocalOnlyHotspotManager(context: Context, private val onDiagnostic: (Strin
         val band = try {
             (SoftApConfiguration::class.java.getMethod("getBand").invoke(configuration) as? Number)
                 ?.toInt()
-        } catch (_: ReflectiveOperationException) {
+        } catch (_: NoSuchMethodException) {
+            null
+        } catch (_: IllegalAccessException) {
+            null
+        } catch (_: InvocationTargetException) {
             null
         }
         return band?.let(::softApBandLabel) ?: legacyBandLabel(channel)
     }
+
+    /** 将反射读取失败包装为 IOException（替代 API 19+ 才有的 ReflectiveOperationException catch）。 */
+    private fun wrapReflectionFailure(failure: Exception, what: String): IOException =
+        IOException("Android ${Build.VERSION.RELEASE} does not expose $what", failure)
 
     private fun awaitApInterface(
         bssid: ByteArray?,
