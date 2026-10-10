@@ -21,6 +21,16 @@
         <item name="android:colorAccent">#A6C8FF</item>
         <item name="android:windowBackground">#151E2C</item>
     </style>
+    <!-- main B8：浅色启动主题 Material 版，主活动仍用深色 Theme.Xcertplay 后由代码动态调色（作者：TRAE AI） -->
+    <style name="Theme.Xcertplay.Light" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#245A9C</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:navigationBarColor">#E9EEF6</item>
+        <item name="android:statusBarColor">#E9EEF6</item>
+        <item name="android:windowBackground">#E9EEF6</item>
+    </style>
     <style name="Theme.Xcertplay.Dialog.Light" parent="android:Theme.Material.Light.Dialog.Alert">
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#245A9C</item>

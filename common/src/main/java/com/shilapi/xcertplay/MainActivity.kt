@@ -1,7 +1,9 @@
 package com.shilapi.xcertplay
 
 import android.app.Activity
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -21,6 +23,9 @@ import java.util.concurrent.Executors
  */
 class MainActivity : Activity() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
+    // main B8：诊断页跟随应用外观并观察 CarPlay 主机夜间态（View 版，作者：TRAE AI）。
+    private var appNight = true
+    private var stopObservingAppearance: (() -> Unit)? = null
     private var status: DiagnosticStatus = DiagnosticStatus.Idle
         set(value) {
             field = value
@@ -38,6 +43,39 @@ class MainActivity : Activity() {
             runSelfCheck(devicePath)
         }
         status = DiagnosticStatus.Idle
+        applyAppearance()
+    }
+
+    // main B8：外观联动生命周期与 main Compose 版语义一致（作者：TRAE AI）。
+    override fun onResume() {
+        super.onResume()
+        appNight = resolveAppNightNow()
+        applyAppearance()
+        stopObservingAppearance?.invoke()
+        stopObservingAppearance = AppAppearanceRuntime.observeHost {
+            runOnUiThread {
+                if (!isFinishing) {
+                    appNight = resolveAppNightNow()
+                    applyAppearance()
+                }
+            }
+        }
+    }
+
+    override fun onPause() {
+        stopObservingAppearance?.invoke()
+        stopObservingAppearance = null
+        super.onPause()
+    }
+
+    // 用调色板为诊断页上色：窗口背景 + 文字控件；输入框/按钮保留系统控件风格（诊断页非用户主路径）。
+    private fun applyAppearance() {
+        val palette = DiPlayPalette.of(appNight)
+        window.setBackgroundDrawable(ColorDrawable(palette.background))
+        val content = findViewById<ViewGroup>(android.R.id.content).getChildAt(0) as? ViewGroup ?: return
+        for (i in 0 until content.childCount) {
+            (content.getChildAt(i) as? TextView)?.setTextColor(palette.primaryText)
+        }
     }
 
     override fun onDestroy() {

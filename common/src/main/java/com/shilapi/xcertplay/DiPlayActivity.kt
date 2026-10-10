@@ -352,6 +352,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         // 外观接入：解析日夜态并应用到窗口背景/系统栏/全屏模式（作者：TRAE AI）。
         refreshAppearance()
         applyWindowAppearance()
+        // main B8：下次启动的 splash 主题跟随当前外观（作者：TRAE AI）。
+        rememberLaunchAppearance()
         setupError = runCatching { DiPlayBootstrap.ensure(this, AirPlayPersistence.loadMfiTarget(this)) }.exceptionOrNull()?.let {
             android.util.Log.e("DiPlaySetup", "CarPlay authentication could not be loaded", it)
             getString(R.string.setup_error_auth)
@@ -817,6 +819,14 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         applyFullscreenMode()
     }
 
+    // main B8：系统在下一次启动时、任何应用代码运行前绘制启动窗口，API 33 起应用才能选择它的主题；
+    // 更旧的车机保持深色边框。AUTO 维持深色：无法预知下次启动的时段，白天显示深色框比夜间显示亮框安全。
+    private fun rememberLaunchAppearance() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val light = AirPlayPersistence.loadAppAppearance(this) == AppAppearance.LIGHT
+        splashScreen.setSplashScreenTheme(if (light) R.style.Theme_Xcertplay_Light else R.style.Theme_Xcertplay)
+    }
+
     // 外观切换按钮：点击在深色/浅色间切换并触发增量重渲染（main #422，作者：TRAE AI）。
     private fun appearanceButton(): ImageButton = iconButton(
         icon = if (appNight) R.drawable.ic_dp_night else R.drawable.ic_dp_day,
@@ -827,6 +837,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             this,
             if (appNight) AppAppearance.LIGHT else AppAppearance.DARK,
         )
+        // main B8：下次启动的 splash 主题跟随新外观（作者：TRAE AI）。
+        rememberLaunchAppearance()
         requestAppearanceRender(focusAppearanceButton = true)
     }.apply {
         tag = APPEARANCE_BUTTON_TAG
@@ -1936,6 +1948,24 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (settingsSectionFilter?.contains(SettingsSection.BYD_ADB) != false) bydAdbSettings(content)
         filteredSection(content, SettingsSection.DISPLAY_AND_PERFORMANCE,
             getString(R.string.display_and_performance), R.drawable.ic_dp_display) { card ->
+            // main B8：应用外观三态（深/浅/跟随 CarPlay 夜间模式）（作者：TRAE AI）。
+            val appearances = AppAppearance.entries
+            choice(
+                card,
+                getString(R.string.settings_app_appearance),
+                listOf(
+                    getString(R.string.settings_app_appearance_dark),
+                    getString(R.string.settings_app_appearance_light),
+                    getString(R.string.settings_app_appearance_auto),
+                ),
+                appearances.indexOf(AirPlayPersistence.loadAppAppearance(this)),
+                reconnects = false,
+            ) { index ->
+                AirPlayPersistence.saveAppAppearance(this, appearances[index])
+                rememberLaunchAppearance()
+                handler.post { checkForAppearanceChange() }
+            }
+            card.addView(label(getString(R.string.settings_app_appearance_description), 14, MUTED))
             val nightModes = CarPlayNightMode.entries
             val nightMode = AirPlayPersistence.loadCarPlayNightMode(this)
             val ambientControls = column().apply {
