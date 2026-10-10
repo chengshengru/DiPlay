@@ -13,8 +13,12 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorFilter
 import android.graphics.Matrix
+import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.graphics.Typeface
@@ -1664,21 +1668,39 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         grip.alpha = sidePanelGripAlpha
         sidePanelGrip = grip
-        return LayerDrawable(arrayOf(card, grip)).apply {
-            // 只在朝向 CarPlay 的一侧留出放把手的缺口；贴着 CarPlay 的底边与其 Dock 齐平。
-            val bottom = if (across) dp(6) else 0
-            when (sidePanelEdge) {
-                Gravity.TOP -> setLayerInset(0, 0, dp(10), 0, 0)
-                Gravity.END -> setLayerInset(0, 0, 0, dp(10), bottom)
-                else -> setLayerInset(0, dp(10), 0, 0, bottom)
+        // 只在朝向 CarPlay 的一侧留出放把手的缺口；贴着 CarPlay 的底边与其 Dock 齐平。
+        val bottom = if (across) dp(6) else 0
+        // setLayerGravity/setLayerInsetBottom 是 API 23 方法，低版本走自绘等效实现，避免 NoSuchMethodError。
+        if (Build.VERSION.SDK_INT >= 23) {
+            return LayerDrawable(arrayOf(card, grip)).apply {
+                when (sidePanelEdge) {
+                    Gravity.TOP -> setLayerInset(0, 0, dp(10), 0, 0)
+                    Gravity.END -> setLayerInset(0, 0, 0, dp(10), bottom)
+                    else -> setLayerInset(0, dp(10), 0, 0, bottom)
+                }
+                setLayerInset(1, 0, 0, 0, bottom)
+                setLayerGravity(1, when (sidePanelEdge) {
+                    Gravity.TOP -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    Gravity.END -> Gravity.RIGHT or Gravity.CENTER_VERTICAL
+                    else -> Gravity.LEFT or Gravity.CENTER_VERTICAL
+                })
             }
-            setLayerInset(1, 0, 0, 0, bottom)
-            setLayerGravity(1, when (sidePanelEdge) {
-                Gravity.TOP -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                Gravity.END -> Gravity.RIGHT or Gravity.CENTER_VERTICAL
-                else -> Gravity.LEFT or Gravity.CENTER_VERTICAL
-            })
         }
+        val cardInsets = when (sidePanelEdge) {
+            Gravity.TOP -> intArrayOf(0, dp(10), 0, 0)
+            Gravity.END -> intArrayOf(0, 0, dp(10), bottom)
+            else -> intArrayOf(dp(10), 0, 0, bottom)
+        }
+        val gripGravity = when (sidePanelEdge) {
+            Gravity.TOP -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            Gravity.END -> Gravity.RIGHT or Gravity.CENTER_VERTICAL
+            else -> Gravity.LEFT or Gravity.CENTER_VERTICAL
+        }
+        return GravityLayerDrawable(
+            arrayOf(card, grip),
+            arrayOf(cardInsets, intArrayOf(0, 0, 0, bottom)),
+            intArrayOf(Gravity.FILL, gripGravity),
+        )
     }
 
     /**
@@ -1902,18 +1924,25 @@ class CarPlayHostActivity : ComponentActivity() {
             cornerRadius = dp(4).toFloat()
             setSize(if (across) dp(8) else dp(88), if (across) dp(88) else dp(8))
         }
-        return LayerDrawable(arrayOf(pill)).apply {
-            setLayerGravity(0, when (from) {
-                Gravity.BOTTOM -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                Gravity.LEFT -> Gravity.LEFT or Gravity.CENTER_VERTICAL
-                else -> Gravity.RIGHT or Gravity.CENTER_VERTICAL
-            })
-            when (from) {
-                Gravity.BOTTOM -> setLayerInsetBottom(0, dp(20))
-                Gravity.LEFT -> setLayerInsetLeft(0, dp(20))
-                else -> setLayerInsetRight(0, dp(20))
+        // setLayerGravity/setLayerInsetLeft 等均是 API 23 方法，低版本走自绘等效实现。
+        val gravity = when (from) {
+            Gravity.BOTTOM -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            Gravity.LEFT -> Gravity.LEFT or Gravity.CENTER_VERTICAL
+            else -> Gravity.RIGHT or Gravity.CENTER_VERTICAL
+        }
+        val inset = dp(20)
+        val insets = when (from) {
+            Gravity.BOTTOM -> intArrayOf(0, 0, 0, inset)
+            Gravity.LEFT -> intArrayOf(inset, 0, 0, 0)
+            else -> intArrayOf(0, 0, inset, 0)
+        }
+        if (Build.VERSION.SDK_INT >= 23) {
+            return LayerDrawable(arrayOf(pill)).apply {
+                setLayerGravity(0, gravity)
+                setLayerInset(0, insets[0], insets[1], insets[2], insets[3])
             }
         }
+        return GravityLayerDrawable(arrayOf(pill), arrayOf(insets), intArrayOf(gravity))
     }
 
     /**
@@ -5698,4 +5727,61 @@ internal object CarPlayBackgroundSession {
         height = 0
         display = null
     }
+}
+
+/**
+ * API 17-22 的 LayerDrawable 没有 setLayerGravity/setLayerInsetBottom 等 API 23 方法，
+ * 该类手动摆放各层作为等效实现：每层先在 bounds 内按 insets 收缩，
+ * 层有固有尺寸时按 gravity 对齐放置，无固有尺寸时拉伸填满，行为与新版一致。
+ *
+ * @author TRAE AI
+ * @since 2026-10-10
+ */
+private class GravityLayerDrawable(
+    private val layers: Array<GradientDrawable>,
+    private val insets: Array<IntArray>,
+    private val gravities: IntArray,
+) : Drawable() {
+    private var alpha = 255
+
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        for (i in layers.indices) {
+            val ins = insets[i]
+            // 每层的可用区域：bounds 收缩 insets，层在该区域内按 gravity 放置。
+            val area = Rect(b.left + ins[0], b.top + ins[1], b.right - ins[2], b.bottom - ins[3])
+            val layer = layers[i]
+            val w = if (layer.intrinsicWidth >= 0) layer.intrinsicWidth else area.width()
+            val h = if (layer.intrinsicHeight >= 0) layer.intrinsicHeight else area.height()
+            val gravity = gravities[i]
+            val x = when (gravity and Gravity.HORIZONTAL_GRAVITY_MASK) {
+                Gravity.LEFT -> area.left
+                Gravity.RIGHT -> area.right - w
+                else -> area.left + (area.width() - w) / 2
+            }
+            val y = when (gravity and Gravity.VERTICAL_GRAVITY_MASK) {
+                Gravity.TOP -> area.top
+                Gravity.BOTTOM -> area.bottom - h
+                else -> area.top + (area.height() - h) / 2
+            }
+            layer.setBounds(x, y, x + w, y + h)
+            layer.draw(canvas)
+        }
+    }
+
+    override fun setAlpha(value: Int) {
+        if (alpha == value) return
+        alpha = value
+        layers.forEach { it.alpha = value }
+        invalidateSelf()
+    }
+
+    override fun getAlpha(): Int = alpha
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        layers.forEach { it.colorFilter = colorFilter }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
