@@ -118,15 +118,15 @@ flowchart LR
 | 五 | 侧栏拖拽/把手/轮胎 | #480 `ef11e819`/`4dda8598` | ✅ 已完成 | 2026-10-11 | main 版已是 View 代码，整体移植（拖拽/把手/tab/轮胎）；⏭️ 跳过 resize 模糊（Android 12 RenderEffect）；appNight→分支 darkMode；新增 paintSidePanelTheme() 挂 onNightChanged；tab 触摸经 forwardSidePanelTabTouch→onHostTouch 复用分支手势层 |
 | 五 | Wi-Fi Direct 频段选择 | #432 `00523988` | ✅ 已完成 | 2026-10-11 | WifiP2pBand 枚举 + AUTO_5_GHZ/AUTO_2_4_GHZ；P2pStartupRecovery.bandPlan；WifiP2pGroupManager `bandRequests = !legacyChannels`——API 17 走 WifiP2pLegacyChannelsApi17 只试频段内显式信道；设置入口 + 描述 ×7 语言 |
 | 五 | CarPlay 音频走车机蓝牙（实验） | #432 `593ac236` | ✅ 已完成 | 2026-10-11 | disableAudioOutput 接线 + AirPlayPersistence.load/saveCarBluetoothAudio（默认关）；诊断 logCarBluetoothAudio() 用 BluetoothCompat.getAdapter 适配 API 17（getSystemService(Class) 为 API 23+）；字符串 ×7 语言 |
-| 六 | Light/Dark/Auto 外观 | #422/#420/#346 | ⬜ | | View 重写 |
-| 六 | DiLink 设置向导 | #416 `4dbc509f` | ⬜ | | UI View 重写 |
-| 六 | GitHub 更新检查 | #413 `f4e7d06f` | ⬜ | | FileProvider 注册 |
-| 六 | 设置内联搜索 | #450 `3ce0a181` | ⬜ | | View 重写 |
-| 六 | 小窗转弯卡片独立摆放 | #493/#494 | ⬜ | | 1% 步进迁移旧值 |
-| 六 | 暂存设置丢弃确认 | #500 `99375a7e` | ⬜ | | |
-| 六 | 下滑手势 Off 选项 | #487 `d05fcb25` | ⬜ | | |
-| 六 | 重连条联动 | #482/`f256cd64` | ⬜ | | |
-| 六 | 设置间距/对齐精修 | #486/#491/#490 | ⬜ | | |
+| 六 | Light/Dark/Auto 外观 | #422/#420/#346 | ✅ 已完成 | 2026-10-11 | B0–B8 十批：AppAppearance/DiPlayPalette/AppDialogs 基建 + 设置页调色板化（113 处常量）+ 10 分类信息架构 + Display 卡三态 choice + rememberLaunchAppearance（API 33+ splash，AUTO 维持深色）+ Theme.Xcertplay.Light（Holo/Material 双层）+ 主机页/诊断页外观联动（View 版，不迁 Compose） |
+| 六 | DiLink 设置向导 | #416 `4dbc509f` | ✅ 已完成 | 2026-10-11 | B4：setup 包（SetupGuide/DiLinkGeneration）1:1 复制；DiPlayActivity 向导函数组 View 实现 + 首启自动打开 + Overview 入口；28 条字符串 ×7 |
+| 六 | GitHub 更新检查 | #413 `f4e7d06f` | ✅ 已完成 | 2026-10-11 | B5：update 包 5 文件 + 4 测试（⏭️ 跳过 UpdateClientTest，依赖 JDK 内置 HttpServer）；UpdateApkProvider FileProvider 注册；about 页 updateRow 全套；`contentLengthLong` 加 API 19+ 守卫；8 条字符串 ×7 |
+| 六 | 设置内联搜索 | #450 `3ce0a181` | ✅ 已完成 | 2026-10-11 | B3：header 常驻搜索框（返回键+标题+EditText+外观按钮）+ PopupWindow 结果弹层 + 索引构建 + 焦点/键盘管理；⏭️ 跳过 centreGlyphs 标题样式（头部改版范围） |
+| 六 | 小窗转弯卡片独立摆放 | #493/#494 | ⚠️ 部分 | 2026-10-11 | #494 全屏部分完成：1% 滑块 + 旧 10% 档位迁移（shared `markerXPercents` + DiLink4 参数 + 持久化新键 + 三处消费端 + onCommit）；⏭️ #493 整块与 #494 小窗 marker 依赖分支缺失的小窗模式域（`loadClusterSmallWindowMode`/`adbNaviMode`/`detectedCluster.smallWindow`），留待小窗功能域整体迁移 |
+| 六 | 暂存设置丢弃确认 | #500 `99375a7e` | ✅ 已完成 | 2026-10-11 | menuSettingsSignature 签名（33 字段镜像 persistMenuSettings）+ leaveSettingsMenu 弹 AlertDialog（明暗跟随 appNight）；返回手势与跳转设置两出口弹询问，关闭控件/USB 静默；3 条字符串 ×7（以 main 原文为准） |
+| 六 | 下滑手势 Off 选项 | #487 `d05fcb25` | ✅ 已完成 | 2026-10-11 | 手势数 0=禁用：持久化 0 值语义 + ACTION_POINTER_DOWN 守卫 + 提示/按钮专用文案 + CarPlay 控件卡 Off 选项；3 条字符串 ×7 |
+| 六 | 重连条联动 | #482/`f256cd64` | ✅ 已完成 | 2026-10-11 | markReconnectNeeded 接线已随批次带入；补 #482 会话挂起重连条测试（PendingReconnect 挂起 + 重连条可见 + 不停止会话） |
+| 六 | 设置间距/对齐精修 | #486/#491/#490 | ✅ 已完成 | 2026-10-11 | #486/#420 布局代码已随 B2 基线（6ebb582）带入；#491 补 3 处 dp 字面量 → `SETTINGS_BLOCK_GAP_DP` + SettingsLayoutSourceRulesTest + headerActionsShareOneHeight；#490 AGENTS.md Settings layout 节 + overviewLinksToEveryOtherCategory；#420 HomeCompactLayoutTest 横竖屏排列断言 |
 | 七 | 7 语言字符串同步 | 各波次随附 | ⬜ | | `SettingsTranslationsTest` |
 
 ### 0.5 每轮迁移的文档更新义务
@@ -492,6 +492,20 @@ shared/.../network/WifiP2pGroupManager.kt（叠加）
 
 ## 9. 波次六：UI 功能（需 View 重写）
 
+> **✅ 波次六已完成**（2026-10-11，分支 `port/wave6-ui`，B0–B8 + 散项共 13 个提交，见 9.1 完成记录）。
+
+### 9.1 完成记录（2026-10-11，分支 `port/wave6-ui`）
+
+- 按《UI高保真还原main分支改造方案.md》B0–B8 十批 + 散项推进，13 个提交：`a9d8ff93`(B0) → `9ce1af9d`(B1) → `779fac62`(B2) → `aa88b02c`(B6) → `bb056227`(B3) → `24bb5db9`(B4) → `0a00a3ed`(B5) → `c5988146`(B7) → `22115621`(B8) → `56e45a4c`/`e7b4ecdc`/`d419683e`/`003b7a5b`(散项)。
+- **外观（B0/B1/B8）**：`AppAppearance`/`DiPlayPalette`/`AppDialogs` + 大开关样式；设置页 113 处颜色常量→palette；Display 卡三态 choice + appearanceButton；`rememberLaunchAppearance`（API 33+ `setSplashScreenTheme`，AUTO 维持深色边框）；`Theme.Xcertplay.Light` 按 Holo（`values/`）+ Material（`values-v21/`）双层拆分（未移植 `windowSplashScreenBackground`，API 31-32 车机保持深色边框，与 main 注释语义一致）；CarPlay 主机页实现 `AppAppearanceOwner`（身份校验发布/清除）+ 诊断页 MainActivity View 版联动（调色板上色 + `AppAppearanceRuntime.observeHost`，不迁 Compose）。
+- **信息架构（B2）**：10 分类/18 区块/about 独立页对齐 main，AGENTS.md 同步修订；B6 横屏强制完整布局（`AppearanceLayoutCompatibilityTest`）。
+- **向导/更新/搜索（B3/B4/B5）**：SetupGuide/DiLinkGeneration 与 update 包纯逻辑 1:1 复制，UI 用分支 View 控件重建；`UpdateApkProvider` 注册 manifest；`UpdateClient.contentLengthLong` 加 API 19+ 守卫；⏭️ UpdateClientTest 跳过（依赖 JDK 内置 HttpServer，分支 Java 8 toolchain 不可见）。
+- **主机页（B7）**：`CarPlayHostActivity` 实现 `AppAppearanceOwner`（onResume 发布/onPause·onDestroy 清除），`refreshAppAppearance()` 重建设置菜单并复用波次五 `paintSidePanelTheme()`；`WaitingScreenColors` 替换为 main 版（`DiPlayPalette.of(night)`）。
+- **散项**：#487 手势 Off（0 值语义 + `ACTION_POINTER_DOWN` 守卫 + 专用文案）；#500 丢弃确认（签名 33 字段镜像 `persistMenuSettings`，返回手势/跳转设置弹 AlertDialog，关闭控件与 USB 静默丢弃）；#490/#491/#420/#482 补齐 AGENTS.md Settings layout 规则节与 6 个 UI/源码扫描测试；#494 全屏 marker 1% 滑块 + 旧 10% 档位迁移（shared `CarPlayClusterDisplay`/`DiLink4ClusterDisplay`/持久化新键/设置滑块/三处消费端，`OverlaySliderRow.onCommit` 手指离开触发重连标记）。
+- **⏭️ 跳过（依赖缺失）**：#493 小窗卡片独立摆放/主题/透明度/`ClusterCardPlacementPreview` 预览与 #494 小窗 marker 部分——依赖分支没有的小窗模式域（`loadClusterSmallWindowMode`/`adbNaviMode`/`detectedCluster.smallWindow`），留待小窗功能域整体迁移时一并移植。
+- 字符串全部同步 ×7 语言（手势 Off 3 条、丢弃确认 3 条、向导 28 条、更新 8 条等），python3 插入 `</resources>` 前 + `xml.etree` 验证合法性。
+- 按用户指示跳过单元测试，仅做编译验证：`:shared:compileDebugKotlin`、`:common:compileDebugKotlin`、`:common:compileDebugUnitTestKotlin`、`:mobile:assembleDebug`（JDK 17 + `--offline`）全部通过。
+
 以下 main 功能基于 Compose，**全部以分支 View 结构为基线手工重新实现**。按用户价值排序：
 
 | 功能 | main PR/提交 | 重写要点 |
@@ -629,12 +643,12 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 - [x] Wi-Fi Direct 频段走 Api17 legacy 路径
 - [x] CarPlay 音频走车机蓝牙（#432 `593ac236`，默认关，BluetoothCompat 适配）
 
-### 波次六 UI
-- [ ] 外观 Light/Dark/Auto（#422/#420/#346）
-- [ ] 设置向导（#416）、更新检查（#413）
-- [ ] 内联搜索（#450）、小窗卡片（#493/#494）、丢弃确认（#500）、手势 Off（#487）
-- [ ] 重连条接线（#482/#501/`f256cd64`）
-- [ ] 间距/对齐精修（#486/#491/#490）
+### 波次六 UI ✅（2026-10-11，分支 `port/wave6-ui`，B0–B8 + 散项，详见 9.1）
+- [x] 外观 Light/Dark/Auto（#422/#420/#346，B0/B1/B2/B6/B7/B8 十批）
+- [x] 设置向导（#416）、更新检查（#413）
+- [x] 内联搜索（#450）、丢弃确认（#500）、手势 Off（#487）；小窗卡片 #494 全屏 1% 滑块完成，#493 ⏭️ 依赖小窗模式域
+- [x] 重连条接线（#482，测试补齐）
+- [x] 间距/对齐精修（#486/#491/#490/#420，布局随 B2 基线带入 + 测试/规则补齐）
 
 ### 波次七 本地化
 - [ ] 全部 `settings_*` 字符串 7 语言齐全
