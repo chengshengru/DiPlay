@@ -597,6 +597,8 @@
     <string name="wheel_zoom_note_volume">Гучність</string>
     <string name="wheel_joystick">Джойстик CarPlay на кермі</string>
     <string name="wheel_joystick_description">Кнопка медіа BYD вмикає й вимикає джойстик для центрального екрана CarPlay, як крутилка в авто. Поки він увімкнений, колесо гучності або ⏮ ⏭ рухають вибір, ⏯ вибирає, а кастомна кнопка повертає назад; музикою й гучністю ці кнопки тоді не керують. Під час дзвінка кнопки працюють для дзвінка. На деяких авто вибір рухає й гучність на консолі.</string>
+    <string name="settings_external_controller">Зовнішній контролер (експериментально)</string>
+    <string name="settings_external_controller_description">Клавіші підключеної Bluetooth-клавіатури, пульта або поворотного контролера переміщують і підтверджують вибір у CarPlay, як поворотна ручка автомобіля. Сенсорний екран продовжує працювати. Застосовується одразу.</string>
     <string name="wheel_joystick_auto_off">Джойстик вимикається сам</string>
     <string name="wheel_joystick_auto_off_description">Через 15 секунд без натискань і коли стартує маршрут кнопки знову керують музикою й гучністю.</string>
     <string name="wheel_joystick_on">Джойстик увімкнено</string>
@@ -773,4 +775,6 @@
     <string name="settings_usb_charging_reduced">Знижене (1,5 А)</string>
     <string name="settings_usb_charging_low">Низьке (0,5 А)</string>
     <string name="settings_usb_charging_description">Струм заряджання, який DiPlay дозволяє iPhone через USB. Якщо дротовий CarPlay обривається кожні кілька секунд і iPhone сам перепідключається, USB-порт автомобіля може не видавати достатньо живлення: спробуйте «Знижене», потім «Низьке». iPhone заряджатиметься повільніше. Застосовується під час наступного USB-підключення.</string>
+    <string name="settings_ambient_album">跟隨專輯封面</string>
+    <string name="settings_ambient_album_description">按封面取色並近似匹配原車可用色號。灰黑或無封面時使用全部31色；大面積白色封面可使用白色或冷白。</string>
 </resources>

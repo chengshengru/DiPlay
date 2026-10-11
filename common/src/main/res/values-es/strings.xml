@@ -585,6 +585,8 @@
     <string name="wheel_zoom_note_volume">Volumen</string>
     <string name="wheel_joystick">Joystick de CarPlay en el volante</string>
     <string name="wheel_joystick_description">El botón multimedia de BYD activa y desactiva un joystick para la pantalla central de CarPlay, como el mando giratorio de un coche. Mientras está activado, la rueda de volumen o ⏮ ⏭ mueven la selección, ⏯ selecciona y el botón personalizable vuelve atrás; esos botones dejan entonces de controlar la música y el volumen. Durante una llamada los botones sirven para la llamada. En algunos coches el volumen de la consola también mueve la selección.</string>
+    <string name="settings_external_controller">Controlador externo (experimental)</string>
+    <string name="settings_external_controller_description">Las teclas de un teclado, mando o controlador giratorio Bluetooth emparejado mueven la selección y eligen en CarPlay, como el mando giratorio de un coche. La pantalla táctil sigue funcionando. Se aplica al instante.</string>
     <string name="wheel_joystick_auto_off">El joystick se desactiva solo</string>
     <string name="wheel_joystick_auto_off_description">Tras 15 segundos sin pulsar nada y al iniciar una ruta, los botones vuelven a controlar la música y el volumen.</string>
     <string name="wheel_joystick_on">Joystick activado</string>
@@ -761,4 +763,6 @@
     <string name="settings_usb_charging_reduced">Reducida (1,5 A)</string>
     <string name="settings_usb_charging_low">Baja (0,5 A)</string>
     <string name="settings_usb_charging_description">Corriente de carga que DiPlay ofrece al iPhone por USB. Si CarPlay por cable se corta cada pocos segundos y el iPhone se vuelve a conectar solo, puede que el puerto USB del coche no dé suficiente energía: prueba Reducida y después Baja. El iPhone cargará más despacio. Se aplica en la próxima conexión USB.</string>
+    <string name="settings_ambient_album">Seguir la portada del álbum</string>
+    <string name="settings_ambient_album_description">Usa el color de la portada o colores cercanos disponibles del vehículo. Las portadas grises, negras o ausentes usan los 31 colores; las mayormente blancas pueden usar blanco o blanco frío.</string>
 </resources>

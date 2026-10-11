@@ -666,6 +666,8 @@
     <string name="wheel_zoom_note_volume">Volume</string>
     <string name="wheel_joystick">CarPlay joystick on the wheel</string>
     <string name="wheel_joystick_description">BYD\'s media key turns a joystick for CarPlay\'s centre screen on and off, like a car\'s rotary knob. While it is on, the volume roller or previous/next move the selection, play/pause selects and the custom key goes back; these keys then leave the music and volume alone. A call keeps the keys for the call. On some cars the console volume moves the selection too.</string>
+    <string name="settings_external_controller">External controller (experimental)</string>
+    <string name="settings_external_controller_description">Keys from a paired Bluetooth keyboard, remote or rotary controller move and select in CarPlay, like a car’s rotary knob. The touchscreen keeps working. Applies at once.</string>
     <string name="wheel_joystick_auto_off">Joystick turns off by itself</string>
     <string name="wheel_joystick_auto_off_description">After 15 seconds without a press, and when a route starts, the keys go back to music and volume.</string>
     <string name="wheel_joystick_on">Joystick on</string>
@@ -858,4 +860,6 @@
     <string name="settings_usb_charging_reduced">Reduced (1.5 A)</string>
     <string name="settings_usb_charging_low">Low (0.5 A)</string>
     <string name="settings_usb_charging_description">How much charging current DiPlay offers the iPhone over USB. If wired CarPlay drops every few seconds and the iPhone reconnects by itself, the car\'s USB port may not supply enough power: try Reduced, then Low. The iPhone then charges more slowly. Applies at the next USB connection.</string>
+    <string name="settings_ambient_album">Follow album cover</string>
+    <string name="settings_ambient_album_description">Use the cover’s color or nearby available car colors. Grey, black or missing covers use all 31 colors; mostly white covers can use white or cold white.</string>
 </resources>

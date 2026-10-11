@@ -629,6 +629,8 @@
     <string name="wheel_zoom_note_volume">音量</string>
     <string name="wheel_joystick">方向盘 CarPlay 摇杆</string>
     <string name="wheel_joystick_description">比亚迪媒体键可开启或关闭用于 CarPlay 中控屏的摇杆，就像车上的旋钮控制器。开启时，音量滚轮或 ⏮ ⏭ 移动选择，⏯ 确认，自定义按键返回；这些按键此时不再控制音乐和音量。通话时按键用于通话。部分车型中控台的音量也会移动选择。</string>
+    <string name="settings_external_controller">外接控制器（实验性）</string>
+    <string name="settings_external_controller_description">已配对的蓝牙键盘、遥控器或旋钮控制器的按键可在 CarPlay 中移动和确认选择，就像车上的旋钮。触摸屏仍可使用。立即生效。</string>
     <string name="wheel_joystick_auto_off">摇杆自动关闭</string>
     <string name="wheel_joystick_auto_off_description">15 秒内无按键操作或开始导航时，按键恢复控制音乐和音量。</string>
     <string name="wheel_joystick_on">摇杆已开启</string>
@@ -821,4 +823,6 @@
     <string name="settings_usb_charging_reduced">降低（1.5 A）</string>
     <string name="settings_usb_charging_low">低（0.5 A）</string>
     <string name="settings_usb_charging_description">DiPlay 通过 USB 允许 iPhone 使用的充电电流。如果有线 CarPlay 每隔几秒断开、iPhone 自行重新连接，可能是车机 USB 口供电不足：请先试「降低」，再试「低」。iPhone 充电会变慢。下次 USB 连接时生效。</string>
+    <string name="settings_ambient_album">跟随专辑封面</string>
+    <string name="settings_ambient_album_description">按封面取色并近似匹配原车可用色号。灰黑或无封面时使用全部31色；大面积白色封面可使用白色或冷白。</string>
 </resources>

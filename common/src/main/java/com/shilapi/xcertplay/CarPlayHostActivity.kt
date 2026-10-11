@@ -428,6 +428,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     override val currentAppNight: Boolean get() = appNight
     private var appNight = true
     private var hostAppearanceResumed = false
+    // main #539：BYD 来电弹窗隐藏的会话就绪标记与开关缓存（作者：TRAE AI）。
+    private var callPopupSessionReady = false
+    private var hideBydCallPopup = false
     private var paintWaitingScreen: () -> Unit = {}
     private var carPlayNightMode = CarPlayNightMode.SYSTEM
     private var nightSchedule = CarPlayNightSchedule()
@@ -728,6 +731,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
      * mode, hotspot and MFI settings that were current when this screen was first opened.
      */
     private fun loadConnectionSettings() {
+        hideBydCallPopup = AirPlayPersistence.loadHideBydCallPopup(this)
         wirelessEnabled = AirPlayPersistence.loadWirelessEnabled(this)
         mfiTarget = AirPlayPersistence.loadMfiTarget(this)
         mfiI2cPath = AirPlayPersistence.loadMfiI2cPath(this)
@@ -888,6 +892,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         super.onResume()
         // main B7：恢复期间本页持有外观归属权（作者：TRAE AI）。
         hostAppearanceResumed = true
+        updateCallPopupGuard()
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
         val savedDelay = AirPlayPersistence.loadAmbientDelaySeconds(this)
@@ -1257,6 +1262,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             return true
         }
         if (!menuOpen &&
+            // main #549：外接控制器开启时，仅实体输入设备的按键驱动 CarPlay（虚拟导航键 Back 仍返回）。
+            (AndroidTvInputMode.shouldUseKnobAsPrimaryInput(this) ||
+                CarPlayRemoteKeys.fromExternalController(event, AirPlayPersistence.loadExternalController(this))) &&
             CarPlayRemoteKeys.dispatch(event, controller)) {
             if (event.repeatCount == 0) {
                 Log.d(
@@ -1318,6 +1326,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     override fun onPause() {
         // main B7：暂停即释放外观归属权（作者：TRAE AI）。
         hostAppearanceResumed = false
+        updateCallPopupGuard()
         AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
         super.onPause()
@@ -1419,6 +1428,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         releaseSidePanelEffects()
         // main B7：销毁时释放外观归属权（作者：TRAE AI）。
         hostAppearanceResumed = false
+        updateCallPopupGuard()
         AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
         pictureBinding?.close()
@@ -2411,6 +2421,14 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) },
         )
+        // main #539：会话内菜单里的 BYD 来电弹窗隐藏开关，仅 Android 12(S)（作者：TRAE AI）。
+        if (Build.VERSION.SDK_INT == 32) {
+            content.addView(settingsSwitchRow(
+                label = getString(R.string.settings_hide_byd_call_popup),
+                checked = hideBydCallPopup,
+                description = getString(R.string.settings_hide_byd_call_popup_description),
+            ) { hideBydCallPopup = it })
+        }
         content.addView(
             buildAirPlayIconSection(),
             LinearLayout.LayoutParams(
@@ -2763,6 +2781,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         else getString(R.string.settings_gesture_fingers, gestureFingerCount)
 
     private fun persistMenuSettings() {
+        AirPlayPersistence.saveHideBydCallPopup(this, hideBydCallPopup)
         AirPlayPersistence.saveSettingsGestureFingers(this, gestureFingerCount)
         AirPlayPersistence.saveWirelessEnabled(this, wirelessEnabled)
         AirPlayPersistence.saveMfiTarget(this, mfiTarget)
@@ -4502,6 +4521,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                     }
                     activeAirPlaySession = session
                     CarPlayBackgroundSession.active = true
+                    callPopupSessionReady = true
+                    updateCallPopupGuard()
                     reconnectAttempts = 0
                     logThemeState(ThemeModeDiagnostics.Source.SESSION_ACTIVE, resources.configuration)
                     syncAirPlayDarkMode(ThemeModeDiagnostics.Source.SESSION_ACTIVE)
@@ -4536,6 +4557,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                     startupRetryBudget.disconnected()
                     activeAirPlaySession = null
                     CarPlayBackgroundSession.active = false
+                    callPopupSessionReady = false
+                    updateCallPopupGuard()
                     if (menuOpen) {
                         recoveryPendingAfterMenu = true
                         return@runOnUiThread
@@ -4551,6 +4574,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             override fun onTransportError(message: String) {
                 runOnUiThread {
                     if (controllerGeneration != restartGeneration || startupRetryStopped) return@runOnUiThread
+                    callPopupSessionReady = false
+                    updateCallPopupGuard()
                     startupRetryBudget.disconnected()
                     if (menuOpen) {
                         recoveryPendingAfterMenu = true
@@ -4590,6 +4615,11 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         controllerGeneration: Int,
     ): (CarPlayStatus) -> Unit = report@{ status ->
         if (controllerGeneration != restartGeneration) return@report
+        // main #539：失败/控制通道结束时立刻撤回 BYD 来电弹窗隐藏（作者：TRAE AI）。
+        if (status is CarPlayStatus.Failed || status is CarPlayStatus.ControlEnded) {
+            callPopupSessionReady = false
+            updateCallPopupGuard()
+        }
         if (menuOpen) {
             if (status is CarPlayStatus.Failed) failurePendingAfterMenu = status
             return@report
@@ -4652,6 +4682,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 finish()
             }
         }
+        callPopupSessionReady = CarPlayBackgroundSession.callPopupReady
+        updateCallPopupGuard()
         if (snapshot.width > 0 && snapshot.height > 0) {
             activeDisplaySize = DisplaySize(snapshot.width, snapshot.height)
         }
@@ -5108,6 +5140,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             return
         }
         reconnectScheduled = true
+        callPopupSessionReady = false
+        updateCallPopupGuard()
         val generation = restartGeneration
         val delayMillis = if (startupDelay != null) {
             startupDelay
@@ -5150,6 +5184,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         Log.i(TAG, "$reason; rebuilding stack at ${size.width}x${size.height}")
         val generation = ++restartGeneration
         handshakeResetInProgress = true
+        callPopupSessionReady = false
+        updateCallPopupGuard()
         val oldController = controller
         val oldSink = sink
         CarPlayMediaKeys.detach(oldController)
@@ -5211,6 +5247,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             parent.addView(settingsMenu, index, FrameLayout.LayoutParams(-1, -1))
         }
         menuOpen = true
+        updateCallPopupGuard()
         gestureOverlay?.visibility = View.GONE
         settingsMenu?.visibility = View.VISIBLE
         safeAreaEditor?.visibility = View.GONE
@@ -5287,6 +5324,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private fun finishSettingsMenu(prefix: String, reconnect: Boolean) {
         if (!menuOpen) return
         menuOpen = false
+        updateCallPopupGuard()
         menuSettingsSignature = null
         settingsMenu?.visibility = View.GONE
         gestureOverlay?.visibility = View.VISIBLE
@@ -5330,6 +5368,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
 
     private fun shutdown(terminateProcess: Boolean, reason: String, completion: () -> Unit = {}) {
         if (!shuttingDown.compareAndSet(false, true)) { completion(); return }
+        callPopupSessionReady = false
+        updateCallPopupGuard()
         resetSidePanel()
         startupRetryBudget.disconnected()
         restartGeneration += 1
@@ -5549,6 +5589,19 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         }
     }
 
+    // main #539：BYD 来电弹窗只在"前台 + 活动会话 + 非菜单/非重建"时隐藏（作者：TRAE AI）。
+    private fun shouldHideBydCallPopup(): Boolean =
+        hostAppearanceResumed && callPopupSessionReady && !menuOpen && !shuttingDown.get() &&
+            !handshakeResetInProgress && !reconnectScheduled && CarPlayBackgroundSession.active &&
+            CarPlayBackgroundSession.isOwner(this) && AirPlayPersistence.loadHideBydCallPopup(this)
+
+    private fun updateCallPopupGuard() {
+        if (CarPlayBackgroundSession.isOwner(this)) CarPlayBackgroundSession.callPopupReady = callPopupSessionReady
+        com.shilapi.xcertplay.hud.BydCallPopupGuard.update(this, this, shouldHideBydCallPopup()) {
+            CarPlayBackgroundSession.active && CarPlayBackgroundSession.callPopupReady && CarPlayBackgroundSession.isOwner(this)
+        }
+    }
+
     private fun setStatus(message: String) {
         runOnUiThread {
             setConnectionStage(message)
@@ -5758,6 +5811,8 @@ internal data class CarPlaySessionDisplay(
 /** Process-local hand-off for keeping the CarPlay session alive while no Activity is visible. */
 internal object CarPlayBackgroundSession {
     @Volatile var active = false
+    // main #539：会话就绪标记，供 BYD 来电弹窗 guard 在无障碍服务进程中判断（作者：TRAE AI）。
+    @Volatile var callPopupReady = false
     private var stopAction: (((() -> Unit)) -> Unit)? = null
     private var stopping = false
     private var owner: Any? = null
@@ -5807,6 +5862,7 @@ internal object CarPlayBackgroundSession {
     @Synchronized
     fun store(controller: CarPlayController, sink: AndroidMediaSink, width: Int, height: Int,
         owner: Any, display: CarPlaySessionDisplay, stop: (() -> Unit) -> Unit) {
+        if (this.controller !== controller) callPopupReady = false
         this.stopAction = stop
         this.owner = owner
         this.controller = controller
@@ -5823,6 +5879,7 @@ internal object CarPlayBackgroundSession {
         sink = null
         if (!keepOwner) { stopAction = null; owner = null }
         active = false
+        callPopupReady = false
         width = 0
         height = 0
         display = null

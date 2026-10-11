@@ -67,6 +67,7 @@ import com.shilapi.xcertplay.hud.BydVehicleProbeOutcome
 import com.shilapi.xcertplay.host.R
 // main #345：BYD 氛围灯音乐跟随（作者：TRAE AI）
 import com.shilapi.xcertplay.media.AmbientColorMode
+import com.shilapi.xcertplay.media.AmbientColorSource
 import com.shilapi.xcertplay.media.AmbientColorSpeed
 import com.shilapi.xcertplay.media.AmbientMusicController
 import com.shilapi.xcertplay.media.AmbientMusicSettings
@@ -2100,6 +2101,14 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         // Opt-in controls that can cost sound or video on some head units.
         filteredSection(content, SettingsSection.ADVANCED_MEDIA,
             getString(R.string.settings_advanced_media), R.drawable.ic_dp_advanced) { card ->
+            // main #539：前台 CarPlay 期间隐藏 BYD 来电弹窗，仅 Android 12(S) 提供（作者：TRAE AI）。
+            if (Build.VERSION.SDK_INT == 32) {
+                toggle(card, getString(R.string.settings_hide_byd_call_popup),
+                    getString(R.string.settings_hide_byd_call_popup_description),
+                    AirPlayPersistence.loadHideBydCallPopup(this)) {
+                    AirPlayPersistence.saveHideBydCallPopup(this, it)
+                }
+            }
             toggle(card, getString(R.string.efficient_video), getString(R.string.use_hevc_leave_off_for_the_widest_head_unit_compatibility), AirPlayPersistence.loadHevcEnabled(this)) { AirPlayPersistence.saveHevcEnabled(this, it); markReconnectNeeded() }
             toggle(card, getString(R.string.smooth_video), getString(R.string.smooth_video_description),
                 AirPlayPersistence.loadSmoothVideo(this)) {
@@ -3376,6 +3385,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             (zoomAvailable && WheelZoomSettings.enabled(this))
         if (WheelZoomSettings.siriKey(this) || vehicleKeysOn) wheelKeyServiceControls(card)
         siriKeyControls(card)
+        // main #549：任意车机——配对的键盘/遥控器/旋钮控制器与触屏并行工作（作者：TRAE AI）。
+        toggle(card, getString(R.string.settings_external_controller), getString(R.string.settings_external_controller_description),
+            AirPlayPersistence.loadExternalController(this)) { AirPlayPersistence.saveExternalController(this, it) }
         // Keep previously configured controls reachable even if package detection misses the car.
         if (byd || zoomAvailable || WheelZoomSettings.joystick(this)) wheelKeyControls(card)
     }
@@ -5300,6 +5312,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
         toggle(body, getString(R.string.settings_ambient_music), getString(R.string.settings_ambient_music_description), draft.music) {
             draft = draft.copy(music = it)
+        }
+        // main #537：氛围灯取色来源——跟随专辑封面（灰黑/无封面回退全部颜色）（作者：TRAE AI）。
+        toggle(body, getString(R.string.settings_ambient_album), getString(R.string.settings_ambient_album_description), draft.colorSource == AmbientColorSource.ALBUM) {
+            draft = draft.copy(colorSource = if (it) AmbientColorSource.ALBUM else AmbientColorSource.SELECTED)
         }
         choice(body, getString(R.string.settings_ambient_color_mode), listOf(getString(R.string.settings_ambient_energy), getString(R.string.settings_ambient_beat), getString(R.string.settings_ambient_tempo), getString(R.string.settings_ambient_bass), getString(R.string.settings_ambient_smart)), draft.colorMode.ordinal, reconnects = false) {
             draft = draft.copy(colorMode = AmbientColorMode.entries[it])
