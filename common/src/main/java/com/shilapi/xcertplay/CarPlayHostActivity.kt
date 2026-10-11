@@ -638,7 +638,6 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             startActivity(Intent(this, DiPlayActivity::class.java))
             finish(); return
         }
-        WheelKeyService.restoreIfNeeded(this)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         (getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager)
             ?.registerDisplayListener(clusterDisplayListener, mainHandler)
@@ -921,6 +920,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
 
     override fun onResume() {
         super.onResume()
+        WheelKeyService.restoreIfNeeded(this)
         // main B7：恢复期间本页持有外观归属权（作者：TRAE AI）。
         hostAppearanceResumed = true
         updateCallPopupGuard()
@@ -1330,6 +1330,25 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         } else WheelZoomKeys.Action.PASS
         if (assignedAction != WheelZoomKeys.Action.PASS) return true
         if (downOrUp && assignedKey) return super.dispatchKeyEvent(event)
+
+        // Steering-wheel next/previous, claimed by the CarPlay screen itself. BYD gives these keys to
+        // whichever window is in front, and this is the only route that reaches CarPlay without the
+        // wheel key service — which a head unit with no ADB cannot turn on at all.
+        val mediaPress = CarPlayMediaButton.forCarPlayWindow(
+            event.keyCode,
+            sessionActive = activeAirPlaySession != null,
+            inCall = inCall(this),
+        )
+        if (downOrUp && mediaPress != null) {
+            // A media button is a tap, and BYD sends each tap as an instant down/up pair: send once,
+            // on the press. The release is swallowed rather than passed on, or BYD's own player would
+            // receive an unpaired key.
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                val sent = controller?.sendMediaButton(mediaPress) == true
+                appendLog("Media: wheel key ${event.keyCode} -> CarPlay $mediaPress sent=$sent")
+            }
+            return true
+        }
 
         // Keep DiPlay's existing steering-wheel/voice-key Siri handling intact.
         if (!CarPlayMediaButton.opensSiri(event.keyCode)) return super.dispatchKeyEvent(event)

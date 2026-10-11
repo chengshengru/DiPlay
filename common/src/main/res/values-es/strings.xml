@@ -627,7 +627,15 @@
     <string name="carplay_rotation_smoother">Más fluida (1920)</string>
     <string name="carplay_rotation_sharper">Más nítida (tamaño de la pantalla)</string>
     <string name="carplay_call_controls_experimental">Botones de llamadas de CarPlay (experimental)</string>
-    <string name="carplay_call_controls_experimental_description">Activa los botones de llamada, voz y reproducción/pausa de DiLink 3 aún sin verificar. Falta probarlos en el vehículo. Desactivado de forma predeterminada; las tarjetas de llamadas del cuadro tienen un ajuste independiente.</string>
+    <string name="carplay_call_controls_experimental_description">Activa los botones de llamada, voz y reproducción/pausa de DiLink 3 aún sin verificar. Falta probarlos en el vehículo. Mientras suena una llamada de CarPlay, pista siguiente contesta y pista anterior rechaza. Desactivado de forma predeterminada; las tarjetas de llamadas del cuadro tienen un ajuste independiente.</string>
+    <string name="settings_fce_cluster_guidance">Indicaciones en el cuadro FCE (experimental)</string>
+    <string name="settings_fce_cluster_guidance_description">Muestra las flechas de CarPlay y la distancia al próximo giro en la vista de navegación del cuadro de instrumentos en unidades FCE, escribiendo en el servicio del vehículo de la unidad. Probado solo en un coche; desactívalo si el cuadro se comporta de forma inesperada.</string>
+    <string name="settings_cluster_speedometer">Velocímetro del cluster (experimental)</string>
+    <string name="settings_cluster_speedometer_description">Muestra la velocidad real mediante ADB autorizado. Se oculta si el dato no está disponible o queda desactualizado. Los cambios se aplican al momento.</string>
+    <string name="settings_cluster_speedometer_horizontal">Posición horizontal del velocímetro</string>
+    <string name="settings_cluster_speedometer_vertical">Posición vertical del velocímetro</string>
+    <string name="settings_cluster_speedometer_size">Tamaño del velocímetro</string>
+    <string name="settings_cluster_speedometer_opacity">Opacidad del velocímetro</string>
     <string name="side_panel">Panel lateral junto a CarPlay (experimental)</string>
     <string name="side_panel_description">CarPlay puede pasar a dos tercios de la pantalla mientras DiPlay muestra un panel en el resto: del lado del pasajero en una pantalla horizontal, abajo en una vertical (reloj y, si se lee, la batería). Muéstralo y ocúltalo desde el menú de la sesión. Se aplica en la próxima conexión.</string>
     <string name="side_panel_show">Panel lateral</string>

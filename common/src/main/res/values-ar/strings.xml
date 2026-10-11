@@ -627,7 +627,15 @@
     <string name="carplay_rotation_smoother">أكثر سلاسة (1920)</string>
     <string name="carplay_rotation_sharper">أكثر وضوحًا (حجم الشاشة)</string>
     <string name="carplay_call_controls_experimental">أزرار مكالمات CarPlay (تجريبي)</string>
-    <string name="carplay_call_controls_experimental_description">تفعيل أزرار المكالمات والصوت والتشغيل/الإيقاف المؤقت غير المتحقق منها في DiLink 3. لا يزال يلزم اختبارها في السيارة. معطلة افتراضيًا؛ بطاقات مكالمات لوحة العدادات لها إعداد منفصل.</string>
+    <string name="carplay_call_controls_experimental_description">تفعيل أزرار المكالمات والصوت والتشغيل/الإيقاف المؤقت غير المتحقق منها في DiLink 3. لا يزال يلزم اختبارها في السيارة. أثناء رنين مكالمة CarPlay، يجيب زر المقطع التالي ويرفض زر المقطع السابق. معطلة افتراضيًا؛ بطاقات مكالمات لوحة العدادات لها إعداد منفصل.</string>
+    <string name="settings_fce_cluster_guidance">الإرشاد في عدادات FCE (تجريبي)</string>
+    <string name="settings_fce_cluster_guidance_description">يعرض أسهم CarPlay ومسافة المنعطف التالي في واجهة الملاحة بلوحة العدادات على وحدات FCE، عبر الكتابة إلى خدمة المركبة في الوحدة. جُرّب على سيارة واحدة فقط؛ أوقفه إذا تصرفت لوحة العدادات بشكل غير متوقع.</string>
+    <string name="settings_cluster_speedometer">عداد سرعة لوحة العدادات (تجريبي)</string>
+    <string name="settings_cluster_speedometer_description">يعرض سرعة السيارة عبر ADB المصرح به. يختفي إذا كانت القراءة غير متاحة أو قديمة. تُطبّق التغييرات فورًا.</string>
+    <string name="settings_cluster_speedometer_horizontal">الموضع الأفقي لعداد السرعة</string>
+    <string name="settings_cluster_speedometer_vertical">الموضع العمودي لعداد السرعة</string>
+    <string name="settings_cluster_speedometer_size">حجم عداد السرعة</string>
+    <string name="settings_cluster_speedometer_opacity">عتامة عداد السرعة</string>
     <string name="side_panel">لوحة جانبية بجوار CarPlay (تجريبي)</string>
     <string name="side_panel_description">يمكن نقل CarPlay إلى ثلثي الشاشة بينما يعرض DiPlay لوحة في الباقي: على جانب الراكب في الشاشة الأفقية، وفي الأسفل في الشاشة العمودية (الساعة، والبطارية إذا تمت قراءتها). أظهرها وأخفها من قائمة الجلسة. يُطبَّق عند الاتصال التالي.</string>
     <string name="side_panel_show">اللوحة الجانبية</string>

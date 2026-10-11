@@ -82,6 +82,7 @@ internal object CarPlayMediaKeys {
         }
         appContext = context.applicationContext
         controller = next
+        GeelyWheelKeys.start(context)
         // 氛围灯音乐跟随：绑定 iPhone 播放状态回调（作者：TRAE AI）
         com.shilapi.xcertplay.media.AmbientMusicController.claimPlaybackOwner(next)
         next.playbackListener = { playing ->
@@ -106,6 +107,7 @@ internal object CarPlayMediaKeys {
         expected.nowPlayingListener = null
         expected.artworkListener = null
         controller = null
+        GeelyWheelKeys.stop()
         releaseLocked()
     }
 
@@ -288,6 +290,8 @@ internal object CarPlayMediaKeys {
     private fun start(context: Context) {
         // MediaSession 与 PlaybackState 均为 API 21+；API 17-20 车机直接跳过整个媒体会话功能。
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return
+        // 焦点禁用分支也不能没有控制器:没有 CarPlay 控制器时媒体会话无处发送按键(main 72f88054)。
+        val expectedController = controller ?: return
         val focusDisabled = AirPlayPersistence.loadDisableMediaKeyAudioFocus(context)
         val granted: Boolean
         if (focusDisabled) {
@@ -298,7 +302,6 @@ internal object CarPlayMediaKeys {
             focusHeld = false
             granted = false
         } else {
-            val expectedController = controller ?: return
             val owner = Any().also { focusOwner = it }
             focusEventRevision = 0L
             val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -431,6 +434,15 @@ internal object CarPlayMediaKeys {
         }
         val sent = synchronized(this) { controller }?.sendMediaButton(index) ?: false
         Log.i(TAG, "media key $source -> CarPlay $index sent=$sent")
+    }
+
+    /** A steering-wheel media key captured outside the Android key stream (Geely/Lynk). */
+    internal fun onExternalMediaKey(index: Int) = send(index, "geely-wheel")
+
+    /** The steering-wheel microphone key captured outside the Android key stream (Geely/Lynk). */
+    internal fun onExternalSiriKey(): Boolean {
+        val active = synchronized(this) { controller } ?: return false
+        return runCatching { active.requestSiri() }.getOrDefault(false)
     }
 
     // 懒加载：CarPlayMediaCallback 继承 MediaSession.Callback（API 21）。

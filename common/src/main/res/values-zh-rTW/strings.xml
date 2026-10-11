@@ -672,7 +672,15 @@
     <string name="car_button_name">名稱</string>
     <string name="car_button_saved_next_connection">已儲存。下次連線時，CarPlay 會顯示新的圖示和名稱。</string>
     <string name="carplay_call_controls_experimental">CarPlay 通話按鍵（實驗性）</string>
-    <string name="carplay_call_controls_experimental_description">啟用尚未驗證的 DiLink 3 通話、語音與播放／暫停按鍵。仍需實車測試。預設關閉；儀表通話資訊卡是獨立設定。</string>
+    <string name="carplay_call_controls_experimental_description">啟用尚未驗證的 DiLink 3 通話、語音與播放／暫停按鍵。仍需實車測試。CarPlay 來電響鈴時，下一首接聽、上一首拒接。預設關閉；儀表通話資訊卡是獨立設定。</string>
+    <string name="settings_fce_cluster_guidance">FCE 儀表導航（實驗性）</string>
+    <string name="settings_fce_cluster_guidance_description">在 FCE 平台車機上，透過車機的車輛服務把 CarPlay 轉向箭頭和到下一路口的距離顯示在儀表的導航畫面。僅在一輛車上測試過；如果儀表顯示異常，請關閉。</string>
+    <string name="settings_cluster_speedometer">儀表板速度計（實驗性）</string>
+    <string name="settings_cluster_speedometer_description">透過已授權的 ADB 顯示車輛速度。讀數無法取得或過期時隱藏。變更立即生效。</string>
+    <string name="settings_cluster_speedometer_horizontal">速度計水平位置</string>
+    <string name="settings_cluster_speedometer_vertical">速度計垂直位置</string>
+    <string name="settings_cluster_speedometer_size">速度計大小</string>
+    <string name="settings_cluster_speedometer_opacity">速度計不透明度</string>
     <string name="carplay_calls_on_dashboard">在儀表板顯示 CarPlay 通話</string>
     <string name="carplay_calls_on_dashboard_description">CarPlay 來電和通話期間，儀表板會顯示來電者，儀表板與抬頭顯示器會顯示通話時間，與比亞迪原廠 CarPlay 應用程式相同。通話期間車輛也會降低風扇轉速。立即生效。車機須啟用網路 ADB。</string>
     <string name="carplay_dock">CarPlay 程式列</string>

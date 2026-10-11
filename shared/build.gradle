@@ -6,6 +6,8 @@ android {
     namespace = 'com.shilapi.xcertplay.shared'
     // 本机 android-33/34/35 jar 为裁剪版（缺 TetheringManager 等类），使用完整的 android-36
     compileSdk = 36
+    // Geely AIDL 需要 build-tools 30+ 的新 aidl 才能解析 SDK 36 的 framework.aidl（@JavaOnlyStableParcelable）（作者：TRAE AI）
+    buildToolsVersion = '34.0.0'
 
     defaultConfig {
         minSdk = 17
@@ -36,6 +38,10 @@ android {
         ndkBuild {
             path = file('src/main/jni/Android.mk')
         }
+    }
+    buildFeatures {
+        // Geely/Lynk head-unit input API (com.geely.inputservice); declarations in src/main/aidl.
+        aidl true
     }
     compileOptions {
         // 使用 Java 8 以支持 desugaring
