@@ -69,6 +69,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.compat.PermissionCompat
 import com.shilapi.xcertplay.airplay.AirPlayConfig
@@ -421,6 +422,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var manualHotspotChannel = 0
     private var manualHotspotSecurity = ManualHotspotSecurity.OPEN
     private var awaitingVpnConsent = false
+    private var vpnAdbConsentTried = false
     private var awaitingWirelessPermissions = false
     private var awaitingLocationPermission = false
     private var vpnReady = false
@@ -827,6 +829,26 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         Log.w(TAG, diagnostic, error)
         appendLog(diagnostic)
         setStatus(getString(R.string.vpn_authorization_unavailable))
+        // main #604：无授权弹窗的固件（Geely Galaxy E8）用已批准的 adb 兜底。
+        if (!vpnAdbConsentTried) preConsentVpnOverAdb()
+    }
+
+    /** Without a consent dialog, the car's approved adb can allow the VPN instead (#604). */
+    private fun preConsentVpnOverAdb() {
+        vpnAdbConsentTried = true
+        val app = applicationContext
+        Thread({
+            val access = runCatching { VpnPreConsent.grant(app) }.getOrDefault(LocalAdb.Access.UNREACHABLE)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val granted = runCatching { CarPlayVpnService.prepare(this) == null }.getOrDefault(false)
+                appendLog("VPN consent over adb access=$access granted=$granted")
+                if (granted && !awaitingVpnConsent && !vpnReady) {
+                    vpnReady = true
+                    maybeStartCarPlay()
+                }
+            }
+        }, "diplay-vpn-adb-consent").start()
     }
 
     private fun requestWirelessPermissions() {
