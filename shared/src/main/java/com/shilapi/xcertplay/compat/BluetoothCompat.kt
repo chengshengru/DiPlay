@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.pm.PackageManager
+import java.lang.reflect.InvocationTargetException
 import java.util.UUID
 
 /**
@@ -139,6 +140,46 @@ object BluetoothCompat {
             adapter.address
         } catch (_: SecurityException) {
             null
+        }
+    }
+
+    /**
+     * Plan A：读取设备真实 ACL 连接状态（反射 [BluetoothDevice.isConnected]）。
+     *
+     * 该状态依赖蓝牙栈维护的链路对象，不随 [BluetoothAdapter.isEnabled] 的瞬时误报翻转，
+     * 因此可用来证明无线电实际可用——车机蓝牙开关状态与无线电实态不同步时尤为关键。
+     *
+     * 反射目标方法自 API 1 即存在；catch 仅列举 API 1 既有的具体异常，
+     * 避免 API 17 验证器因 [ReflectiveOperationException]（API 19+）拒绝整类导致 VerifyError。
+     */
+    @SuppressLint("MissingPermission")
+    fun isDeviceConnected(device: BluetoothDevice): Boolean = try {
+        val method = BluetoothDevice::class.java.getMethod("isConnected")
+        method.invoke(device) as? Boolean == true
+    } catch (_: NoSuchMethodException) {
+        false
+    } catch (_: IllegalAccessException) {
+        false
+    } catch (_: InvocationTargetException) {
+        false
+    } catch (_: RuntimeException) {
+        false
+    }
+
+    /**
+     * Plan A：在已配对设备中查找真实 ACL 已连接的 iPhone。
+     *
+     * 返回唯一已连接的 iPhone；无可判定为已连接的 iPhone（无、或存在歧义多个）时返回 null，不抛异常。
+     * 仅作"无线电可用"的探针，不做设备选择的最终裁决（最终裁决仍由调用方负责）。
+     */
+    @SuppressLint("MissingPermission")
+    fun findConnectedIphone(adapter: BluetoothAdapter): BluetoothDevice? {
+        val iPhones = getBondedDevices(adapter)
+            .filter { getDeviceName(it)?.contains("iPhone", ignoreCase = true) == true }
+        val connected = iPhones.filter { isDeviceConnected(it) }
+        return when {
+            connected.size == 1 -> connected.single()
+            else -> null
         }
     }
 }

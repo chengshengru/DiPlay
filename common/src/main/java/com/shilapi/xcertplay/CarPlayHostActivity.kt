@@ -314,6 +314,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var statusView: TextView? = null
     private var statusScrollView: ScrollView? = null
     private var stageStatusView: TextView? = null
+    private var usbDiagView: TextView? = null
+    private val usbDiagLines = ArrayDeque<String>()
+    private val usbDiagLock = Any()
     private var resolutionValueView: TextView? = null
     private var resolutionPreviewView: TextView? = null
     private var hotspotStatusView: TextView? = null
@@ -1566,6 +1569,24 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         paintWaitingScreen()
         viewport.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
         root.addView(viewport, FrameLayout.LayoutParams(-1, -1))
+        // USB 连接实时诊断覆盖层：把最近若干行 xcertplay-usb 日志直接打在车机屏幕上，
+        // 便于 API 17 等环境下不接电脑也能看到卡在哪一步（作者：TRAE AI）。
+        val usbDiag = TextView(this).apply {
+            textSize = 11f
+            typeface = Typeface.MONOSPACE
+            setTextColor(Color.rgb(150, 230, 160))
+            setBackgroundColor(Color.argb(160, 0, 0, 0))
+            gravity = Gravity.BOTTOM or Gravity.START
+            maxLines = 12
+        }
+        root.addView(
+            usbDiag,
+            FrameLayout.LayoutParams(-1, -2).apply {
+                gravity = Gravity.BOTTOM
+                bottomMargin = dp(8); leftMargin = dp(8); rightMargin = dp(8)
+            },
+        )
+        usbDiagView = usbDiag
         // Above the video and gesture layer, below the menus.
         sidePanel = buildSidePanel().also { root.addView(it, FrameLayout.LayoutParams(0, 0)) }
         // 侧栏把手小条（main #480），位于视频与手势层之上、菜单之下。
@@ -4590,7 +4611,13 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             }
 
             override fun onDebugLog(message: String) {
-                if (DiagnosticRedactor.redact(message) == null) return
+                val redacted = DiagnosticRedactor.redact(message) ?: return
+                synchronized(usbDiagLock) {
+                    usbDiagLines.addLast(redacted)
+                    while (usbDiagLines.size > 12) usbDiagLines.removeFirst()
+                    val snapshot = usbDiagLines.joinToString("\n")
+                    usbDiagView?.post { usbDiagView?.text = snapshot }
+                }
                 if (message.startsWith(CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX + " ")) {
                     // Retain old-controller teardown evidence without accepting its UI/session state.
                     AsyncDiagnosticLog.append(diagnosticLog, message)
@@ -5617,7 +5644,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
 
     private fun updateDebugOverlays() {
         statusScrollView?.visibility = View.GONE
-        connectionPanel?.visibility = if (activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
+        val waitingVisible = activeScreenStreamTypes.isEmpty()
+        connectionPanel?.visibility = if (waitingVisible) View.VISIBLE else View.GONE
+        usbDiagView?.visibility = if (waitingVisible) View.VISIBLE else View.GONE
     }
 
     private fun friendlyStage(message: String): String = when {

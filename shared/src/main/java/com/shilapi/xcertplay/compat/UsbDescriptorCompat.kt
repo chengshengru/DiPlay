@@ -140,6 +140,13 @@ internal object UsbDescriptorCompat {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) usbInterface.alternateSetting
         else ALTERNATE_SETTING_UNKNOWN
 
+    /**
+     * [UsbDevice.getVersion] is API 21+. API 17-20 has no device BCD version getter, so callers get
+     * `null` and must treat it as "unknown" (diagnostics only; nothing functional depends on it).
+     */
+    fun deviceVersion(device: UsbDevice): String? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) device.version else null
+
     /** `interfaceId/alternateSetting:class.subclass.protocolxEndpoints` per interface. */
     fun describe(configuration: UsbConfigurationView): String =
         configuration.interfaces.joinToString(",") { usbInterface ->

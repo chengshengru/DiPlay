@@ -148,22 +148,29 @@ class IphoneUsbHost(
     ) {
         executor.execute {
             callback(runTransition(device) { connection ->
-                val response = ByteArray(VENDOR_RESPONSE_LENGTH)
+                // Apple CarPlay 激活是主机→设备的命令（OUT），必须携带 1 字节负载 0x01 才能命令 iPhone
+                // 切换到 CarPlay 配置并重枚举。原先使用 0xc0 IN 读 1 字节只会取到状态字节、被误判为
+                // “已请求重枚举”，而 iPhone 实际毫无反应（车机诊断：iPhone 无反应、无配置出现）。
+                val command = byteArrayOf(CARPLAY_CONFIGURATION_ENABLE.toByte())
                 val transferred = connection.controlTransfer(
-                    USB_VENDOR_DEVICE_IN,
+                    USB_VENDOR_DEVICE_OUT,
                     CARPLAY_CONFIGURATION_REQUEST,
                     0,
                     CARPLAY_CONFIGURATION_INDEX,
-                    response,
-                    response.size,
+                    command,
+                    command.size,
                     CONTROL_TRANSFER_TIMEOUT_MILLIS,
                 )
-                if (transferred != response.size) {
-                    // iOS 12 and 15 rejected this request even while unlocked (#509, #455); a locked
-                    // iPhone rejects it too (#100). Record what the iPhone exposes to tell them apart.
+                onDiagnostic(
+                    "CarPlay reenumeration request dir=OUT bRequest=0x52 " +
+                        "wIndex=0x${CARPLAY_CONFIGURATION_INDEX.toString(16)} transferred=$transferred",
+                )
+                if (transferred != command.size) {
+                    // iOS 12 与 15 即使解锁也会拒绝该请求（#509、#455）；锁屏的 iPhone 同样拒绝（#100）。
+                    // 记录 iPhone 暴露的信息以区分二者。
                     runCatching { onDiagnostic(modeRejectionDiagnostic(connection, device)) }
                     throw IphoneUsbException.Protocol(
-                        "CarPlay configuration request transferred $transferred of ${response.size} bytes",
+                        "CarPlay configuration request transferred $transferred of ${command.size} bytes",
                     )
                 }
                 TransitionResult.ReenumerationRequested
@@ -288,12 +295,9 @@ class IphoneUsbHost(
 
     private fun permissionPendingIntent(): PendingIntent {
         val intent = Intent(permissionAction).setPackage(appContext.packageName)
-        return PendingIntent.getBroadcast(
-            appContext,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+        return PendingIntent.getBroadcast(appContext, 0, intent, flags)
     }
 
     private fun registerReceiver(filter: IntentFilter, onReceive: (Intent) -> Unit): Closeable {
@@ -324,16 +328,18 @@ class IphoneUsbHost(
         val read = connection.controlTransfer(
             USB_VENDOR_DEVICE_IN, GET_USB_MODE_REQUEST, 0, 0, mode, mode.size, CONTROL_TRANSFER_TIMEOUT_MILLIS,
         )
-        return usbModeDiagnostic(read, mode, device.version,
+        return usbModeDiagnostic(read, mode, UsbDescriptorCompat.deviceVersion(device),
             IphoneCarPlayConfiguration.describeAll(device))
     }
 
     companion object {
         private const val USB_VENDOR_DEVICE_IN = 0xc0
+        private const val USB_VENDOR_DEVICE_OUT = 0x40
         private const val GET_USB_MODE_REQUEST = 0x45
         private const val USB_MODE_RESPONSE_LENGTH = 4
         private const val CARPLAY_CONFIGURATION_REQUEST = 0x52
         private const val CARPLAY_CONFIGURATION_INDEX = 0x0004
+        private const val CARPLAY_CONFIGURATION_ENABLE = 0x01
         private const val VENDOR_RESPONSE_LENGTH = 1
         private const val CONTROL_TRANSFER_TIMEOUT_MILLIS = 1_000
 

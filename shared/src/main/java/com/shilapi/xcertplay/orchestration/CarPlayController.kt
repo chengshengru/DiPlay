@@ -45,6 +45,7 @@ import com.shilapi.xcertplay.network.CarPlayBonjour
 import com.shilapi.xcertplay.network.diagnosticSummary
 import com.shilapi.xcertplay.network.CarPlayVpnService
 import com.shilapi.xcertplay.compat.ApiLevel
+import com.shilapi.xcertplay.compat.BluetoothCompat
 import com.shilapi.xcertplay.compat.UsbDescriptorCompat
 import com.shilapi.xcertplay.network.HotspotAddressPolicy
 import com.shilapi.xcertplay.network.HotspotAddressRecovery
@@ -219,6 +220,11 @@ class CarPlayController(
     private val availabilityPollGeneration = AtomicInteger(0)
     private var permissionPollGeneration = 0
     private var reenumerationAttempts = 0
+    // API 17 车机修复：重枚举阶段若 iPhone 原地切换配置（无总线重枚举）或 ATTACHED 广播未被捕获，
+    // 控制器会永久停在 WaitingForReenumeration 且无超时、无报错——即“iPhone 无反应、卡在连接界面”的典型症状。
+    // 用 generation 守卫避免 watchdog 在重枚举已成功后误触发；用 lastIphoneDevice 兜底重试。
+    private val reenumerationGeneration = AtomicInteger(0)
+    private var lastIphoneDevice: UsbDevice? = null
     private var lastReportedStatus: CarPlayStatus? = null
     private var mfiResetLogged = false
 
@@ -1332,9 +1338,22 @@ class CarPlayController(
                 ?: throw IOException("Bluetooth adapter is unavailable")
             // main #307：无线握手前有界恢复被我们暂停的车机蓝牙；不恢复本就关闭的无线电。
             val bluetoothRecoveryComplete = BydBluetoothSuspend.resumeAndWait(appContext, adapter)
-            if (!adapter.isEnabled) throw IOException("Bluetooth is not enabled")
-            if (!bluetoothRecoveryComplete) throw IOException("Bluetooth recovery did not complete before the handshake")
-            val device = selectWirelessBluetoothDevice(adapter)
+            // Plan A：先探测真实 ACL 已连接的 iPhone。它是无线电（含 iAP2 RFCOMM 引导）可用的铁证，
+            // 可绕过 adapter.isEnabled 因车机开关状态与无线电实态不同步而产生的误报死循环。
+            val wirelessLinkDevice = probeConnectedWirelessIphone(adapter)
+            debugLog(
+                "wireless Plan A probe: adapterEnabled=${adapter.isEnabled} " +
+                    "recoveryComplete=$bluetoothRecoveryComplete " +
+                    "connectedIphone=${wirelessLinkDevice?.address ?: "none"} " +
+                    "bypassGate=${!adapter.isEnabled && wirelessLinkDevice != null}",
+            )
+            if (!adapter.isEnabled && wirelessLinkDevice == null) {
+                throw IOException("Bluetooth is not enabled")
+            }
+            if (!bluetoothRecoveryComplete && wirelessLinkDevice == null) {
+                throw IOException("Bluetooth recovery did not complete before the handshake")
+            }
+            val device = wirelessLinkDevice ?: selectWirelessBluetoothDevice(adapter)
             val hostBluetoothMac = accessoryBluetoothMac(adapter)
             debugLog(
                 "wireless selected Bluetooth target name=${device.name ?: "unknown"} " +
@@ -1835,6 +1854,7 @@ class CarPlayController(
                     "pid=0x${device.productId.toString(16)}",
             )
             availabilityPollGeneration.incrementAndGet()
+            lastIphoneDevice = device
             requestIphonePermission(device)
         }
     }
@@ -1950,15 +1970,82 @@ class CarPlayController(
     private fun beginReenumeration(device: UsbDevice) {
         phase = Phase.REENUMERATION
         reenumerationAttempts += 1
+        lastIphoneDevice = device
+        reenumerationGeneration.incrementAndGet()
         connectionDiagnostic("USB transition requested count=$reenumerationAttempts")
         onStatus(CarPlayStatus.SelectingConfiguration)
         iphoneHost.requestCarPlayReenumerationAsync(device, executor) { transition ->
             when (transition) {
-                IphoneUsbHost.TransitionResult.ReenumerationRequested ->
+                IphoneUsbHost.TransitionResult.ReenumerationRequested -> {
                     onStatus(CarPlayStatus.WaitingForReenumeration)
+                    scheduleReenumerationWatchdog()
+                }
                 is IphoneUsbHost.TransitionResult.Failed -> fail(transition.error)
             }
         }
+    }
+
+    /**
+     * iPhone 的 0x52 CarPlay 请求可能原地切换活动配置（不触发总线重枚举），或随之而来的
+     * [UsbManager.ACTION_USB_DEVICE_ATTACHED] 广播未被捕获。两种情况下控制器都会永久停在
+     * WaitingForReenumeration（无超时、无报错），正是 API 17 车机“iPhone 无反应、卡在连接界面”的根因。
+     * 该 watchdog 在超时后重新探测仍连接的 Apple 设备，若其已暴露 CarPlay 配置则直接继续。
+     */
+    private fun scheduleReenumerationWatchdog() {
+        val generation = reenumerationGeneration.get()
+        mainHandler.postDelayed({
+            if (phase != Phase.REENUMERATION || generation != reenumerationGeneration.get()) return@postDelayed
+            recoverFromReenumeration()
+        }, REENUMERATION_WATCHDOG_MILLIS)
+    }
+
+    private fun recoverFromReenumeration() {
+        connectionDiagnostic(
+            "reenumeration watchdog fired: phase=$phase closed=$closed " +
+                "attempts=$reenumerationAttempts",
+        )
+        if (closed || phase != Phase.REENUMERATION) return
+        // 不依赖 matcher（可能是 PID 白名单），直接扫描所有 Apple 厂商设备，避免重枚举后 PID 变化导致漏检。
+        val device = requireUsbManager().deviceList.values
+            .firstOrNull { it.vendorId == IphoneUsbMatcher.APPLE_VENDOR_ID }
+            ?: lastIphoneDevice
+        if (device == null) {
+            connectionDiagnostic("reenumeration watchdog: 无 Apple 设备；重试 transition")
+            retryReenumerationOrFail(lastIphoneDevice ?: return)
+            return
+        }
+        val usbManager = requireUsbManager()
+        val configuration = IphoneCarPlayConfiguration.find(device)
+        connectionDiagnostic(
+            "reenumeration watchdog: device vid=0x${device.vendorId.toString(16)} " +
+                "pid=0x${device.productId.toString(16)} configReady=${configuration != null} " +
+                "hasPermission=${usbManager.hasPermission(device)}",
+        )
+        when {
+            configuration != null && usbManager.hasPermission(device) -> {
+                connectionDiagnostic("reenumeration watchdog: 原地观察到 CarPlay 配置；直接打开数据路径")
+                openDataPaths(device)
+            }
+            configuration != null -> {
+                connectionDiagnostic("reenumeration watchdog: 观察到 CarPlay 配置；重新请求权限")
+                requestIphonePermission(device)
+            }
+            reenumerationAttempts < MAXIMUM_REENUMERATION_ATTEMPTS -> {
+                connectionDiagnostic("reenumeration watchdog: 配置仍缺失；重试 transition")
+                retryReenumerationOrFail(device)
+            }
+            else -> fail(
+                IphoneUsbException.Protocol("重枚举后 iPhone 仍未暴露 CarPlay USB 配置"),
+            )
+        }
+    }
+
+    private fun retryReenumerationOrFail(device: UsbDevice) {
+        if (reenumerationAttempts >= MAXIMUM_REENUMERATION_ATTEMPTS) {
+            fail(IphoneUsbException.Protocol("重枚举后 iPhone 仍未暴露 CarPlay USB 配置"))
+            return
+        }
+        beginReenumeration(device)
     }
 
     private fun onIphoneAttached(device: UsbDevice) {
@@ -2352,6 +2439,26 @@ class CarPlayController(
         throw IOException(
             "No unambiguous bonded iPhone found; pair one iPhone and retry",
         )
+    }
+
+    /**
+     * Plan A：探测真实 ACL 已连接的 iPhone，作为"无线电可用"的探针，不抛异常。
+     *
+     * 优先用 [BluetoothCompat.findConnectedIphone]（反射 [android.bluetooth.BluetoothDevice.isConnected]，
+     * 反映真实链路而非 [android.bluetooth.BluetoothAdapter.isEnabled] 误报）；
+     * 反射不可用时退化为 profile 连接（HEADSET/A2DP）判定的 iPhone。
+     * 歧义（多个已连接 iPhone）时返回 null，交回 [selectWirelessBluetoothDevice] 的最终裁决。
+     */
+    private fun probeConnectedWirelessIphone(adapter: BluetoothAdapter): BluetoothDevice? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return null
+        }
+        BluetoothCompat.findConnectedIphone(adapter)?.let { return it }
+        val profileConnected = connectedBluetoothDevices(adapter)
+            .filter { it.name?.contains("iPhone", ignoreCase = true) == true }
+        return if (profileConnected.size == 1) profileConnected.single() else null
     }
 
     private fun connectBluetoothSocket(socket: BluetoothSocket, address: String) {
@@ -2880,6 +2987,8 @@ class CarPlayController(
         private const val WIRELESS_HANDOFF_TIMEOUT_MILLIS = 45_000L
         private const val RFCOMM_CONNECT_TIMEOUT_MILLIS = 15_000L
         private const val MAXIMUM_REENUMERATION_ATTEMPTS = 2
+        // API 17 车机：重枚举静默挂起防护。重枚举通常在 1–2s 内完成，5s 是安全的兜底窗口。
+        private const val REENUMERATION_WATCHDOG_MILLIS = 5_000L
         private const val EXECUTOR_CLOSE_TIMEOUT_MILLIS = 2_000L
         private const val ADAPTER_ADDRESS_PLACEHOLDER = "02:00:00:00:00:00"
         // main #474：无线热点地址族偏好的持久化位置。

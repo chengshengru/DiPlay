@@ -41,6 +41,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.shilapi.xcertplay.adb.LocalAdb
+import com.shilapi.xcertplay.compat.BluetoothCompat
 import com.shilapi.xcertplay.compat.PermissionCompat
 // main B4：连接向导逻辑与 DiLink 代际识别（作者：TRAE AI）。
 import com.shilapi.xcertplay.setup.DiLinkGeneration
@@ -4883,31 +4884,45 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT); return
         }
         val adapter = if (Build.VERSION.SDK_INT >= 18) (getSystemService(android.content.Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter else null
-        if (adapter == null || !adapter.isEnabled) {
-            AlertDialog.Builder(this).setTitle(getString(R.string.turn_on_bluetooth))
-                .setMessage(getString(R.string.enable_the_car_s_bluetooth_and_pair_your_iphone_first))
-                .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ -> openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
-                .setNegativeButton(getString(R.string.later), null).show(); return
+        if (adapter == null) {
+            showTurnOnBluetoothDialog(); return
+        }
+        // Plan A：即使 adapter.isEnabled 误报为 false，只要真实 ACL 已连接的 iPhone 存在，
+        // 即证明无线电可用，跳过"打开蓝牙"死循环，直接进入设备选择让用户点选已连接的 iPhone。
+        val connectedIphone = BluetoothCompat.findConnectedIphone(adapter)
+        if (!adapter.isEnabled && connectedIphone == null) {
+            showTurnOnBluetoothDialog(); return
         }
         val devices = runCatching { adapter.bondedDevices.sortedBy { it.name ?: "" } }.getOrDefault(emptyList())
-        if (devices.isEmpty()) {
+        // Plan A 兜底：若 isEnabled 误报导致 bondedDevices 为空，但已探测到真实 ACL 连接的 iPhone，
+        // 仍把它纳入可选列表，确保用户始终能点选"已连接的 iPhone"。
+        val candidates = if (devices.isEmpty() && connectedIphone != null) listOf(connectedIphone) else devices
+        if (candidates.isEmpty()) {
             AlertDialog.Builder(this).setTitle(getString(R.string.pair_your_iphone))
                 .setMessage(getString(R.string.on_your_iphone_open_settings_bluetooth_and_pair_with_the_c))
                 .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ -> openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
                 .setNegativeButton(getString(R.string.got_it), null).show(); return
         }
         AlertDialog.Builder(this).setTitle(getString(R.string.choose_your_iphone))
-            .setItems(devices.map { device ->
+            .setItems(candidates.map { device ->
                 val name = device.name ?: getString(R.string.paired_device)
-                if (devices.count { it.name == device.name } > 1) "$name · ${device.address.takeLast(5)}" else name
+                if (candidates.count { it.name == device.name } > 1) "$name · ${device.address.takeLast(5)}" else name
             }.toTypedArray()) { _, index ->
-                val device = devices[index]
+                val device = candidates[index]
                 DiPlayPreferences.savePhone(this, device.address, device.name ?: "iPhone")
                 val start = pendingWireless; pendingWireless = false
                 render()
                 if (start) connect(true)
             }.setNeutralButton(getString(R.string.pair_another)) { _, _ -> openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
             .setNegativeButton(getString(R.string.cancel)) { _, _ -> pendingWireless = false }.show()
+    }
+
+    /** Plan A：抽取"打开蓝牙"提示弹窗，供无适配器 / 无已连接 iPhone 两种分支复用。 */
+    private fun showTurnOnBluetoothDialog() {
+        AlertDialog.Builder(this).setTitle(getString(R.string.turn_on_bluetooth))
+            .setMessage(getString(R.string.enable_the_car_s_bluetooth_and_pair_your_iphone_first))
+            .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ -> openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
+            .setNegativeButton(getString(R.string.later), null).show()
     }
 
     private fun wirelessHelp() {
