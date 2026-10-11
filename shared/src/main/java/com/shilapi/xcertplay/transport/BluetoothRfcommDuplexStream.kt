@@ -52,6 +52,9 @@ class BluetoothRfcommDuplexStream internal constructor(
     private var failure: IOException? = null
     private var readCalls = 0L
     private var receivedBytes = 0L
+
+    /** 对端目前已送达的字节数;没有任何回应时为 0(main #590 链路检测用)。 */
+    val bytesReceived: Long get() = synchronized(lock) { receivedBytes }
     private var flushAllowed = true
 
     // Acquire both streams before starting any reader or iAP2 protocol thread. Android getters

@@ -454,14 +454,19 @@ class Iap2UsbSession internal constructor(
         completedRequests?.offer(waitThreadExited)
     }
 
-    /** 返回 null 表示超时（请求保持排队）；哨兵或 requestWait() 返回 null 时判定会话失败。 */
-    private fun awaitCompletedRead(timeoutMillis: Long): UsbRequest? {
+    /**
+     * 返回 null 表示超时（请求保持排队）；[timedOut] 标记本次 null 是否为超时
+     * （main 语义：超时走 drainTimedOutRead 回读，requestWait 返回 null 才断会话）。
+     * 哨兵或 requestWait() 返回 null 时判定会话失败。
+     */
+    private fun awaitCompletedRead(timeoutMillis: Long, timedOut: AtomicBoolean): UsbRequest? {
         if (!legacyRequestWait) {
             return try {
                 connection.requestWait(timeoutMillis)
             } catch (_: TimeoutException) {
+                timedOut.set(true)
                 null
-            } ?: throw failSession("Android returned no USBMUX read request")
+            }
         }
         val queue = completedRequests ?: return null
         val polled = try {
@@ -471,6 +476,7 @@ class Iap2UsbSession internal constructor(
             return null
         }
         if (polled === waitThreadExited) throw failSession("Android returned no USBMUX read request")
+        if (polled == null) timedOut.set(true)
         return polled
     }
 
@@ -519,11 +525,14 @@ class Iap2UsbSession internal constructor(
                         "fallbackBytes=${queueResult.fallbackBytes}",
                 )
             }
-            val completed = awaitCompletedRead(timeoutMillis)
+            val timedOut = AtomicBoolean(false)
+            val completed = awaitCompletedRead(timeoutMillis, timedOut)
             if (completed == null) {
-                // API 17 迁移：超时（legacy 队列 poll 超时或 API 26+ TimeoutException）
-                drainCancelledRead(request)
-                return@synchronized null
+                // API 17 迁移：超时（legacy 队列 poll 超时或 API 26+ TimeoutException）。
+                // 读可能在超时与 cancel 之间已完成（#610/#301），回读其字节而不是断开会话；
+                // 非超时的 null（队列层无结果）仍按 main 语义断开会话。
+                if (!timedOut.get()) throw failSession("Android returned no USBMUX read request")
+                return@synchronized drainTimedOutRead(request, buffer)
             }
             if (completed !== request) {
                 throw failSession("Android completed an unexpected USB request")
@@ -564,15 +573,35 @@ class Iap2UsbSession internal constructor(
         if (closed) throw IphoneUsbException.DeviceUnavailable("USBMUX session is closed")
     }
 
-    private fun drainCancelledRead(request: UsbRequest) {
-        if (!request.cancel()) {
-            throw failSession("Android could not cancel timed out USBMUX read request")
-        }
-        // API 17 迁移：经 awaitCompletedRead 统一等待（legacy 队列或 API 26+ 定时重载）
-        val completed = awaitCompletedRead(CANCEL_DRAIN_TIMEOUT_MILLIS)
-            ?: throw failSession("Timed out draining cancelled USBMUX read request")
+    /**
+     * 取消已超时的读并从 Android 收回(移植自 main #625,#610/#301)。
+     * 超时与 cancel 之间完成的读已无法取消:它正在返回途中。这一竞态曾在 Telechips 与
+     * DiLink 5.1 车机上每隔几分钟断开整个会话。无论是否完成都排空该请求,并把它携带的
+     * 字节返回,保持 USBMUX 流完整。
+     */
+    private fun drainTimedOutRead(request: UsbRequest, buffer: ByteBuffer): ByteArray? {
+        val cancelled = request.cancel()
+        // API 17 迁移：经 awaitCompletedRead 统一等待（legacy 队列或 API 26+ 定时重载），
+        // 排空阶段超时一律按 main 文案断开（cancelled 与否区分原因）
+        val completed = if (legacyRequestWait) {
+            awaitCompletedRead(CANCEL_DRAIN_TIMEOUT_MILLIS, AtomicBoolean(false))
+        } else {
+            try {
+                connection.requestWait(CANCEL_DRAIN_TIMEOUT_MILLIS)
+            } catch (_: TimeoutException) {
+                null
+            }
+        } ?: throw failSession(
+            if (cancelled) "Timed out draining cancelled USBMUX read request"
+            else "Android could not cancel timed out USBMUX read request",
+        )
         if (completed !== request) {
             throw failSession("Android did not drain the cancelled USBMUX read request")
+        }
+        if (buffer.position() == 0) return null
+        return ByteArray(buffer.position()).also {
+            buffer.flip()
+            buffer.get(it)
         }
     }
 

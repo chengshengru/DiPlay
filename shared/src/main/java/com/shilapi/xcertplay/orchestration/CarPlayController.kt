@@ -63,6 +63,7 @@ import com.shilapi.xcertplay.network.WirelessStartupException
 import com.shilapi.xcertplay.network.WirelessStartupFailure
 import com.shilapi.xcertplay.network.WirelessStartupDiagnostics
 import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
+import com.shilapi.xcertplay.transport.BluetoothLinkCheck
 import com.shilapi.xcertplay.transport.BluetoothRfcommDuplexStream
 import com.shilapi.xcertplay.transport.Ch341DeviceMatcher
 import com.shilapi.xcertplay.transport.Ch341I2cTransport
@@ -273,6 +274,7 @@ class CarPlayController(
     @Volatile private var bonjour: CarPlayBonjour? = null
     private val wirelessResourceLock = Any()
     private val wirelessFailureReported = AtomicBoolean(false)
+    @Volatile private var instantBluetoothLink: InstantBluetoothLink? = null
     @Volatile private var firstTcpWatchdog: FirstTcpWatchdog? = null
     // 已发布的热点地址与相反的备选地址族（main #474：首次 TCP 超时后交替地址族重试）。
     @Volatile private var wirelessPublishedAddress: InetAddress? = null
@@ -1436,9 +1438,11 @@ class CarPlayController(
             }
             logBluetoothConnectionSnapshot(device, "before-connect")
             val bluetoothStarted = System.nanoTime()
+            val bluetoothConnectMillis: Long
             try {
                 connectBluetoothSocket(socket, device.address)
-                connectionDiagnostic("Bluetooth connect completed elapsedMs=${elapsedMillis(bluetoothStarted)} " +
+                bluetoothConnectMillis = elapsedMillis(bluetoothStarted)
+                connectionDiagnostic("Bluetooth connect completed elapsedMs=$bluetoothConnectMillis " +
                     "socketReportedConnected=${runCatching { socket.isConnected }.getOrNull() ?: "unknown"}")
             } catch (error: Throwable) {
                 connectionDiagnostic(
@@ -1461,6 +1465,12 @@ class CarPlayController(
                     // The stream owns the connected socket and also closes it if stream getters
                     // fail. Do not retain a second socket owner in bootstrap teardown.
                     if (bluetoothSocket === socket) bluetoothSocket = null
+                }
+            }
+            if (BluetoothLinkCheck.looksUnreal(bluetoothConnectMillis, 0L)) {
+                InstantBluetoothLink(generation, device, stream, bluetoothConnectMillis).also {
+                    instantBluetoothLink = it
+                    watchForUnrealBluetooth(it)
                 }
             }
             val channel = Iap2Session.openWireless(
@@ -1578,7 +1588,11 @@ class CarPlayController(
             } else {
                 debugLog("wireless bring-up failed", error)
                 if (error is Error) throw error
-                fail(error, generation)
+                // 一条"立刻连上"却没收到一个字节的链路可能从未真实存在:
+                // 如实上报而不是对着同样的失败反复重试(main #590)。
+                val unreal = instantBluetoothLink?.takeIf { it.generation == generation }
+                    ?.let { unrealBluetoothFailure(it, "failure") }
+                fail(unreal ?: error, generation)
                 closeWirelessStack(generation = generation)
             }
         }
@@ -2469,6 +2483,63 @@ class CarPlayController(
         return if (profileConnected.size == 1) profileConnected.single() else null
     }
 
+    /** 一条建立快到不可能是真手机的 RFCOMM 链路,供 unrealBluetoothFailure 使用(main #590)。 */
+    private class InstantBluetoothLink(
+        val generation: Int,
+        val device: BluetoothDevice,
+        val stream: BluetoothRfcommDuplexStream,
+        val connectMillis: Long,
+    )
+
+    /**
+     * 一些车机对每次 RFCOMM 连接都立刻返回成功、随后一个字节也不送:通话与音乐跑在厂商
+     * 自己的蓝牙模块上,Android 的适配器背后没有任何手机能听到的东西。其中一部分让链路
+     * 保持打开且静默,另一部分几秒后断开,因此既在静默一段时间后验证,也在未收到字节而
+     * 尝试失败时验证(见 bring-up 失败处理)。
+     */
+    private fun watchForUnrealBluetooth(link: InstantBluetoothLink) {
+        Thread({
+            try {
+                Thread.sleep(BluetoothLinkCheck.SILENCE_MILLIS)
+            } catch (_: InterruptedException) {
+                return@Thread
+            }
+            if (isStaleWirelessRun(link.generation)) return@Thread
+            val failure = unrealBluetoothFailure(link, "silence") ?: return@Thread
+            if (isStaleWirelessRun(link.generation)) return@Thread
+            fail(failure, link.generation)
+            closeWirelessStack(generation = link.generation)
+        }, "diplay-bluetooth-link-check").apply { isDaemon = true; start() }
+    }
+
+    /**
+     * [link] 从未真实存在时的失败;真实或无法判定时为 null。验证方式是连接一个没有手机
+     * 提供的服务,真实协议栈不可能连上;只有它也"立刻成功"才判定链路不真实。收到过
+     * 一个字节的链路完全不做测试。
+     */
+    private fun unrealBluetoothFailure(link: InstantBluetoothLink, trigger: String): WirelessStartupException? {
+        val received = link.stream.bytesReceived
+        if (!BluetoothLinkCheck.looksUnreal(link.connectMillis, received)) return null
+        val started = System.nanoTime()
+        val control = runCatching {
+            link.device.createRfcommSocketToServiceRecord(UUID.randomUUID())
+                .use { connectBluetoothSocket(it, link.device.address) }
+        }
+        val controlMillis = elapsedMillis(started)
+        val unreal = BluetoothLinkCheck.controlProvesUnreal(control.isSuccess, controlMillis)
+        connectionDiagnostic(
+            "Bluetooth link check trigger=$trigger connectMs=${link.connectMillis} receivedBytes=$received " +
+                "controlConnect=${if (control.isSuccess) "succeeded" else "failed"} " +
+                "controlMs=$controlMillis unreal=$unreal",
+        )
+        if (!unreal) return null
+        return WirelessStartupException(
+            WirelessStartupFailure.BLUETOOTH_UNUSABLE,
+            "Android Bluetooth on this head unit reports ${BluetoothLinkCheck.UNREAL_MARK}: " +
+                "a connection to a service no phone offers also succeeded in ${controlMillis}ms",
+        )
+    }
+
     private fun connectBluetoothSocket(socket: BluetoothSocket, address: String) {
         val result = AtomicReference<Throwable?>()
         val connected = CountDownLatch(1)
@@ -2598,6 +2669,18 @@ class CarPlayController(
         buildSet {
             addAll(connectedBluetoothDevices(adapter, BluetoothProfile.HEADSET, BluetoothHeadset::class.java))
             addAll(connectedBluetoothDevices(adapter, BluetoothProfile.A2DP, BluetoothA2dp::class.java))
+            // 车机是手机音频与通话的接收端(sink),iPhone 会出现在这些隐藏 profile 下(main #585)。
+            // 仅在 profile 报告已连接时才询问:不存在的 profile 服务永远不会应答代理请求,
+            // 直接询问会白白付出完整的超时等待。
+            for (profile in intArrayOf(PROFILE_A2DP_SINK, PROFILE_HEADSET_CLIENT)) {
+                val connected = try {
+                    adapter.getProfileConnectionState(profile) == BluetoothProfile.STATE_CONNECTED
+                } catch (error: SecurityException) {
+                    Log.w(IphoneCarPlayConfiguration.TAG, "Could not read Bluetooth profile $profile state", error)
+                    false
+                }
+                if (connected) addAll(connectedBluetoothDevices(adapter, profile, BluetoothProfile::class.java))
+            }
         }
 
     private fun <T : BluetoothProfile> connectedBluetoothDevices(
@@ -2983,6 +3066,9 @@ class CarPlayController(
         private const val TELEPHONY_DROP = 3
         private val diagnosticAttempts = AtomicInteger()
         private const val IAP2_IPHONE_UUID = "00000000-deca-fade-deca-deafdecacafe"
+        // BluetoothProfile.A2DP_SINK 与 HEADSET_CLIENT,公开 SDK 中隐藏(main #585)。
+        private const val PROFILE_A2DP_SINK = 11
+        private const val PROFILE_HEADSET_CLIENT = 16
         private const val HOTSPOT_START_TIMEOUT_MILLIS = 60_000L
         private const val WIFI_P2P_START_TIMEOUT_MILLIS = 20_000L
         private const val PAIR_TIMEOUT_MILLIS = 5 * 60_000L
