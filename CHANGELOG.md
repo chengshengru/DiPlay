@@ -1,6 +1,12 @@
-# DiPlay 0.2.16-api17 — 2026-10-11
+# DiPlay 0.2.17-api17 — 2026-10-11
 
-Android 4.2.2 (API 17) port of DiPlay 0.2.16 (`main` @ `6ebb582`, which also includes 0.2.15). All seven migration waves are complete; see the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for per-feature details and API 17 guards.
+Android 4.2.2 (API 17) port of DiPlay 0.2.17 (`main` @ `4314bbe1`). All eight migration waves are complete; see the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for per-feature details and API 17 guards. Wave 8 ports the 0.2.17 increment (44 commits) on top of 0.2.16-api17:
+
+- Count Opus 16 kHz microphone packets by their own rate and record the iPhone clock; expose CarPlay microphone recording for voice memos (#547, #548).
+- Keep the wired session alive across corrupted NCM blocks, retry iAP2 identification against older-iOS rejection messages, explain wired-mode rejection and record settings failures, auto-confirm USB on Android 10+ with BYD accessibility settings, and add a driver-lowerable iPhone USB charging-current control (#575, #583).
+- Pause the car-head-unit Wi-Fi scan during Wi-Fi Direct on every Android version, recommend the built-in car hotspot in Settings, and store diagnostic reports in the visible Downloads/DiPlay directory (#570, #576, #541).
+- Follow ambient lighting with album-cover colors, hide the BYD incoming-call popup on the CarPlay foreground through accessibility, allow CarPlay remote keys on touch devices and add external HID controller support (#537, #539, #549, #550).
+- Infer the DiLink controller generation and add a background update check — WorkManager is downgraded to 2.8.1 to fit the branch AGP 7.4.2 build chain (#531, #488).
 
 - Send the Siri and call microphone through a bundled software Opus encoder, advertise Opus only when it can be encoded, and align echo reference, buffered-audio pacing and audio diagnostics (#468, #483, #421, #484, #499).
 - Fix wired NCM receive framing, extend the 16 KiB usbfs limit and the step-down USB read retries down to API 17–25 (#478, #495).

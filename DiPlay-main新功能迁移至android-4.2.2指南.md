@@ -34,7 +34,7 @@
 
 | 锚点 | Commit（完整哈希） | 时间 | 说明 |
 |------|--------------------|------|------|
-| **main 基线** | `6ebb58218f90b0c0853b78013cb8431765ca77bb` | 2026-10-09 19:01 +0400 | Merge PR #533（release/0.2.16）；较 `ef4e3fe5` 仅新增发版说明/站点/版本号，无新功能代码，波次一至四功能终点仍为 `ef4e3fe5` |
+| **main 基线** | `4314bbe133599b21f40d23d3bf3de3f0d45353b4` | 2026-10-10 15:47 +0400 | Merge PR #584（release/0.2.17）；增量轮（波次八，批次A–E）已迁移完成，上一基线 `6ebb58218f90b0c0853b78013cb8431765ca77bb`（Merge PR #533，release/0.2.16） |
 | **分叉点** | `7887bb7bf2b52258e663a2a4ea1332382ed80ad8` | 2026-10-07 15:24 +0400 | v0.2.14 发布合并点，两分支共同祖先 |
 | **android-4.2.2 起点** | `6a08b07d2ee41f002d9f8b5151c94d7ed26d5fea` | 2026-10-09 20:42 +0800 | 分支已有 4 个移植提交（API 17 下移、legacy-mdns、热点恢复） |
 
@@ -128,6 +128,11 @@ flowchart LR
 | 六 | 重连条联动 | #482/`f256cd64` | ✅ 已完成 | 2026-10-11 | markReconnectNeeded 接线已随批次带入；补 #482 会话挂起重连条测试（PendingReconnect 挂起 + 重连条可见 + 不停止会话） |
 | 六 | 设置间距/对齐精修 | #486/#491/#490 | ✅ 已完成 | 2026-10-11 | #486/#420 布局代码已随 B2 基线（6ebb582）带入；#491 补 3 处 dp 字面量 → `SETTINGS_BLOCK_GAP_DP` + SettingsLayoutSourceRulesTest + headerActionsShareOneHeight；#490 AGENTS.md Settings layout 节 + overviewLinksToEveryOtherCategory；#420 HomeCompactLayoutTest 横竖屏排列断言 |
 | 七 | 7 语言字符串同步 | 各波次随附 | ✅ 已完成 | 2026-10-11 | 分支提交 `2deb9cc0`/`c33d6d35`；6 个 main 文案提交应用 + `fps_counter_*` ×6 语言补齐；`SettingsTranslationsTest` 1/1 通过；详见 10.1 |
+| 八 | 批次A 纯逻辑小项 | #547/#548/#531/#550/`bcd1e71d` | ✅ 已完成 | 2026-10-11 | 分支提交 `5b1924d7`；Opus 帧计数、麦克风录制诊断、UpdateVersion 版本推断、氛围灯热修、远程键 |
+| 八 | 批次B USB/传输 | #575+#583 | ✅ 已完成 | 2026-10-11 | 分支提交 `31216dab`；NCM 坏块保活、iAP2 重试、拒绝原因解释、USB 自动确认、充电电流诊断 |
+| 八 | 批次C 无线与诊断 | #570/#541/#576 | ✅ 已完成 | 2026-10-11 | 分支提交 `9c8ab729`；扫描暂停全版本、诊断导出到 Downloads、推荐内置热点文案 |
+| 八 | 批次D 交互与氛围灯 | #537/#539/#549 | ✅ 已完成 | 2026-10-11 | 分支提交 `a7bc59aa`；专辑封面取色氛围灯、BYD 来电弹窗隐藏（无障碍通道）、外接控制器 |
+| 八 | 批次E 后台更新检查 | #488（含 3 fix） | ✅ 已完成 | 2026-10-11 | 分支提交 `c8cb0e9b`；WorkManager 2.12.0→**2.8.1** 降级（AGP 7.4.2 不兼容 2.12）；API 17 适配：getSystemService 走 ContextCompat、Network 21+ 低版本走 ActiveNetworkInfo+默认路由、横幅 RippleDrawable/foreground 走 UiCompat；UpdateClientTest 改 ServerSocket 桩（:common 解析不到 jdk.httpserver）；UpdateAvailabilityTest sdk 35→33（Robolectric 4.10 上限）；文案去版本号 ×7 语言同步 |
 
 ### 0.5 每轮迁移的文档更新义务
 
@@ -677,7 +682,7 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 ### 收尾
 - [ ] 分支全量构建：`./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleDebug`
 - [ ] 真机验收矩阵（第 12.3 节）逐项签字
-- [x] 更新分支版 `CHANGELOG` 注明各功能对应 main PR 号（0.2.16-api17 段落，随版本同步完成）
+- [x] 更新分支版 `CHANGELOG` 注明各功能对应 main PR 号（0.2.17-api17 段落，随版本同步完成）
 
 ---
 
