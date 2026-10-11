@@ -1,3 +1,17 @@
+# DiPlay 0.2.18-api17 — 2026-10-12
+
+Android 4.2.2 (API 17) port of DiPlay 0.2.18 (`main` @ `24ae1fa5`). Wave 9 ports the 0.2.18 increment (47 commits) on top of 0.2.17-api17; see the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for per-feature details and API 17 guards:
+
+- Keep wired sessions running when a USB read finishes as DiPlay stops waiting for it, start wired CarPlay on Android 7.1 head units and when a head-unit USB audio driver holds the iPhone, and skip VPN pre-consent dialogs over approved network ADB (#625, #614, #618).
+- Stop discarding music packets after a 10 ms wait, drain queued AAC frames at a stream reset, and log the /feedback position against the received audio (#618, #625).
+- Show the real connection stage in every app language, stop with a clear cause when a head unit's Bluetooth cannot reach the iPhone, and find the connected iPhone through sink-role Bluetooth profiles (#624, #590, #585).
+- Wheel next/previous on the CarPlay screen without the wheel-key service, Geely/Lynk `geely_fx11` wheel keys and Siri, wheel-key service restore retries with diagnostics, and next/previous to answer or decline with CarPlay call keys (#600, #626, #622, #625).
+- Settings backup and restore from a phone browser (zxing 3.5.3), an installer choice for updates, and a shared DiPlayButton for code-built chrome with the picture panel repainted on night changes (#598, #593, #594).
+- Experimental, off-by-default options: Harman full screen (guarded to API 19+), square corners, clearer navigation voice over USB, MediaTek low-latency decoding (API 21+ paths), a media-key audio focus opt-out, a cluster speedometer, FCE cluster guidance and BYD SOME/IP windshield HUD gating (#613, #596, #622, #608, #615, #607, #599).
+- Skipped on API 17: car phone audio via Telecom self-managed calls (#595 — API 26+); the common `<queries>` block stays commented because targetSdk 28 needs no package-visibility filter.
+
+See the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for skipped-item reasons; full-release vehicle acceptance is not claimed.
+
 # DiPlay 0.2.17-api17 — 2026-10-11
 
 Android 4.2.2 (API 17) port of DiPlay 0.2.17 (`main` @ `4314bbe1`). All eight migration waves are complete; see the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for per-feature details and API 17 guards. Wave 8 ports the 0.2.17 increment (44 commits) on top of 0.2.16-api17:

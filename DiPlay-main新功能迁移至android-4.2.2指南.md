@@ -1,7 +1,7 @@
 # DiPlay main 分支新功能迁移至 android-4.2.2 分支 — 详细迁移指南
 
 > **作者**: TRAE AI
-> **生成日期**: 2026-10-09 ｜ **最后更新**: 2026-10-11
+> **生成日期**: 2026-10-09 ｜ **最后更新**: 2026-10-12
 > **源分支基线**: `main` @ `ef4e3fe5c39fa49a532a9570ecb930618a06e106`（2026-10-09 16:00 +0400，Merge PR #528）
 > **目标分支**: `android-4.2.2` @ `6a08b07d`（2026-10-09 20:42 +0800，"迁移热点恢复"）
 > **分叉点**: `7887bb7b`（v0.2.14，2026-10-07）
@@ -34,7 +34,7 @@
 
 | 锚点 | Commit（完整哈希） | 时间 | 说明 |
 |------|--------------------|------|------|
-| **main 基线** | `4314bbe133599b21f40d23d3bf3de3f0d45353b4` | 2026-10-10 15:47 +0400 | Merge PR #584（release/0.2.17）；增量轮（波次八，批次A–E）已迁移完成，上一基线 `6ebb58218f90b0c0853b78013cb8431765ca77bb`（Merge PR #533，release/0.2.16） |
+| **main 基线** | `24ae1fa52edbe27392a668d4c9e71a32d5691986` | 2026-10-11 14:47 +0400 | Merge PR #628（release/0.2.18）；增量轮（波次九，批次A–H）已迁移完成，上一基线 `4314bbe133599b21f40d23d3bf3de3f0d45353b4`（Merge PR #584，release/0.2.17） |
 | **分叉点** | `7887bb7bf2b52258e663a2a4ea1332382ed80ad8` | 2026-10-07 15:24 +0400 | v0.2.14 发布合并点，两分支共同祖先 |
 | **android-4.2.2 起点** | `6a08b07d2ee41f002d9f8b5151c94d7ed26d5fea` | 2026-10-09 20:42 +0800 | 分支已有 4 个移植提交（API 17 下移、legacy-mdns、热点恢复） |
 
@@ -133,6 +133,14 @@ flowchart LR
 | 八 | 批次C 无线与诊断 | #570/#541/#576 | ✅ 已完成 | 2026-10-11 | 分支提交 `9c8ab729`；扫描暂停全版本、诊断导出到 Downloads、推荐内置热点文案 |
 | 八 | 批次D 交互与氛围灯 | #537/#539/#549 | ✅ 已完成 | 2026-10-11 | 分支提交 `a7bc59aa`；专辑封面取色氛围灯、BYD 来电弹窗隐藏（无障碍通道）、外接控制器 |
 | 八 | 批次E 后台更新检查 | #488（含 3 fix） | ✅ 已完成 | 2026-10-11 | 分支提交 `c8cb0e9b`；WorkManager 2.12.0→**2.8.1** 降级（AGP 7.4.2 不兼容 2.12）；API 17 适配：getSystemService 走 ContextCompat、Network 21+ 低版本走 ActiveNetworkInfo+默认路由、横幅 RippleDrawable/foreground 走 UiCompat；UpdateClientTest 改 ServerSocket 桩（:common 解析不到 jdk.httpserver）；UpdateAvailabilityTest sdk 35→33（Robolectric 4.10 上限）；文案去版本号 ×7 语言同步 |
+| 九 | 批次A 纯逻辑/连接小项 | #618b/#618d/#622b/#622c/#597/#622f | ✅ 已完成 | 2026-10-12 | 分支提交 `42b5f653`；USB 短包可选填充状态机、蓝牙 flush 保留、25 mm 步进、图标 192 px（AirPlayIconSizing）、About 层级、热点名警告文案 |
+| 九 | 批次B USB/传输 | #618a/#625a/#590/#585 | ✅ 已完成 | 2026-10-12 | 分支提交 `42f03d8a`；UsbConfigurationSelection 并入 UsbDescriptorCompat、drainTimedOutRead 保活、BluetoothLinkCheck、sink-role profile 查找 |
+| 九 | 批次C 音频/解码 | #618f/#625b/#622a/#615/#608 | ✅ 已完成 | 2026-10-12 | 分支提交 `f967f18b`；AAC 排空、FeedbackPositionMonitor、语音 8/16 kHz、媒体键焦点开关、MTK 解码（⏭️ AudioPlaybackCallback 仅 API 21+ 路径，低版本走默认解码链） |
+| 九 | 批次D 无线/VPN | #614/#618c | ✅ 已完成 | 2026-10-12 | 分支提交 `069ce4ff`；VPN 监听器 scopedToTunnel、VpnPreConsent 免对话框启动 |
+| 九 | 批次E 显示 | #613/#596 | ✅ 已完成 | 2026-10-12 | 分支提交 `dedd59a9`；Harman 全屏（⏭️ 32 位 x86 库按 ABI 注入，API 19+ 守卫）、直角满屏 |
+| 九 | 批次F 车辆/HUD | #622d/#600/#622e/#626/#599/#607/#587 | ✅ 已完成 | 2026-10-12 | 分支提交 `8f4091b3`（44 文件 +2112/-18）；来电方向盘键、窗口媒体键（API 28/33 双档测试）、WheelKeyService 恢复重试+诊断报告、Geely/Lynk 方向盘键（aidl + buildTools 34.0.0）、FCE 集群引导、测速表悬浮、BYD SOME/IP HUD 可用性前置检查 |
+| 九 | 批次G 新功能块 | #594/#598/#593 | ✅ 已完成 | 2026-10-12 | 分支提交 `bbcd16fc`（26 文件 +1362/-105）；DiPlayButton（ripple/stateListAnimator/foreground 全走 UiCompat）+ 等待屏/菜单 12 处 + 画面调节面板补齐基线 palette 化、设置备份（zxing 3.5.3 纯 Java 库 + settings-backup.html + backup 字符串 ×7）、安装器选择（公开副本哈希校验 + 多安装器选择器；manifest `<queries>` 保持注释，targetSdk 28 无包可见性过滤）；测试 sdk 35→33（Robolectric 4.9 上限） |
+| 九 | 批次H 守卫 | #595 | ⏭️ 跳过/守卫 | 2026-10-12 | Telecom 自管理通话整体跳过（API 26+）：分支无 telecom/ 文件、无 `phoneAudioRoute*` 引用、`WheelKeyService.wanted()` 未追加、shared/AndroidManifest 未声明 `MANAGE_OWN_CALLS`/`PhoneAudioConnectionService`；`:shared:assembleDebug` 验证无残留 |
 
 ### 0.5 每轮迁移的文档更新义务
 
@@ -142,7 +150,98 @@ flowchart LR
 2. 0.1 基线快照：把"main 基线"行推进到本轮实际迁移到的 main 提交；
 3. 若执行了"main 更优则替换"：在备注列写 `🔁 替换: <旧文件> → <PR>`；
 4. 若发现新的增量提交不属于任何现有波次：在对应波次追加小节或在 0.4 表新增行；
-5. 文档头部"最后更新"日期同步修改。
+5. **版本号同步**：按 §0.6 同步 `mobile` 的 `versionCode`/`versionName` 并追加 `CHANGELOG` 首段（本项**每轮必做**，不可省略）；
+6. 文档头部"最后更新"日期同步修改。
+
+### 0.6 main 版本号与 CHANGELOG 同步规范（每轮必做）
+
+> **为什么需要**：main 每个 public preview 批次都会推进 `mobile` 的版本号（v0.2.18 → `versionCode 37`），并追加 `CHANGELOG` 段落。分支若不同步，APK 版本号会停在上一轮，用户看到的版本与迁移进度、诊断报告里的 `appVersion` 全部对不上，后续排查会失去唯一标识。
+
+#### 0.6.1 版本号载体（唯一信息源）
+
+分支对外的版本号只有**一处**载体：
+
+```
+mobile/build.gradle.kts → android.defaultConfig.versionCode / versionName
+```
+
+同名文件在 `automotive/`、`samples/home/`、`samples/maphost/` 中**另有独立版本线，不参与同步**（见 0.6.3）。
+
+#### 0.6.2 命名契约与取值规则
+
+| 规则 | 说明 |
+|------|------|
+| **`versionName`** | `<main 的 versionName>-api17`。`-api17` 后缀是分支标识，**永不省略**；main 若某轮用了 `-preview` 之类后缀，拼接为 `<main versionName>-api17` |
+| **`versionCode`** | **与当轮 main 的 `versionCode` 取同一整数**（不独立递增）。原因：debug 变体有独立 `applicationIdSuffix`，release 与 main 官方包本就不同 ABI/签名，无需靠 versionCode 区分；取同值可让"main 第 N 版 ↔ 分支第 N 版"一一对应 |
+| **debug 变体** | 保持 `buildTypes.debug` 的 `applicationIdSuffix = ".hudtest"` 与 `versionNameSuffix = "-hud-test"` 不动（`mobile/build.gradle.kts`）。debug 全名形如 `0.2.18-api17-hud-test` / 包名 `com.shihab.diplay.hudtest`，与 release 可并存安装 |
+| **对用户的可见性** | release 的 `versionName` 必须以 `-api17` 结尾，使诊断报告与"关于"页能一眼区分分支版与官方版 |
+
+**当前对齐状态（以 main `24ae1fa5` / v0.2.18 为例）**：
+
+| 载体 | main | 分支（本轮落定值） |
+|------|------|-------------------|
+| `mobile` `versionCode` | `37` | **`37`** |
+| `mobile` `versionName` | `0.2.18` | **`0.2.18-api17`** |
+| debug `versionName` | `0.2.18-hud-test` | **`0.2.18-api17-hud-test`** |
+| `CHANGELOG.md` 首段标题 | `# DiPlay 0.2.18 — 2026-10-11` | **`# DiPlay 0.2.18-api17 — <本轮日期>`** |
+| 上一轮（v0.2.17） | `36` / `0.2.17` | `36` / `0.2.17-api17`（已完成） |
+
+#### 0.6.3 不同步的模块（误改会破坏独立版本线）
+
+| 模块 | 两分支现值 | 处置 |
+|------|-----------|------|
+| `automotive/build.gradle.kts`（`:automotive`，`com.shilapi.xcertplay`） | `versionCode 1201` / `versionName "1.2.1"` | **不动**，跟随 main 原值，**不追加 `-api17`** |
+| `samples/home/build.gradle.kts`（`:home`） | `versionCode 1` / `versionName "0.1"` | **不动** |
+| `samples/maphost/build.gradle.kts`（`:maphost`） | `versionCode 1` / `versionName "1.0"` | **不动** |
+| `shared/`、`common/`、`legacy-mdns/` | 库模块，无版本号 | — |
+
+#### 0.6.4 CHANGELOG 写法（继承 + 自建）
+
+分支 `CHANGELOG.md` 采用「**自建首段 + 保留 main 历史英文段落**」结构：
+
+1. **自建首段**（每轮置于文件最前）：
+   ```
+   # DiPlay <main versionName>-api17 — <YYYY-MM-DD>
+
+   Android 4.2.2 (API 17) port of DiPlay <main versionName> (`main` @ `<main commit hash>`).
+   <一句进度说明；波次完成情况；指向迁移指南>
+   - <逐条列出本轮增量的 main PR 号与功能一句话>
+   ...
+   - Skipped or degraded on API 17: <逐项列出本轮跳过/降级项及原因>；minSdk stays 17 and the `-api17` suffix marks the port.
+   ```
+2. **保留 main 的历史英文段落**（上一轮及更早）原样不动，**只追加、不改写**；
+3. **跳过/降级项必须显式列出**（例如 0.2.17-api17 段尾已列：Compose UI 重写为 View、侧栏模糊需 Android 12+、`#493` 小窗模式域、Android 17 本地网络权限 no-op 守卫）；
+4. **不新增 `docs/RELEASE-NOTES-<ver>.md`**：分支 `docs/` 只保留到 `RELEASE-NOTES-0.2.14.md`；main 的新 release notes（如 `docs/RELEASE-NOTES-0.2.18.md`）**不复制**，功能清单落在分支 `CHANGELOG.md` + 本指南 §0.4。`docs/RELEASE-NOTES-NEXT.md` 可按需跟随 main（不影响构建）。
+
+#### 0.6.5 执行步骤与校验
+
+```sh
+# 1) 读 main 的版本号（唯一信息源）
+git show origin/main:mobile/build.gradle.kts | grep -E "versionCode|versionName"
+
+# 2) 只改分支 mobile/build.gradle.kts 的 defaultConfig 两行
+#    versionCode = <main 同值>
+#    versionName = "<main versionName>-api17"
+
+# 3) 追加 CHANGELOG.md 首段（0.6.4 模板）
+# 4) 推进本指南 §0.1「main 基线」+ 登记 §0.4 进度表（§0.5 第 1、2 项）
+```
+
+**校验（构建后）**：
+
+```sh
+./gradlew :mobile:assembleRelease
+# 期望：versionName 以 -api17 结尾，versionCode 等于当轮 main 的 versionCode
+aapt dump badging mobile/build/outputs/apk/release/mobile-release.apk | grep versionName
+```
+
+| 检查项 | 通过标准 |
+|--------|---------|
+| release `versionName` | 以 `-api17` 结尾 |
+| release `versionCode` | **等于**当轮 main 的 `versionCode` |
+| debug `versionName` | 额外带 `-hud-test`（`applicationIdSuffix` 仍为 `.hudtest`） |
+| `automotive` / `:home` / `:maphost` | 与 main 逐字一致，**未追加 `-api17`** |
+| `CHANGELOG.md` 首段 | 标题为 `# DiPlay <ver>-api17 — <日期>`，段尾含跳过项清单，且 main 历史段落未被改写 |
 
 ---
 
@@ -683,6 +782,8 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 - [ ] 分支全量构建：`./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleDebug`
 - [ ] 真机验收矩阵（第 12.3 节）逐项签字
 - [x] 更新分支版 `CHANGELOG` 注明各功能对应 main PR 号（0.2.17-api17 段落，随版本同步完成）
+- [x] **版本号同步 main**（§0.6）：`mobile` `versionCode 36` / `versionName "0.2.17-api17"`，与 main v0.2.17 对齐；`automotive` / `:home` / `:maphost` 保持独立版本线未动
+- [x] 下一轮（波次九）版本号同步：`mobile` → `versionCode 37` / `versionName "0.2.18-api17"`（§0.6.2）；`CHANGELOG` 追加 `0.2.18-api17` 首段（2026-10-12 完成）
 
 ---
 
