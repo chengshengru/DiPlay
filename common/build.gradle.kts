@@ -56,6 +56,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     // main #488：WorkManager 每日后台更新检查（2.8.1 兼容 AGP 7.4.2 与 API 17）
     implementation(libs.androidx.work.runtime)
+    // main #598：设置备份二维码（zxing core 纯 Java 库，兼容 API 17）
+    implementation(libs.zxing.core)
 
     // 移除所有 Compose 依赖（API 17 不支持）
 

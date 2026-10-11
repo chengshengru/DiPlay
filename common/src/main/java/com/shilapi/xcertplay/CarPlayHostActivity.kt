@@ -433,6 +433,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var menuOpen = false
     private var latestStage = "Preparing CarPlay"
     private var darkMode = false
+    // main #594：菜单叠加层配色，跟随日夜态；原固定 MENU_* 常量保留供旧代码使用（作者：TRAE AI）。
+    private val overlayPalette: DiPlayPalette get() = DiPlayPalette.of(darkMode)
     // main B7：应用外观联动——主机页持有外观归属权并向运行时发布当前夜间态（作者：TRAE AI）。
     override val currentAppNight: Boolean get() = appNight
     private var appNight = true
@@ -1569,17 +1571,15 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             gravity = Gravity.CENTER
         }
         panel.addView(instructions)
-        val recovery = Button(this).apply {
+        val recovery = DiPlayButton(this).apply {
             text = getString(R.string.reset_carplay_wi_fi)
-            isAllCaps = false
             visibility = View.GONE
             setOnClickListener { showDiPlayHome("wireless-recovery") }
             wifiRecoveryButton = this
         }
         panel.addView(recovery, LinearLayout.LayoutParams(dp(300), dp(64)).apply { bottomMargin = dp(12) })
-        val retry = Button(this).apply {
+        val retry = DiPlayButton(this).apply {
             text = getString(R.string.retry_carplay_connection)
-            isAllCaps = false
             visibility = View.GONE
             setOnClickListener {
                 if (!CarPlayBackgroundSession.isOwner(this@CarPlayHostActivity) ||
@@ -1593,14 +1593,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             startupRetryButton = this
         }
         panel.addView(retry, LinearLayout.LayoutParams(dp(300), dp(64)).apply { bottomMargin = dp(12) })
-        val back = Button(this).apply {
+        val back = DiPlayButton(this).apply {
             text = getString(R.string.back_to_diplay)
-            isAllCaps = false
-            setTextColor(Color.rgb(12, 17, 27))
-            background = GradientDrawable().apply {
-                setColor(Color.rgb(166, 200, 255))
-                cornerRadius = dp(20).toFloat()
-            }
             setOnClickListener { showDiPlayHome() }
         }
         panel.addView(back, LinearLayout.LayoutParams(dp(300), dp(64)))
@@ -1616,6 +1610,11 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             stage.setTextColor(colors.text)
             instructions.setTextColor(colors.secondary)
             gestureHint.setTextColor(colors.secondary)
+            // main #594：等待屏按钮跟随日夜配色统一由 DiPlayButton 着色（作者：TRAE AI）。
+            val buttonPalette = DiPlayPalette.of(darkMode)
+            back.style(DiPlayButtonKind.PRIMARY, buttonPalette, overlay = false)
+            retry.style(DiPlayButtonKind.SECONDARY, buttonPalette, overlay = false)
+            recovery.style(DiPlayButtonKind.SECONDARY, buttonPalette, overlay = false)
         }
         paintWaitingScreen()
         viewport.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
@@ -2281,7 +2280,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     // main B7：应用外观（DARK/LIGHT/AUTO）解析出的夜间态与主机页不同时，重建设置菜单
-    // 并重涂侧栏（作者：TRAE AI）。菜单色在分支仍为静态深色，重建主要恢复滚动与焦点。
+    // 并重涂侧栏与画面调节面板（作者：TRAE AI）。
     private fun refreshAppAppearance() {
         val nextNight = resolveAppNightNow(darkMode)
         if (nextNight == appNight) return
@@ -2307,6 +2306,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             }
         }
         paintSidePanelTheme()
+        // main #594：画面调节面板随夜间态整树重涂（作者：TRAE AI）。
+        (picturePanel as? CarPlayPicturePanel)?.applyPalette(overlayPalette)
     }
 
     private inline fun <reified T : View> findDescendant(root: View): T? =
@@ -2342,9 +2343,11 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             ),
         )
         if (sessionDisplay?.viewAreas?.sidePanel() != null) {
-            content.addView(Button(this).apply {
+            content.addView(DiPlayButton(this).apply {
                 text = getString(if (sidePanelShown) R.string.side_panel_full_screen else R.string.side_panel_show)
-                textSize = 20f
+                textSize = 17f
+                minHeight = dp(52)
+                style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
                 setOnClickListener {
                     cancelSettingsEdits()
                     showSidePanel(!sidePanelShown)
@@ -2712,13 +2715,11 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             ).apply { topMargin = dp(30) },
         )
 
-        val save = Button(this).apply {
+        val save = DiPlayButton(this).apply {
             text = getString(R.string.save_and_reconnect)
-            isAllCaps = false
             textSize = 17f
-            setTextColor(MENU_BUTTON_TEXT)
-            UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_ACCENT))
             minHeight = dp(52)
+            style(DiPlayButtonKind.PRIMARY, overlayPalette, overlay = true)
             setOnClickListener { saveSettingsAndReconnect() }
         }
         content.addView(
@@ -2729,13 +2730,11 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             ).apply { topMargin = dp(46) },
         )
 
-        val exitApplicationButton = Button(this).apply {
+        val exitApplicationButton = DiPlayButton(this).apply {
             text = getString(R.string.exit_application)
-            isAllCaps = false
             textSize = 17f
-            setTextColor(Color.WHITE)
-            UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_DANGER))
             minHeight = dp(52)
+            style(DiPlayButtonKind.DANGER, overlayPalette, overlay = true)
             setOnClickListener { exitApplication() }
         }
         content.addView(
@@ -2746,14 +2745,18 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             ).apply { topMargin = dp(12) },
         )
 
-        content.addView(Button(this).apply {
+        content.addView(DiPlayButton(this).apply {
             text = getString(R.string.language_app_language)
-            isAllCaps = false
+            textSize = 17f
+            minHeight = dp(52)
+            style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
             setOnClickListener { AppLocale.showPicker(this@CarPlayHostActivity) }
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
-        val gestureButton = Button(this).apply {
-            isAllCaps = false
+        val gestureButton = DiPlayButton(this).apply {
+            textSize = 17f
+            minHeight = dp(52)
+            style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
             setOnClickListener {
                 // main #487：0 = 禁用手势；循环为 0→2→3→4→0（作者：TRAE AI）。
                 gestureFingerCount = when (gestureFingerCount) { 0 -> 2; 4 -> 0; else -> gestureFingerCount + 1 }
@@ -2763,13 +2766,11 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         gestureButton.text = settingsGestureButtonText()
         content.addView(gestureButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
-        val openDiPlaySettingsButton = Button(this).apply {
+        val openDiPlaySettingsButton = DiPlayButton(this).apply {
             text = "${getString(R.string.app_name)} ${getString(R.string.settings)}"
-            isAllCaps = false
             textSize = 17f
-            setTextColor(Color.WHITE)
-            UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_TRACK_OFF))
             minHeight = dp(52)
+            style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
             setOnClickListener {
                 // main #500：跳转完整设置页前确认丢弃（作者：TRAE AI）。
                 leaveSettingsMenu { showDiPlayHome("settings") }
@@ -2801,12 +2802,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             ),
         )
         panel.addView(
-            Button(this).apply {
+            DiPlayButton(this).apply {
                 text = "X"
-                isAllCaps = false
                 textSize = 22f
-                setTextColor(Color.WHITE)
-                UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_TRACK_OFF))
+                style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
                 contentDescription = getString(R.string.discard_changes_and_exit_settings)
                 minWidth = 0
                 minHeight = 0
@@ -3323,9 +3322,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             orientation = LinearLayout.VERTICAL
         }
         actions.addView(
-            Button(this).apply {
+            DiPlayButton(this).apply {
                 text = getString(R.string.choose_image)
-                isAllCaps = false
+                style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
                 setOnClickListener {
                     externalActivityInProgress = true
                     launchCarButtonImagePicker(
@@ -3347,9 +3346,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             ),
         )
         actions.addView(
-            Button(this).apply {
+            DiPlayButton(this).apply {
                 text = getString(R.string.default_icon)
-                isAllCaps = false
+                style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
                 setOnClickListener {
                     AirPlayPersistence.clearCustomAirPlayIcon(this@CarPlayHostActivity)
                     updateAirPlayIconPreview()
@@ -3543,17 +3542,17 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             orientation = LinearLayout.HORIZONTAL
         }
         buttons.addView(
-            Button(this).apply {
+            DiPlayButton(this).apply {
                 text = getString(R.string.set)
-                isAllCaps = false
+                style(DiPlayButtonKind.PRIMARY, overlayPalette, overlay = true)
                 setOnClickListener { openSafeAreaEditor() }
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         buttons.addView(
-            Button(this).apply {
+            DiPlayButton(this).apply {
                 text = getString(R.string.reset)
-                isAllCaps = false
+                style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
                 setOnClickListener { resetSafeAreaForCurrentSize() }
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -3631,17 +3630,17 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             setPadding(dp(16), dp(10), dp(16), dp(16))
         }
         controls.addView(
-            Button(this).apply {
+            DiPlayButton(this).apply {
                 text = getString(R.string.cancel)
-                isAllCaps = false
+                style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
                 setOnClickListener { closeSafeAreaEditor() }
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         controls.addView(
-            Button(this).apply {
+            DiPlayButton(this).apply {
                 text = getString(R.string.save)
-                isAllCaps = false
+                style(DiPlayButtonKind.PRIMARY, overlayPalette, overlay = true)
                 setOnClickListener { saveSafeAreaEditor() }
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -5362,8 +5361,12 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         controller?.sendTouch(emptyList())
         root.post {
             if (generation != picturePanelGeneration || isFinishing || isDestroyed) return@post
-            val panel = CarPlayPicturePanel(this,
-                adjustmentsAvailable = fallbackVideoView == null, close = ::closePicturePanel)
+            val panel = CarPlayPicturePanel(
+                this,
+                adjustmentsAvailable = fallbackVideoView == null,
+                initialPalette = overlayPalette,
+                close = ::closePicturePanel,
+            )
             val availableWidth = (root.width - dp(24)).coerceAtLeast(1)
             val width = minOf(dp(420), if (root.width < dp(800)) availableWidth else (root.width * 0.42f).toInt())
             val height = minOf(dp(540), root.height - dp(24)).coerceAtLeast(1)
