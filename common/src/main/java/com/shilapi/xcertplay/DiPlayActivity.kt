@@ -2123,6 +2123,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
         filteredSection(content, SettingsSection.EXPERIMENTAL_DISPLAY,
             getString(R.string.settings_experimental_display), R.drawable.ic_dp_display) { card ->
+            // main #613：Harman 固件老式全屏（实验性；写 OEM system-UI 位，需重连生效由用户重连触发）。
+            toggle(card, getString(R.string.settings_harman_fullscreen_experimental),
+                getString(R.string.settings_harman_fullscreen_experimental_description),
+                AirPlayPersistence.loadHarmanFullscreen(this)) { enabled ->
+                AirPlayPersistence.saveHarmanFullscreen(this, enabled)
+            }
             toggle(card, getString(R.string.split_screen_areas), getString(R.string.split_screen_areas_description),
                 SplitScreenSettings.enabled(this)) {
                 SplitScreenSettings.setEnabled(this, it)

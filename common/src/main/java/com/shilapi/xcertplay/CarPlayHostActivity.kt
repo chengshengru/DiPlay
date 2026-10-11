@@ -402,7 +402,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var sessionDock: CarPlayDock? = null
     private var hideTopBar = true
     private var hideBottomBar = true
+    private var harmanFullscreenEnabled = false
+    private var harmanFullscreenApplied = false
     private var safeAreaDrawOutside = true
+    private var mainDisplayDisableSafeArea = true
     private var locationReportingEnabled = false
     private var locationPermissionAvailable = false
     private var microphoneAvailable = false
@@ -724,7 +727,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         rightHandDrive = AirPlayPersistence.loadRightHandDrive(this)
         hideTopBar = AirPlayPersistence.loadHideTopBar(this)
         hideBottomBar = AirPlayPersistence.loadHideBottomBar(this)
+        harmanFullscreenEnabled = AirPlayPersistence.loadHarmanFullscreen(this)
         safeAreaDrawOutside = AirPlayPersistence.loadSafeAreaDrawOutside(this)
+        mainDisplayDisableSafeArea = AirPlayPersistence.loadMainDisplayDisableSafeArea(this)
         locationPermissionAvailable = hasFineLocationPermission()
         loadConnectionSettings()
         wirelessPermissionsReady = !wirelessEnabled || hasRequiredWirelessPermissions()
@@ -980,9 +985,13 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         if (!menuOpen) {
             val savedHideTopBar = AirPlayPersistence.loadHideTopBar(this)
             val savedHideBottomBar = AirPlayPersistence.loadHideBottomBar(this)
-            systemBarsChanged = hideTopBar != savedHideTopBar || hideBottomBar != savedHideBottomBar
+            val savedHarmanFullscreen = AirPlayPersistence.loadHarmanFullscreen(this)
+            systemBarsChanged = hideTopBar != savedHideTopBar ||
+                hideBottomBar != savedHideBottomBar ||
+                harmanFullscreenEnabled != savedHarmanFullscreen
             hideTopBar = savedHideTopBar
             hideBottomBar = savedHideBottomBar
+            harmanFullscreenEnabled = savedHarmanFullscreen
         }
         maybeStartCarPlay()
         applyFullscreenMode()
@@ -2858,6 +2867,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         AirPlayPersistence.saveHideTopBar(this, hideTopBar)
         AirPlayPersistence.saveHideBottomBar(this, hideBottomBar)
         AirPlayPersistence.saveSafeAreaDrawOutside(this, safeAreaDrawOutside)
+        AirPlayPersistence.saveMainDisplayDisableSafeArea(this, mainDisplayDisableSafeArea)
     }
 
     /** main #500：镜像 [persistMenuSettings]——凡在那里暂存的字段都必须参与签名（作者：TRAE AI）。 */
@@ -2868,7 +2878,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         locationReportingEnabled, autoStartOnBoot, advancedAudioChannelMapping, displayScaleTenths,
         displayScalePercent, fps, widthPhysicalMm, physicalSizeBasis, hevcEnabled,
         hevcSoftwareDecoderEnabled, manufacturer, model, oemLabel, debugLogsEnabled, rightHandDrive,
-        carPlayDock, hideTopBar, hideBottomBar, safeAreaDrawOutside,
+        carPlayDock, hideTopBar, hideBottomBar, safeAreaDrawOutside, mainDisplayDisableSafeArea,
     ).joinToString("|").hashCode()
 
     private fun captureSettingsBaseline(): SettingsBaseline {
@@ -3552,6 +3562,22 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) },
         )
+        // main #596：中控直角铺满——声明 cornerMasks 并省略中控 safeArea。
+        section.addView(
+            settingsSwitchRow(
+                label = getString(R.string.rect_fill_disable_safe_area),
+                checked = mainDisplayDisableSafeArea,
+                description = getString(R.string.rect_fill_disable_safe_area_description),
+            ) { checked ->
+                mainDisplayDisableSafeArea = checked
+                updateSafeAreaSummary()
+                updateResolutionMenu()
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(12) },
+        )
         safeAreaSummaryView = summary
         updateSafeAreaSummary()
         return section
@@ -4215,7 +4241,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         }
         appendLog("CarPlay size=${CarPlayUiScale.label(uiScalePercent)} canvas=${scaledDisplay.widthPixels}x${scaledDisplay.heightPixels}")
         val display = scaledDisplay.copy(
-            safeArea = AirPlaySafeArea.toInsets(
+            safeArea = if (mainDisplayDisableSafeArea) null else AirPlaySafeArea.toInsets(
                 mapping = AirPlayPersistence.loadSafeAreaRect(this, size.width, size.height),
                 activityWidthPixels = size.width,
                 activityHeightPixels = size.height,
@@ -4223,6 +4249,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 displayHeightPixels = scaledDisplay.heightPixels,
             ),
             safeAreaDrawOutside = safeAreaDrawOutside,
+            mainDisplayCornerMasks = if (mainDisplayDisableSafeArea) true else null,
+            mainDisplayDisableSafeArea = mainDisplayDisableSafeArea,
         )
         // A fixed dock, split-screen support or a turning screen declares several areas the car switches
         // between live. A session that starts in split screen sizes its canvas to that window, so it keeps
@@ -4408,6 +4436,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         )
 
     private fun safeAreaSummary(): String {
+        if (mainDisplayDisableSafeArea) {
+            return getString(R.string.safe_area_disabled_rect_fill_summary)
+        }
         val size = currentActivitySize() ?: return getString(R.string.safe_area_waiting_for_activity_size)
         val mapping = AirPlayPersistence.loadSafeAreaRect(this, size.width, size.height)
         return if (mapping == null) {
@@ -5745,6 +5776,17 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
 
     private fun applyFullscreenMode() {
         val multiWindow = isMultiWindowActive()
+        if (harmanFullscreenEnabled) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            // The OEM-specific bit must be written last: the standard insets controller does not preserve it.
+            HarmanFullscreenCompat.apply(window)
+            harmanFullscreenApplied = true
+            return
+        }
+        if (harmanFullscreenApplied) {
+            HarmanFullscreenCompat.clear(window)
+            harmanFullscreenApplied = false
+        }
         val hideTop = hideTopBar && !multiWindow
         val hideBottom = hideBottomBar && !multiWindow
         // API < 20：WindowInsetsControllerCompat 不实现系统栏可见性，回退到老式窗口标志。

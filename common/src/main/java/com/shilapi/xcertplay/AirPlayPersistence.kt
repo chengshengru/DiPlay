@@ -1040,6 +1040,19 @@ object AirPlayPersistence {
             .apply()
     }
 
+    // main #613：Harman 固件回收 OEM 侧栏的老式全屏（实验性，默认关）。
+    private const val KEY_HARMAN_FULLSCREEN = "harman_fullscreen"
+
+    fun loadHarmanFullscreen(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_HARMAN_FULLSCREEN, false)
+
+    fun saveHarmanFullscreen(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_HARMAN_FULLSCREEN, enabled)
+            .apply()
+    }
+
     fun loadSafeAreaDrawOutside(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_SAFE_AREA_DRAW_OUTSIDE, true)
@@ -1047,6 +1060,24 @@ object AirPlayPersistence {
     fun saveSafeAreaDrawOutside(context: Context, drawOutside: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_SAFE_AREA_DRAW_OUTSIDE, drawOutside)
+            .apply()
+    }
+
+    // main #596：中控直角铺满——声明 cornerMasks 且不声明 safeArea（默认 true）。
+    private const val KEY_MAIN_DISPLAY_DISABLE_SAFE_AREA = "main_display_disable_safe_area"
+
+    fun loadMainDisplayDisableSafeArea(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).let { prefs ->
+            if (prefs.contains(KEY_MAIN_DISPLAY_DISABLE_SAFE_AREA)) {
+                prefs.getBoolean(KEY_MAIN_DISPLAY_DISABLE_SAFE_AREA, true)
+            } else {
+                prefs.getBoolean("disable_safe_area", true)
+            }
+        }
+
+    fun saveMainDisplayDisableSafeArea(context: Context, disable: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_MAIN_DISPLAY_DISABLE_SAFE_AREA, disable)
             .apply()
     }
 
