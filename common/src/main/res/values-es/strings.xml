@@ -769,4 +769,5 @@
     <string name="settings_usb_charging_description">Corriente de carga que DiPlay ofrece al iPhone por USB. Si CarPlay por cable se corta cada pocos segundos y el iPhone se vuelve a conectar solo, puede que el puerto USB del coche no dé suficiente energía: prueba Reducida y después Baja. El iPhone cargará más despacio. Se aplica en la próxima conexión USB.</string>
     <string name="settings_ambient_album">Seguir la portada del álbum</string>
     <string name="settings_ambient_album_description">Usa el color de la portada o colores cercanos disponibles del vehículo. Las portadas grises, negras o ausentes usan los 31 colores; las mayormente blancas pueden usar blanco o blanco frío.</string>
+    <string name="settings_hotspot_name_non_english">Con caracteres chinos u otros no ingleses en el nombre, CarPlay puede quedarse en «Preparando CarPlay…»: algunas unidades emiten ese nombre de una forma que el iPhone no encuentra. Si pasa, cambia el nombre del punto de acceso del coche a letras inglesas y números.</string>
 </resources>

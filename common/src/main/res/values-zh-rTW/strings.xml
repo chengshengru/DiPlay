@@ -829,4 +829,5 @@
     <string name="settings_usb_charging_description">DiPlay 透過 USB 允許 iPhone 使用的充電電流。如果有線 CarPlay 每隔幾秒中斷、iPhone 自行重新連線，可能是車機 USB 埠供電不足：請先試「降低」，再試「低」。iPhone 充電會變慢。下次 USB 連線時生效。</string>
     <string name="settings_ambient_album">跟隨專輯封面</string>
     <string name="settings_ambient_album_description">按封面取色並近似匹配原車可用色號。灰黑或無封面時使用全部31色；大面積白色封面可使用白色或冷白。</string>
+    <string name="settings_hotspot_name_non_english">熱點名稱含中文或其他非英文字元時，部分車機廣播的名稱 iPhone 找不到，CarPlay 會停在「正在準備 CarPlay…」。如出現這種情況，請把車機熱點改為英文字母和數字的名稱。</string>
 </resources>

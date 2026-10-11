@@ -14,6 +14,7 @@ import android.hardware.usb.UsbManager
 import android.hardware.usb.UsbRequest
 import android.os.Build
 import android.util.Log
+import com.shilapi.xcertplay.compat.UsbConfigurationView
 import com.shilapi.xcertplay.compat.UsbDescriptorCompat
 import java.io.Closeable
 import java.io.IOException
@@ -257,12 +258,7 @@ class IphoneUsbHost(
                 ?: throw IphoneUsbException.Protocol(
                     "Re-enumerated iPhone exposes no USBMUX CarPlay configuration",
                 )
-            if (!UsbDescriptorCompat.selectConfiguration(connection, device, configuration)) {
-                Log.w(
-                    IphoneCarPlayConfiguration.TAG,
-                    "setConfiguration ${configuration.label} reported failure; claiming anyway",
-                )
-            }
+            selectConfiguration(connection, device, configuration)
             val usbMux = IphoneCarPlayConfiguration.usbMuxInterface(configuration)
                 ?: throw IphoneUsbException.Protocol("CarPlay configuration exposes no USBMUX interface")
             val endpoints = IphoneCarPlayConfiguration.usbMuxEndpoints(usbMux)
@@ -286,6 +282,56 @@ class IphoneUsbHost(
             connection.close()
             throw error
         }
+    }
+
+    /** Selects [configuration], detaching head-unit drivers that block the switch (#518). */
+    private fun selectConfiguration(connection: UsbDeviceConnection, device: UsbDevice, configuration: UsbConfigurationView) {
+        // API 17-20 框架不暴露配置值:先从 raw descriptors 解析出实际 SET_CONFIGURATION 目标值,
+        // 解析不到时降级为旧的"切换失败也照常 claim"行为(卸载驱动逻辑需要可比对的目标值)。
+        val target = configuration.id.takeIf { it > 0 }
+            ?: UsbDescriptorCompat.configurationValues(connection.rawDescriptors).getOrNull(configuration.index)
+        if (target == null) {
+            if (!UsbDescriptorCompat.selectConfiguration(connection, device, configuration)) {
+                Log.w(
+                    IphoneCarPlayConfiguration.TAG,
+                    "setConfiguration ${configuration.label} reported failure; claiming anyway",
+                )
+            }
+            return
+        }
+        val interfaces = UsbDescriptorCompat.configurations(device)
+            .flatMap { it.interfaces }
+            .associateBy { it.id }
+        val outcome = UsbConfigurationSelection.select(
+            target = target,
+            interfaceIds = interfaces.keys.toList(),
+            setConfiguration = { UsbDescriptorCompat.selectConfiguration(connection, device, configuration) },
+            activeConfiguration = { activeConfiguration(connection) },
+            // 强制 claim 会分离内核驱动;release 之后接口保持未绑定
+            detach = { id ->
+                val usbInterface = interfaces.getValue(id)
+                connection.claimInterface(usbInterface, true).also { if (it) connection.releaseInterface(usbInterface) }
+            },
+        ) ?: return
+        runCatching { onDiagnostic(outcome.diagnostic()) }
+        if (outcome.wrongConfiguration) {
+            throw IphoneUsbException.DeviceUnavailable(
+                "Android could not switch the iPhone to USB configuration ${configuration.label} " +
+                    "(still ${outcome.after}); a head-unit driver may hold it",
+            )
+        }
+        if (!outcome.selected) {
+            Log.w(IphoneCarPlayConfiguration.TAG, "setConfiguration ${configuration.label} reported failure; claiming anyway")
+        }
+    }
+
+    /** iPhone 当前配置值(标准 GET_CONFIGURATION),读不到时为 null。 */
+    private fun activeConfiguration(connection: UsbDeviceConnection): Int? {
+        val value = ByteArray(1)
+        val read = connection.controlTransfer(
+            USB_STANDARD_DEVICE_IN, GET_CONFIGURATION_REQUEST, 0, 0, value, value.size, CONTROL_TRANSFER_TIMEOUT_MILLIS,
+        )
+        return if (read == value.size) value[0].toInt() and 0xff else null
     }
 
     private fun requireConfiguredDevice(device: UsbDevice) {
@@ -335,6 +381,8 @@ class IphoneUsbHost(
 
     companion object {
         private const val USB_VENDOR_DEVICE_IN = 0xc0
+        private const val USB_STANDARD_DEVICE_IN = 0x80
+        private const val GET_CONFIGURATION_REQUEST = 0x08
         private const val GET_USB_MODE_REQUEST = 0x45
         private const val USB_MODE_RESPONSE_LENGTH = 4
         private const val CARPLAY_CONFIGURATION_REQUEST = 0x52
@@ -343,8 +391,14 @@ class IphoneUsbHost(
         private const val CONTROL_TRANSFER_TIMEOUT_MILLIS = 1_000
 
         /** usbmuxd reads 3:3:3:0 in the initial mode and 5:3:3:0 once a mode is set. */
+        /** iOS 12 and 15 answer the mode request with 3 bytes instead of 4 (#509, #455); keep them. */
         internal fun usbModeDiagnostic(read: Int, mode: ByteArray, deviceVersion: String?, configurations: List<String>): String {
-            val current = if (read == mode.size) mode.joinToString(":") { (it.toInt() and 0xff).toString() } else "unreadable($read)"
+            val bytes = mode.copyOf(read.coerceIn(0, mode.size)).joinToString(":") { (it.toInt() and 0xff).toString() }
+            val current = when (read) {
+                mode.size -> bytes
+                in 1 until mode.size -> "$bytes (short:$read)"
+                else -> "unreadable($read)"
+            }
             return "CarPlay USB mode request rejected; current mode=$current " +
                 "usbVersion=${deviceVersion ?: "unknown"} configurations=$configurations"
         }

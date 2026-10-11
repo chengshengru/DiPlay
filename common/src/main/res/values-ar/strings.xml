@@ -769,4 +769,5 @@
     <string name="settings_usb_charging_description">تيار الشحن الذي يسمح DiPlay لجهاز iPhone بسحبه عبر USB. إذا انقطع CarPlay السلكي كل بضع ثوانٍ وأعاد iPhone الاتصال من تلقاء نفسه، فقد لا يوفّر منفذ USB في السيارة طاقة كافية: جرّب «مخفّض» ثم «منخفض». يصبح شحن iPhone أبطأ. يُطبَّق عند اتصال USB التالي.</string>
     <string name="settings_ambient_album">اتباع غلاف الألبوم</string>
     <string name="settings_ambient_album_description">يُطابق لون الغلاف تقريبياً مع ألوان السيارة المتاحة. تستخدم الأغلفة الرمادية أو السوداء أو المفقودة جميع الألوان الـ31؛ وقد تستخدم الأغلفة البيضاء غالباً الأبيض أو الأبيض البارد.</string>
+    <string name="settings_hotspot_name_non_english">قد يتوقف CarPlay عند «جارٍ تجهيز CarPlay…» إذا احتوى الاسم على أحرف صينية أو أحرف غير إنجليزية، لأن بعض وحدات السيارة تبث هذا الاسم بصيغة لا يجدها iPhone. إذا حدث ذلك، فأعد تسمية نقطة اتصال السيارة بأحرف إنجليزية وأرقام.</string>
 </resources>

@@ -21,6 +21,9 @@ object ManualHotspotValidation {
         else -> null
     }
 
+    /** 名称含非 ASCII(中文等)字符时,部分车机广播的名称 iPhone 找不到(#303,main #622)。 */
+    fun nameMayNotReachIphone(ssid: String): Boolean = ssid.any { it.code > 0x7e }
+
     /** English diagnostic text retained for non-UI callers. */
     fun validate(ssid: String, passphrase: String): String? = error(ssid, passphrase)?.message
 }

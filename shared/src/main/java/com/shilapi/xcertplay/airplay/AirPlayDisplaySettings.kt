@@ -19,7 +19,8 @@ object AirPlayDisplaySettings {
 
     const val MIN_WIDTH_PHYSICAL_MM = 100
     const val MAX_WIDTH_PHYSICAL_MM = 400
-    const val WIDTH_PHYSICAL_MM_STEP = 50
+    // 25 mm 步进:iOS 会在几个物理尺寸档位切换布局,50 mm 可能直接跳过它们(#489)
+    const val WIDTH_PHYSICAL_MM_STEP = 25
     const val DEFAULT_WIDTH_PHYSICAL_MM = 200
     val DEFAULT_PHYSICAL_SIZE_BASIS = AirPlayPhysicalSizeBasis.WIDTH
     const val MIN_REPORTED_PHYSICAL_MM = 1

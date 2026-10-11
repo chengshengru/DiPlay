@@ -52,6 +52,7 @@ class BluetoothRfcommDuplexStream internal constructor(
     private var failure: IOException? = null
     private var readCalls = 0L
     private var receivedBytes = 0L
+    private var flushAllowed = true
 
     // Acquire both streams before starting any reader or iAP2 protocol thread. Android getters
     // have platform-nullability, and some vendor sockets return null after connect() succeeds.
@@ -75,7 +76,7 @@ class BluetoothRfcommDuplexStream internal constructor(
             }
             try {
                 output.write(data)
-                output.flush()
+                if (flushAllowed) flushOutput()
             } catch (error: Exception) {
                 val io = BluetoothRfcommStreamException(
                     BluetoothRfcommStreamException.Operation.WRITE,
@@ -84,6 +85,21 @@ class BluetoothRfcommDuplexStream internal constructor(
                 )
                 throw fail(io)
             }
+        }
+    }
+
+    /**
+     * Android 的 socket flush 会轮询 TIOCOUTQ ioctl。Ford SYNC+(i.MX8,Android 8.1)在写入
+     * 本身成功后仍以 EACCES 拒绝该 ioctl(#582)。字节此时已入队,因此该 socket 之后停止
+     * flush,而不是断开链路。
+     */
+    private fun flushOutput() {
+        try {
+            output.flush()
+        } catch (error: IOException) {
+            if (!refusedIoctl(error)) throw error
+            flushAllowed = false
+            report("Bluetooth RFCOMM flush refused by the head unit; sending without flush")
         }
     }
 
@@ -318,3 +334,9 @@ class BluetoothRfcommDuplexStream internal constructor(
         private val EMPTY = ByteArray(0)
     }
 }
+
+private val PERMISSION_ERRNO = Regex("\\bE(ACCES|PERM)\\b")
+
+/** android.system.ErrnoException 的措辞形如 "ioctl failed: EACCES (…)",只做文本匹配,API 17 可用。 */
+internal fun refusedIoctl(error: Throwable): Boolean =
+    generateSequence(error) { it.cause }.take(8).any { it.message?.contains(PERMISSION_ERRNO) == true }
