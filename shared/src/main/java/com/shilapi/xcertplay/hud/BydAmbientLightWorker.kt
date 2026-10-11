@@ -16,6 +16,13 @@ internal object BydAmbientLightWorkerProtocol {
     data class Request(val op: String, val args: List<Int> = emptyList())
     fun validToken(token: String) = tokenPattern.matches(token)
 
+    /**
+     * worker 的一行回复（从 [output] 中提取）。在带热修框架的 BYD 固件上（2024 唐 DiLink 5），
+     * app_process 在 worker 启动 BYD SDK 时会先在 stdout 打印 "HotFixRoot: … -> patchMetaFile:…"，
+     * 之后才是首条回复；因此只有最后一行才是 worker 的回复。
+     */
+    fun reply(output: String?): String? = output?.lines()?.lastOrNull { it.isNotBlank() }?.trim()
+
     fun parse(line: String, token: String): Request? {
         if (!validToken(token) || line.toByteArray(Charsets.UTF_8).size > MAX_LINE_BYTES) return null
         val f = line.split(' ')
