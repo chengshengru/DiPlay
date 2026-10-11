@@ -738,9 +738,13 @@
     <string name="setup_done_title">Всё готово</string>
     <string name="setup_done_description">Подключите iPhone сейчас. Этот мастер можно снова открыть в настройках.</string>
     <string name="update_check">Проверить обновления</string>
+    <string name="settings_background_update_checks_description">Раз в сутки DiPlay проверяет GitHub на новую версию и показывает её на главном экране. Загрузка начинается только после вашего нажатия.</string>
+    <string name="settings_background_update_checks">Проверять обновления в фоне</string>
+    <string name="update_saved_to">Сохранено в %1$s</string>
+    <string name="update_available_home">Доступно обновление</string>
     <string name="update_checking">Проверка…</string>
     <string name="update_up_to_date">У вас последняя версия</string>
-    <string name="update_download">Скачать %1$s</string>
+    <string name="update_download">Скачать обновление</string>
     <string name="update_downloading">Скачивание · %1$d%%</string>
     <string name="update_verifying">Проверка…</string>
     <string name="update_install">Установить %1$s</string>

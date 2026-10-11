@@ -47,11 +47,14 @@ import com.shilapi.xcertplay.setup.DiLinkGeneration
 import com.shilapi.xcertplay.setup.SetupGuide
 // main B5：应用内更新（作者：TRAE AI）。
 import androidx.core.content.FileProvider
+import com.shilapi.xcertplay.update.BackgroundUpdateScheduler
+import com.shilapi.xcertplay.update.UpdateApkExport
+import com.shilapi.xcertplay.update.UpdateAvailability
 import com.shilapi.xcertplay.update.UpdateCatalog
 import com.shilapi.xcertplay.update.UpdateClient
 import com.shilapi.xcertplay.update.UpdateChecksums
 import com.shilapi.xcertplay.update.UpdateRelease
-import com.shilapi.xcertplay.update.UpdateVersion
+import com.shilapi.xcertplay.update.UpdateReleaseLookup
 import java.io.IOException
 import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
@@ -204,6 +207,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var updateRelease: UpdateRelease? = null
     private var updateFile: File? = null
     private var updateMessage: String? = null
+    // main #488：后台更新检查的缓存发布与 APK 导出路径（作者：TRAE AI）。
+    private var availableUpdate: UpdateRelease? = null
+    private var updateSavedPath: String? = null
     // main B3：内嵌搜索状态——常驻输入框、下拉结果弹层、索引与焦点恢复标记（作者：TRAE AI）。
     private var settingsSearchBox: EditText? = null
     private var settingsSearchPopup: PopupWindow? = null
@@ -352,6 +358,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (savedInstanceState == null && isLauncherIntent(intent) && CarPlayBackgroundSession.hasSession()) {
             openProjection(); finish(); return
         }
+        // main #488：调度每日后台更新检查并加载缓存的可用更新（作者：TRAE AI）。
+        scheduleBackgroundUpdateChecks()
+        availableUpdate = UpdateAvailability.available(this, version())
         enforceInterfaceSize()
         languagePreferenceAtCreate = AppLocale.preference(this)
         com.shilapi.xcertplay.hud.BydNavigationOutputs.onAppOpened(applicationContext)
@@ -1178,6 +1187,28 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             card.addView(disconnectButton, matchButton(8, 38))
 
             content.addView(card)
+            // main #488：compact 首页同样显示后台更新提示，点击跳转 about 页的下载入口（作者：TRAE AI）。
+            availableUpdate?.let { release ->
+                val message = getString(R.string.update_available_home)
+                val tint = { alpha: Int -> (WARNING and 0x00FFFFFF) or (alpha shl 24) }
+                val chip = GradientDrawable().apply {
+                    setColor(tint(0x26))
+                    cornerRadius = dp(16).toFloat()
+                    setStroke(dp(1), tint(0x80))
+                }
+                content.addView(label(message, 14, WARNING, true).apply {
+                    gravity = Gravity.CENTER
+                    minHeight = dp(60)
+                    setPadding(dp(12), dp(8), dp(12), dp(8))
+                    isClickable = true
+                    isFocusable = true
+                    contentDescription = message
+                    // API17 适配：RippleDrawable 是 API 21+、foreground 是 API 23+，走 UiCompat（作者：TRAE AI）。
+                    UiCompat.setForeground(this, android.graphics.drawable.LayerDrawable(arrayOf(
+                        UiCompat.ripple(RIPPLE, chip, null), focusRing(16))))
+                    setOnClickListener { openAvailableUpdate(release) }
+                }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+            }
             setupError?.let { content.addView(label(it, 13, WARNING).apply { setPadding(0, dp(6), 0, 0) }) }
             return
         }
@@ -1237,6 +1268,28 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         right.addView(button(getString(R.string.settings), false) { page = "settings"; render() }, matchButton())
         right.addView(label(getString(R.string.make_diplay_feel_right_for_your_car), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(24)) })
         right.addView(label("${getString(R.string.home_public_preview)}${version()}", 12, MUTED).apply { UiCompat.setLetterSpacing(this, .08f) })
+        // main #488：后台检查发现新版本时，首页显示安静的更新提示（作者：TRAE AI）。
+        availableUpdate?.let { release ->
+            val message = getString(R.string.update_available_home)
+            val tint = { alpha: Int -> (WARNING and 0x00FFFFFF) or (alpha shl 24) }
+            val chip = GradientDrawable().apply {
+                setColor(tint(0x26))
+                cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), tint(0x80))
+            }
+            right.addView(label(message, 14, WARNING, true).apply {
+                gravity = Gravity.CENTER
+                minHeight = dp(60)
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                isClickable = true
+                isFocusable = true
+                contentDescription = message
+                // API17 适配：RippleDrawable 是 API 21+、foreground 是 API 23+，走 UiCompat（作者：TRAE AI）。
+                UiCompat.setForeground(this, android.graphics.drawable.LayerDrawable(arrayOf(
+                    UiCompat.ripple(RIPPLE, chip, null), focusRing(16))))
+                setOnClickListener { openAvailableUpdate(release) }
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        }
         if (wide) {
             // Both rows share column widths. The USB button starts at the wireless
             // card's top edge, independently of hero wrapping or font scaling.
@@ -2437,6 +2490,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             card.addView(label(getString(R.string.an_independent_carplay_receiver_for_android_head_units_wir), 17, TEXT))
             // main B5：about 页应用内更新行（作者：TRAE AI）。
             card.addView(updateRow())
+            // main #488：后台更新检查开关（作者：TRAE AI）。
+            toggle(card, getString(R.string.settings_background_update_checks),
+                getString(R.string.settings_background_update_checks_description),
+                UpdateAvailability.backgroundChecksEnabled(this)) { UpdateAvailability.saveBackgroundChecksEnabled(this, it) }
         }
         section(content, getString(R.string.made_possible_by_open_source)) { card ->
             card.addView(label(getString(R.string.receiver_based_on_xcertplay_licensed_under_gpl_3_0_diplay), 16, MUTED))
@@ -2456,13 +2513,17 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     matchButton(if (updateMessage == null) 0 else 10, 60))
             UpdateStage.CHECKING -> container.addView(label(getString(R.string.update_checking), 14, MUTED))
             UpdateStage.AVAILABLE -> container.addView(
-                button(getString(R.string.update_download, updateRelease?.tagName.orEmpty()), true) { downloadUpdate() },
+                button(getString(R.string.update_download), true) { downloadUpdate() },
                 matchButton(10, 60))
             UpdateStage.DOWNLOADING -> container.addView(label(getString(R.string.update_downloading, updateProgress ?: 0), 14, MUTED))
             UpdateStage.VERIFYING -> container.addView(label(getString(R.string.update_verifying), 14, MUTED))
-            UpdateStage.READY -> container.addView(
-                button(getString(R.string.update_install, updateRelease?.tagName.orEmpty()), true) { installUpdate() },
-                matchButton(10, 60))
+            UpdateStage.READY -> {
+                container.addView(
+                    button(getString(R.string.update_install, updateRelease?.tagName.orEmpty()), true) { installUpdate() },
+                    matchButton(10, 60))
+                // main #488：展示 APK 导出路径，供无法使用系统安装器的车机从文件管理器访问（作者：TRAE AI）。
+                updateSavedPath?.let { container.addView(label(getString(R.string.update_saved_to, it), 13, MUTED).apply { setPadding(0, dp(10), 0, 0) }) }
+            }
         }
         return container
     }
@@ -2478,10 +2539,15 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 if (generation != updateGeneration || isFinishing || isDestroyed) return@runOnUiThread
                 outcome.fold(
                     { release ->
+                        // main #488：手动检查结果同样进入后台检查缓存（作者：TRAE AI）。
+                        UpdateAvailability.recordAttempt(this, System.currentTimeMillis())
+                        availableUpdate = release
                         if (release == null) {
+                            UpdateAvailability.clear(this)
                             updateMessage = getString(R.string.update_up_to_date)
                             updateStage = UpdateStage.IDLE
                         } else {
+                            UpdateAvailability.save(this, release)
                             updateRelease = release
                             updateStage = UpdateStage.AVAILABLE
                         }
@@ -2498,19 +2564,31 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }, "diplay-update-check").start()
     }
 
-    private fun latestRelease(): UpdateRelease? {
-        val json = UpdateClient.fetchText(
-            UpdateClient.RELEASES_URL,
-            "application/vnd.github+json",
-            userAgent(),
-        )
-        val release = UpdateCatalog.parse(json) ?: return null
-        return release.takeIf { UpdateVersion.isNewer(it.tagName, version()) }
+    private fun latestRelease(): UpdateRelease? =
+        // main #488：发布查询移入 UpdateReleaseLookup（含 openConnection 注入）（作者：TRAE AI）。
+        UpdateReleaseLookup.latest(version(), userAgent())
+
+    // main #488：点击首页更新提示，跳到 about 页的下载流程（作者：TRAE AI）。
+    private fun openAvailableUpdate(release: UpdateRelease) {
+        updateRelease = release
+        updateMessage = null
+        updateStage = UpdateStage.AVAILABLE
+        page = "about"
+        render()
+    }
+
+    // main #488：WorkManager 每日后台检查；不可用时仅记录日志（作者：TRAE AI）。
+    private fun scheduleBackgroundUpdateChecks() {
+        runCatching { BackgroundUpdateScheduler.schedule(applicationContext) }
+            .onFailure { Log.i("DiPlay-Update", "background update scheduling unavailable", it) }
     }
 
     private fun downloadUpdate() {
-        val release = updateRelease ?: return
+        // main 1b67267e：缓存的发布可能滞后一天，下载前先查最新发布（作者：TRAE AI）。
+        if (updateRelease == null) return
+        lateinit var release: UpdateRelease
         updateStage = UpdateStage.DOWNLOADING
+        updateSavedPath = null
         updateProgress = null
         updateMessage = null
         val generation = ++updateGeneration
@@ -2519,6 +2597,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             // 每次尝试独占自己的文件目录，跨 Activity 重建亦然。
             val directory = File(cacheDir, "update/${java.util.UUID.randomUUID()}")
             val outcome = runCatching {
+                // The cached release can be a day old. Download the newest one.
+                release = latestRelease() ?: throw IOException(getString(R.string.update_up_to_date))
                 val checksumsFile = File(directory, UpdateCatalog.CHECKSUMS_FILE)
                 UpdateClient.download(release.checksumsUrl, checksumsFile) { _, _ -> }
                 val apkFile = File(directory, release.apkName)
@@ -2538,6 +2618,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 }
                 apkFile
             }.onFailure { directory.deleteRecursively() }
+            // main #488：校验通过的 APK 复制到文件管理器可达的位置（作者：TRAE AI）。
+            val savedPath = outcome.getOrNull()?.let { UpdateApkExport.copy(applicationContext, it) }
             runOnUiThread {
                 if (generation != updateGeneration || isFinishing || isDestroyed) {
                     directory.deleteRecursively()
@@ -2545,7 +2627,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 }
                 outcome.fold(
                     { file ->
+                        updateRelease = release
                         updateFile = file
+                        updateSavedPath = savedPath
                         updateStage = UpdateStage.READY
                         render()
                     },
@@ -5012,6 +5096,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     appendLine(StartupDiagnosticSnapshot.report(appContext))
                     appendLine("Startup settings: openAfterBoot=${AirPlayPersistence.loadAutoStartOnBoot(appContext)} " +
                         "connectWhenOpened=${DiPlayPreferences.autoConnect(appContext)}")
+                    appendLine()
+                    // main #488：诊断报告加入后台更新状态（作者：TRAE AI）。
+                    appendLine(UpdateAvailability.report(appContext, System.currentTimeMillis()))
                     appendLine()
                     appendLine("--- Recent own-app process exits (Android 11+) ---")
                     appendLine(ProcessExitDiagnostics.report(appContext))

@@ -738,9 +738,13 @@
     <string name="setup_done_title">أنت جاهز</string>
     <string name="setup_done_description">اتصل بـ iPhone الآن. يمكنك فتح هذا الدليل مرة أخرى من الإعدادات.</string>
     <string name="update_check">البحث عن تحديثات</string>
+    <string name="settings_background_update_checks_description">مرة كل يوم، يتحقق DiPlay من GitHub عن إصدار جديد ويعرضه في الشاشة الرئيسية. لا يتم التنزيل أبدًا دون نقرتك.</string>
+    <string name="settings_background_update_checks">التحقق من التحديثات في الخلفية</string>
+    <string name="update_saved_to">تم الحفظ في %1$s</string>
+    <string name="update_available_home">يتوفر تحديث</string>
     <string name="update_checking">جارٍ البحث…</string>
     <string name="update_up_to_date">لديك آخر إصدار</string>
-    <string name="update_download">تنزيل %1$s</string>
+    <string name="update_download">تنزيل التحديث</string>
     <string name="update_downloading">جارٍ التنزيل · %1$d%%</string>
     <string name="update_verifying">جارٍ التحقق…</string>
     <string name="update_install">تثبيت %1$s</string>
