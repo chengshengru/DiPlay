@@ -47,6 +47,13 @@ class NcmUsbBridge internal constructor(
     // 波次二 #478：恰好结束于 USB 包边界的 NTB 块可能带一个可选零字节填充（或 ZLP）。
     // 跨次 USB 完成保持该状态，不要把下一个 NTB 的头当成填充字节吞掉。
     private var optionalShortPacketPad = false
+    // #575：全速链路用 64 字节包，短包填充跟随真实包大小。
+    private val usbPacketSize = inEndpoint.maxPacketSize.takeIf { it > 0 } ?: USB_PACKET_SIZE
+    // #575：坏块重同步限流——10 秒窗口内超过 16 次仍判会话失败。
+    private val resyncTimes = ArrayDeque<Long>()
+    private var resyncCount = 0
+    private var resyncReason: String? = null
+    private var resyncSkipped = 0
     private val readBuffer = ByteArray(READ_CHUNK_BYTES)
     // Bulk IN uses one persistent async request: bulkTransfer() pins its byte[] in a JNI critical
     // section for the whole wait, which blocks ART's GC thread flip and, with it, every other USB
@@ -216,29 +223,78 @@ class NcmUsbBridge internal constructor(
             // （缓冲区没有多余字节），也可能携带一个零字节强制短包。不要等待这个可选字节，
             // 也不要吞掉下一个 NTB 的头当填充。可选填充跨次完成到达时保持该状态。
             if (optionalShortPacketPad && bufferedSize > 0) {
-                when (buffered[0].toInt() and 0xff) {
-                    0 -> {
-                        buffered.copyInto(buffered, 0, 1, bufferedSize)
-                        bufferedSize -= 1
-                    }
-                    Ntb16Codec.NTH16_SIG and 0xff -> Unit // 下一个 NTB 头在下方校验。
-                    else -> throw failSession("Invalid NTB16 short-packet pad")
-                }
                 optionalShortPacketPad = false
+                when (buffered[0].toInt() and 0xff) {
+                    0 -> discard(1)
+                    Ntb16Codec.NTH16_SIG and 0xff -> Unit // 下一个 NTB 头在下方校验。
+                    else -> if (!resynchronize("Invalid NTB16 short-packet pad")) return
+                }
             }
-            if (bufferedSize < 12) return
-            if (readU32(buffered, 0) != Ntb16Codec.NTH16_SIG) {
-                throw failSession("NCM read buffer does not begin with an NTB16 header")
-            }
+            if (bufferedSize < NTH16_LENGTH) return
             val blockLength = readU16(buffered, 8)
-            if (blockLength < 28) throw failSession("Invalid NTB16 block length $blockLength")
+            if (readU32(buffered, 0) != Ntb16Codec.NTH16_SIG) {
+                // #575：坏块重同步——跳到下一个可信 NTB16 头，丢失内容由 TCP 重传。
+                if (!resynchronize("NCM read buffer does not begin with an NTB16 header")) return
+                continue
+            }
+            if (blockLength < 28) {
+                if (!resynchronize("Invalid NTB16 block length $blockLength")) return
+                continue
+            }
             if (bufferedSize < blockLength) return
             for (frame in Ntb16Codec.parse(buffered, 0, blockLength)) enqueueFrame(frame)
-            val remaining = bufferedSize - blockLength
-            buffered.copyInto(buffered, 0, blockLength, bufferedSize)
-            bufferedSize = remaining
-            optionalShortPacketPad = blockLength % USB_PACKET_SIZE == 0
+            discard(blockLength)
+            optionalShortPacketPad = blockLength % usbPacketSize == 0
+            finishResync()
         }
+    }
+
+    /**
+     * #575：Android 会把中途失败的批量传输（babble/CRC/丢包）当作正常完成上报已收字节，
+     * 一个损坏的 NTB 就能让接收流错位。与 Linux cdc_ncm 一致：丢弃损坏字节并从下一个
+     * 通过更严格校验的 NTB16 头继续；TCP 会重传丢失内容。尚未缓冲到头时返回 false。
+     * 持续反复的损坏仍按原样判会话失败。
+     */
+    private fun resynchronize(reason: String): Boolean {
+        if (resyncReason == null) {
+            val now = System.nanoTime()
+            while (resyncTimes.isNotEmpty() && now - resyncTimes.first() > RESYNC_WINDOW_NANOS) resyncTimes.removeFirst()
+            if (resyncTimes.size >= MAX_RESYNCS_PER_WINDOW) throw failSession("$reason (repeated)")
+            resyncTimes.addLast(now)
+            resyncCount++
+            resyncReason = reason
+            resyncSkipped = 0
+        }
+        val next = (1..bufferedSize - NTH16_LENGTH).firstOrNull(::plausibleHeaderAt)
+        // 没有头时保留仍可能是头起始的字节。
+        val skipped = next ?: (bufferedSize - (NTH16_LENGTH - 1)).coerceAtLeast(0)
+        discard(skipped)
+        resyncSkipped += skipped
+        return next != null
+    }
+
+    private fun finishResync() {
+        val reason = resyncReason ?: return
+        resyncReason = null
+        if (resyncCount <= LOGGED_RESYNCS || resyncCount % 50 == 0) {
+            runCatching { onDiagnostic("NCM resynchronized after $reason; skipped=$resyncSkipped resyncs=$resyncCount") }
+        }
+    }
+
+    /** 比正常路径更严格，避免载荷字节被误判为头。 */
+    private fun plausibleHeaderAt(offset: Int): Boolean {
+        if (readU32(buffered, offset) != Ntb16Codec.NTH16_SIG) return false
+        val headerLength = readU16(buffered, offset + 4)
+        val blockLength = readU16(buffered, offset + 8)
+        val ndpIndex = readU16(buffered, offset + 10)
+        return headerLength == NTH16_LENGTH && blockLength >= 28 &&
+            ndpIndex >= NTH16_LENGTH && ndpIndex % 4 == 0 && ndpIndex + 8 <= blockLength
+    }
+
+    private fun discard(count: Int) {
+        if (count <= 0) return
+        buffered.copyInto(buffered, 0, count, bufferedSize)
+        bufferedSize -= count
     }
 
     private fun appendBuffered(source: ByteArray, length: Int) {
@@ -377,6 +433,28 @@ class NcmUsbBridge internal constructor(
         private const val MAX_QUEUED_FRAMES = 256
         private const val MAX_QUEUED_BYTES = 1 shl 20
         private const val NANOS_PER_MILLISECOND = 1_000_000L
+        private const val NTH16_LENGTH = 12
+        private const val MAX_RESYNCS_PER_WINDOW = 16
+        private const val RESYNC_WINDOW_NANOS = 10_000_000_000L
+        private const val LOGGED_RESYNCS = 5
+        internal const val USB_SETUP_ATTEMPTS = 5
+        private const val USB_SETUP_RETRY_MILLIS = 100L
+
+        /**
+         * #518：厂商内核的 cdc_ncm 驱动可能在 Android 强制分离后、claim 之前重新绑定，
+         * 导致 USB setup 调用失败。重试最多 [attempts] 次，间隔 100ms。返回成功的次数。
+         */
+        internal fun retryUsbSetup(
+            attempts: Int = USB_SETUP_ATTEMPTS,
+            pause: (Long) -> Unit = Thread::sleep,
+            action: () -> Boolean,
+        ): Int? {
+            for (attempt in 1..attempts) {
+                if (action()) return attempt
+                if (attempt < attempts) pause(USB_SETUP_RETRY_MILLIS)
+            }
+            return null
+        }
 
         /** Claims and activates the NCM control/data interfaces; owns the connection on success. */
         fun open(
@@ -395,38 +473,41 @@ class NcmUsbBridge internal constructor(
                 // same interface id, so it must be claimed once and switched with setInterface.
                 val sameInterface = function.control.id == function.data.id
                 val first = if (sameInterface) function.data else function.control
-                val firstClaimed = connection.claimInterface(first, true)
+                val firstClaimed = retryUsbSetup { connection.claimInterface(first, true) }
                 Log.i(
                     IphoneCarPlayConfiguration.TAG,
                     "claim iface=${first.id}/${first.alternateSetting} class=${first.interfaceClass}" +
-                        " subclass=${first.interfaceSubclass} proto=${first.interfaceProtocol} ok=$firstClaimed",
+                        " subclass=${first.interfaceSubclass} proto=${first.interfaceProtocol} ok=${firstClaimed != null}" +
+                        " attempts=${firstClaimed ?: USB_SETUP_ATTEMPTS}",
                 )
-                if (!firstClaimed) {
+                if (firstClaimed == null) {
                     throw IphoneUsbException.DeviceUnavailable(
                         "Android could not claim the NCM interface ${first.id}",
                     )
                 }
                 claimed.add(first)
                 if (!sameInterface) {
-                    val dataClaimed = connection.claimInterface(function.data, true)
+                    val dataClaimed = retryUsbSetup { connection.claimInterface(function.data, true) }
                     Log.i(
                         IphoneCarPlayConfiguration.TAG,
                         "claim iface=${function.data.id}/${function.data.alternateSetting}" +
-                            " class=${function.data.interfaceClass} ok=$dataClaimed",
+                            " class=${function.data.interfaceClass} ok=${dataClaimed != null}" +
+                            " attempts=${dataClaimed ?: USB_SETUP_ATTEMPTS}",
                     )
-                    if (!dataClaimed) {
+                    if (dataClaimed == null) {
                         throw IphoneUsbException.DeviceUnavailable(
                             "Android could not claim the NCM data interface ${function.data.id}",
                         )
                     }
                     claimed.add(function.data)
                 }
-                val altSelected = connection.setInterface(function.data)
+                val altSelected = retryUsbSetup { connection.setInterface(function.data) }
                 Log.i(
                     IphoneCarPlayConfiguration.TAG,
-                    "setInterface iface=${function.data.id}/${function.data.alternateSetting} ok=$altSelected",
+                    "setInterface iface=${function.data.id}/${function.data.alternateSetting} ok=${altSelected != null}" +
+                        " attempts=${altSelected ?: USB_SETUP_ATTEMPTS}",
                 )
-                if (!altSelected) {
+                if (altSelected == null) {
                     throw IphoneUsbException.DeviceUnavailable(
                         "Android could not select the NCM data alternate setting",
                     )

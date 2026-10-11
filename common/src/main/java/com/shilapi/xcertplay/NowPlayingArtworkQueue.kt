@@ -25,6 +25,9 @@ internal class NowPlayingArtworkQueue<Image : Any>(
     private var workerScheduled = false
     private var deliveryScheduled = false
 
+    /** main #537：在既有受限 worker 上跑元数据恢复任务，不占 UI 与 PCM 线程。 */
+    fun execute(task: Runnable) = worker.execute(task)
+
     /** A fresh token also invalidates a decode already in progress. */
     fun newSession(): Any = synchronized(lock) {
         clearLocked()

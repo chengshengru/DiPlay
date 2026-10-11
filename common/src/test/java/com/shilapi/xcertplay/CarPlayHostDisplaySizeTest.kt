@@ -50,7 +50,10 @@ class CarPlayHostDisplaySizeTest {
         // Source-only tests have no provisioned local authentication identity.
         AirPlayPersistence.saveMfiTarget(activity, MfiTarget.USB_CH341)
         // Exercise host startup without launching vendor-service workers or real transports.
-        controllerConstruction = mockConstruction(CarPlayController::class.java)
+        controllerConstruction = mockConstruction(CarPlayController::class.java) { controller, _ ->
+            // main #537：attach 会读取保留的 NowPlaying 快照，mock 构造需预置默认值（作者：TRAE AI）。
+            org.mockito.Mockito.`when`(controller.nowPlayingSnapshot()).thenReturn(com.shilapi.xcertplay.media.CarPlayNowPlaying())
+        }
         (getField("teardownExecutor") as ExecutorService).shutdownNow()
         setField("teardownExecutor", PausedExecutorService())
         CarPlayBackgroundSession::class.java.getDeclaredField("owner").apply { isAccessible = true }
@@ -420,6 +423,7 @@ class CarPlayHostDisplaySizeTest {
         try {
             for ((clusterSize, native) in listOf((1920 to 720) to true, (1280 to 720) to false, null to false)) {
                 val controller = org.mockito.Mockito.mock(CarPlayController::class.java)
+                org.mockito.Mockito.`when`(controller.nowPlayingSnapshot()).thenReturn(com.shilapi.xcertplay.media.CarPlayNowPlaying())
                 org.mockito.Mockito.`when`(controller.configuredClusterSize()).thenReturn(clusterSize)
                 CarPlayBackgroundSession.store(controller, sink, 1920, 990, Any(), display) {}
                 assertEquals(true, invoke("adoptBackgroundSession"))

@@ -200,7 +200,8 @@ internal class BydAmbientLightClient(context: Context) : AutoCloseable {
     }
 
     private fun exchange(command: String, timeout: Int = 5000): String? =
-        token?.let { stream?.exchangeBounded("$it $command", timeout) }
+        // 固件热修注释兼容：worker 回复取输出最后一行（DiLink 5 会在首条回复前打印 HotFixRoot 日志）
+        BydAmbientLightWorkerProtocol.reply(token?.let { stream?.exchangeBounded("$it $command", timeout) })
 
     private fun fail(ticket: Long, reason: String) {
         if (generation.get() != ticket) return

@@ -108,8 +108,13 @@ object AirPlayPersistence {
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
     // main #307：CarPlay 期间暂停车机蓝牙的开关与宽限期。
     private const val KEY_BT_SUSPEND_DURING_CARPLAY = "bt_suspend_during_carplay"
+    // main #539：前台 CarPlay 期间隐藏 BYD 来电弹窗（仅 Android 12）。
+    private const val KEY_HIDE_BYD_CALL_POPUP = "hide_byd_call_popup"
     private const val KEY_BT_SUSPEND_DELAY = "bt_suspend_delay_seconds"
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
+    // main #549：外接控制器（键盘/遥控器/旋钮）驱动 CarPlay 旋钮的开关。
+    private const val KEY_EXTERNAL_CONTROLLER = "external_controller"
+    private const val KEY_USB_CHARGING_CURRENT = "usb_charging_current"
     private const val KEY_MFI_TARGET = "mfi_target"
     private const val KEY_MFI_I2C_PATH = "mfi_i2c_path"
     private const val KEY_REMOTE_MFI_SERVER = "remote_mfi_server"
@@ -442,6 +447,17 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_BT_SUSPEND_DURING_CARPLAY, false)
 
+    /** main #539：前台 CarPlay 期间隐藏 BYD 来电弹窗，默认关。 */
+    fun loadHideBydCallPopup(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_HIDE_BYD_CALL_POPUP, false)
+
+    /** main #539：保存 BYD 来电弹窗隐藏开关。 */
+    fun saveHideBydCallPopup(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_HIDE_BYD_CALL_POPUP, enabled).apply()
+    }
+
     fun saveBtSuspendDuringCarplay(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_BT_SUSPEND_DURING_CARPLAY, enabled).apply()
@@ -454,6 +470,27 @@ object AirPlayPersistence {
     fun saveBtSuspendDelaySeconds(context: Context, seconds: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_BT_SUSPEND_DELAY, if (seconds in listOf(5, 10, 15, 30)) seconds else 10).apply()
+    }
+
+    /** main #549：配对的键盘、遥控器或旋钮控制器与触屏并行驱动 CarPlay 旋钮。 */
+    fun loadExternalController(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_EXTERNAL_CONTROLLER, false)
+
+    /** main #549：保存外接控制器开关。 */
+    fun saveExternalController(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_EXTERNAL_CONTROLLER, enabled).apply()
+    }
+
+    /** main #583：读取有线充电电流报价档位，缺省 NORMAL（2.4A）。 */
+    fun loadUsbChargingCurrent(context: Context): UsbChargingCurrent = UsbChargingCurrent.fromKey(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_USB_CHARGING_CURRENT, null),
+    )
+
+    /** main #583：保存有线充电电流报价档位。 */
+    fun saveUsbChargingCurrent(context: Context, current: UsbChargingCurrent) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_USB_CHARGING_CURRENT, current.key).apply()
     }
 
     fun loadLocationReportingEnabled(context: Context): Boolean =
