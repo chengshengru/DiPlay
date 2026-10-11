@@ -45,6 +45,7 @@ import com.shilapi.xcertplay.network.CarPlayBonjour
 import com.shilapi.xcertplay.network.diagnosticSummary
 import com.shilapi.xcertplay.network.CarPlayVpnService
 import com.shilapi.xcertplay.compat.ApiLevel
+import com.shilapi.xcertplay.compat.UsbDescriptorCompat
 import com.shilapi.xcertplay.network.HotspotAddressPolicy
 import com.shilapi.xcertplay.network.HotspotAddressRecovery
 import com.shilapi.xcertplay.network.LocalOnlyHotspotManager
@@ -1863,7 +1864,21 @@ class CarPlayController(
         }
     }
 
+    /**
+     * The USB permission result arrives from a broadcast receiver on the main thread, where an
+     * escaping Throwable kills the process. A failing descriptor read is reported as a transport
+     * failure instead (the 0.2.16-api17 build died here on an API-level mismatch).
+     */
     private fun onIphonePermission(result: IphoneUsbHost.PermissionResult) {
+        try {
+            handleIphonePermission(result)
+        } catch (error: Throwable) {
+            debugLog("wired iPhone USB permission result failed", error)
+            fail(error)
+        }
+    }
+
+    private fun handleIphonePermission(result: IphoneUsbHost.PermissionResult) {
         when (result) {
             is IphoneUsbHost.PermissionResult.Granted -> {
                 // The system broadcast and the polling fallback can both observe the grant.
@@ -1875,7 +1890,7 @@ class CarPlayController(
                         val configuration = IphoneCarPlayConfiguration.find(result.device)
                         connectionDiagnostic(
                             "USB configuration ready=${configuration != null} " +
-                                "configurationId=${configuration?.id ?: "none"} " +
+                                "configurationId=${configuration?.label ?: "none"} " +
                                 "reenumerationAttempts=$reenumerationAttempts " +
                                 "action=${when {
                                     configuration != null -> "reuse-descriptors"
@@ -2001,8 +2016,9 @@ class CarPlayController(
         val function = NcmFunctionDiscovery.find(configuration)
             ?: throw IphoneUsbException.Protocol("iPhone configuration does not expose an NCM function")
         debugLog(
-            "ncm config=${configuration.id} control=${function.control.id}/${function.control.alternateSetting}" +
-                " data=${function.data.id}/${function.data.alternateSetting}" +
+            "ncm config=${configuration.label}" +
+                " control=${function.control.id}/${UsbDescriptorCompat.alternateSetting(function.control)}" +
+                " data=${function.data.id}/${UsbDescriptorCompat.alternateSetting(function.data)}" +
                 " status=${function.statusIn?.address?.let { "0x${it.toString(16)}" } ?: "none"}" +
                 " in=0x${function.bulkIn.address.toString(16)} out=0x${function.bulkOut.address.toString(16)}",
         )

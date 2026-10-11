@@ -1,9 +1,10 @@
 package com.shilapi.xcertplay.transport
 
-import android.hardware.usb.UsbConfiguration
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
+import com.shilapi.xcertplay.compat.UsbConfigurationView
+import com.shilapi.xcertplay.compat.UsbDescriptorCompat
 
 /**
  * Finds the NCM control/data interface pair inside an active iPhone configuration.
@@ -28,17 +29,17 @@ object NcmFunctionDiscovery {
         val bulkOut: UsbEndpoint,
     )
 
-    fun find(configuration: UsbConfiguration): NcmFunction? {
+    fun find(configuration: UsbConfigurationView): NcmFunction? {
         return findCdcNcm(configuration)
     }
 
-    private fun findCdcNcm(configuration: UsbConfiguration): NcmFunction? {
-        val control = interfaces(configuration).firstOrNull {
+    private fun findCdcNcm(configuration: UsbConfigurationView): NcmFunction? {
+        val control = configuration.interfaces.firstOrNull {
             it.interfaceClass == CONTROL_CLASS && it.interfaceSubclass == CONTROL_SUBCLASS
         } ?: return null
-        val data = interfaces(configuration)
+        val data = configuration.interfaces
             .filter { it.interfaceClass == DATA_CLASS && bulkEndpoints(it) != null }
-            .minByOrNull { if (it.alternateSetting == DATA_ALTERNATE_SETTING) 0 else 1 }
+            .minByOrNull { if (UsbDescriptorCompat.alternateSetting(it) == DATA_ALTERNATE_SETTING) 0 else 1 }
             ?: return null
         val endpoints = bulkEndpoints(data) ?: return null
         val statusIn = (0 until control.endpointCount)
@@ -49,9 +50,6 @@ object NcmFunctionDiscovery {
             }
         return NcmFunction(control, data, statusIn, endpoints.first, endpoints.second)
     }
-
-    private fun interfaces(configuration: UsbConfiguration): List<UsbInterface> =
-        (0 until configuration.interfaceCount).map(configuration::getInterface)
 
     private fun bulkEndpoints(usbInterface: UsbInterface): Pair<UsbEndpoint, UsbEndpoint>? {
         val endpoints = (0 until usbInterface.endpointCount).map(usbInterface::getEndpoint)

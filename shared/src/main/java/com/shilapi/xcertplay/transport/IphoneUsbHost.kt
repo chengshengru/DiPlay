@@ -5,7 +5,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.hardware.usb.UsbConfiguration
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
@@ -15,6 +14,7 @@ import android.hardware.usb.UsbManager
 import android.hardware.usb.UsbRequest
 import android.os.Build
 import android.util.Log
+import com.shilapi.xcertplay.compat.UsbDescriptorCompat
 import java.io.Closeable
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -249,10 +249,10 @@ class IphoneUsbHost(
                 ?: throw IphoneUsbException.Protocol(
                     "Re-enumerated iPhone exposes no USBMUX CarPlay configuration",
                 )
-            if (!connection.setConfiguration(configuration)) {
+            if (!UsbDescriptorCompat.selectConfiguration(connection, device, configuration)) {
                 Log.w(
                     IphoneCarPlayConfiguration.TAG,
-                    "setConfiguration ${configuration.id} reported failure; claiming anyway",
+                    "setConfiguration ${configuration.label} reported failure; claiming anyway",
                 )
             }
             val usbMux = IphoneCarPlayConfiguration.usbMuxInterface(configuration)
@@ -261,7 +261,8 @@ class IphoneUsbHost(
                 ?: throw IphoneUsbException.Protocol("USBMUX interface exposes no bulk endpoint pair")
             Log.i(
                 IphoneCarPlayConfiguration.TAG,
-                "usbmux config=${configuration.id} iface=${usbMux.id} alt=${usbMux.alternateSetting} " +
+                "usbmux config=${configuration.label} iface=${usbMux.id}" +
+                    " alt=${UsbDescriptorCompat.alternateSetting(usbMux)} " +
                     "class=${usbMux.interfaceClass}/${usbMux.interfaceSubclass}/${usbMux.interfaceProtocol} " +
                     "endpoints=${usbMux.endpointCount} " +
                     "out=${describeUsbEndpoint(endpoints.first)} " +
@@ -324,7 +325,7 @@ class IphoneUsbHost(
             USB_VENDOR_DEVICE_IN, GET_USB_MODE_REQUEST, 0, 0, mode, mode.size, CONTROL_TRANSFER_TIMEOUT_MILLIS,
         )
         return usbModeDiagnostic(read, mode, device.version,
-            (0 until device.configurationCount).map(device::getConfiguration).map { "${it.id}[${IphoneCarPlayConfiguration.describe(it)}]" })
+            IphoneCarPlayConfiguration.describeAll(device))
     }
 
     companion object {

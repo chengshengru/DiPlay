@@ -1,17 +1,21 @@
 package com.shilapi.xcertplay.transport
 
-import android.hardware.usb.UsbConfiguration
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.util.Log
+import com.shilapi.xcertplay.compat.UsbConfigurationView
+import com.shilapi.xcertplay.compat.UsbDescriptorCompat
 
 /**
  * Descriptor-based discovery of the iPhone's CarPlay configuration.
  *
  * Configuration ids differ between iPhone models, so the configuration is identified by its
  * interfaces: Apple USB Multiplexor (USBMUX) plus the NCM/Ethernet function CarPlay uses.
+ *
+ * Configuration descriptors themselves are API 21+ ([UsbDescriptorCompat] owns the API 17-20
+ * fallback), so this object only ever reads interfaces through a [UsbConfigurationView].
  */
 object IphoneCarPlayConfiguration {
     const val TAG = "xcertplay-usb"
@@ -27,30 +31,24 @@ object IphoneCarPlayConfiguration {
     private const val PREFERRED_USBMUX_OUT = 0x04
     private const val PREFERRED_USBMUX_IN = 0x85
 
-    fun find(device: UsbDevice): UsbConfiguration? {
-        val configurations = (0 until device.configurationCount).map(device::getConfiguration)
+    fun find(device: UsbDevice): UsbConfigurationView? {
+        val configurations = UsbDescriptorCompat.configurations(device)
         val chosen = configurations.firstOrNull { usbMuxInterface(it) != null && hasCdcNcm(it) && hasAppleEthernet(it) }
             ?: configurations.firstOrNull { usbMuxInterface(it) != null && hasCdcNcm(it) }
         Log.i(
             TAG,
-            "carplay config chosen=${chosen?.id} " +
-                "available=${configurations.map { it.id }} detail=${chosen?.let(::describe)}",
+            "carplay config chosen=${chosen?.label} " +
+                "available=${configurations.map { it.label }} " +
+                "detail=${chosen?.let(UsbDescriptorCompat::describe)}",
         )
         return chosen
     }
 
-    fun describe(configuration: UsbConfiguration): String =
-        (0 until configuration.interfaceCount).joinToString(",") { index ->
-            val usbInterface = configuration.getInterface(index)
-            "${usbInterface.id}/${usbInterface.alternateSetting}" +
-                ":${usbInterface.interfaceClass.toString(16)}" +
-                ".${usbInterface.interfaceSubclass.toString(16)}" +
-                ".${usbInterface.interfaceProtocol.toString(16)}" +
-                "x${usbInterface.endpointCount}"
-        }
+    /** Every configuration of the device with its descriptor summary, for USB diagnostics. */
+    fun describeAll(device: UsbDevice): List<String> = UsbDescriptorCompat.describeAll(device)
 
-    fun usbMuxInterface(configuration: UsbConfiguration): UsbInterface? =
-        (0 until configuration.interfaceCount).map(configuration::getInterface).firstOrNull {
+    fun usbMuxInterface(configuration: UsbConfigurationView): UsbInterface? =
+        configuration.interfaces.firstOrNull {
             it.interfaceClass == USBMUX_CLASS &&
                 it.interfaceSubclass == USBMUX_SUBCLASS &&
                 it.interfaceProtocol == USBMUX_PROTOCOL
@@ -77,13 +75,13 @@ object IphoneCarPlayConfiguration {
         return if (out != null && input != null) out to input else null
     }
 
-    private fun hasCdcNcm(configuration: UsbConfiguration): Boolean =
-        (0 until configuration.interfaceCount).map(configuration::getInterface).any {
+    private fun hasCdcNcm(configuration: UsbConfigurationView): Boolean =
+        configuration.interfaces.any {
             it.interfaceClass == NCM_CONTROL_CLASS && it.interfaceSubclass == NCM_CONTROL_SUBCLASS
         }
 
-    private fun hasAppleEthernet(configuration: UsbConfiguration): Boolean =
-        (0 until configuration.interfaceCount).map(configuration::getInterface).any {
+    private fun hasAppleEthernet(configuration: UsbConfigurationView): Boolean =
+        configuration.interfaces.any {
             it.interfaceClass == APPLE_ETHERNET_CLASS &&
                 it.interfaceSubclass == APPLE_ETHERNET_SUBCLASS &&
                 it.interfaceProtocol == APPLE_ETHERNET_PROTOCOL

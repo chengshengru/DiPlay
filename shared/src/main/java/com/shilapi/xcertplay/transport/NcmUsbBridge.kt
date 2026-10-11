@@ -7,6 +7,7 @@ import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbRequest
 import android.os.Build
 import android.util.Log
+import com.shilapi.xcertplay.compat.UsbDescriptorCompat
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
@@ -476,7 +477,7 @@ class NcmUsbBridge internal constructor(
                 val firstClaimed = retryUsbSetup { connection.claimInterface(first, true) }
                 Log.i(
                     IphoneCarPlayConfiguration.TAG,
-                    "claim iface=${first.id}/${first.alternateSetting} class=${first.interfaceClass}" +
+                    "claim iface=${first.id}/${UsbDescriptorCompat.alternateSetting(first)} class=${first.interfaceClass}" +
                         " subclass=${first.interfaceSubclass} proto=${first.interfaceProtocol} ok=${firstClaimed != null}" +
                         " attempts=${firstClaimed ?: USB_SETUP_ATTEMPTS}",
                 )
@@ -490,7 +491,7 @@ class NcmUsbBridge internal constructor(
                     val dataClaimed = retryUsbSetup { connection.claimInterface(function.data, true) }
                     Log.i(
                         IphoneCarPlayConfiguration.TAG,
-                        "claim iface=${function.data.id}/${function.data.alternateSetting}" +
+                        "claim iface=${function.data.id}/${UsbDescriptorCompat.alternateSetting(function.data)}" +
                             " class=${function.data.interfaceClass} ok=${dataClaimed != null}" +
                             " attempts=${dataClaimed ?: USB_SETUP_ATTEMPTS}",
                     )
@@ -501,10 +502,19 @@ class NcmUsbBridge internal constructor(
                     }
                     claimed.add(function.data)
                 }
-                val altSelected = retryUsbSetup { connection.setInterface(function.data) }
+                // UsbDeviceConnection.setInterface is API 21+; the compat helper falls back to the
+                // standard SET_INTERFACE request on API 17-20.
+                val altSelected = retryUsbSetup {
+                    UsbDescriptorCompat.selectInterface(
+                        connection,
+                        function.data,
+                        NcmFunctionDiscovery.DATA_ALTERNATE_SETTING,
+                    )
+                }
                 Log.i(
                     IphoneCarPlayConfiguration.TAG,
-                    "setInterface iface=${function.data.id}/${function.data.alternateSetting} ok=${altSelected != null}" +
+                    "setInterface iface=${function.data.id}/${UsbDescriptorCompat.alternateSetting(function.data)}" +
+                        " ok=${altSelected != null}" +
                         " attempts=${altSelected ?: USB_SETUP_ATTEMPTS}",
                 )
                 if (altSelected == null) {
