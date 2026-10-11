@@ -149,7 +149,8 @@ object CarHotspotTethering {
                     })
                 }
             } catch (error: Exception) {
-                val adbRecovered = ((error is ReflectiveOperationException && error !is InvocationTargetException) ||
+                // ReflectiveOperationException 是 API 19+ 类，API 17 上 instanceof 恒为 false，改用具体子类判断。
+                val adbRecovered = ((error.isReflectionFailure() && error !is InvocationTargetException) ||
                     error is SecurityException ||
                     (error is InvocationTargetException && error.targetException is SecurityException)) &&
                     fallback()
@@ -157,7 +158,7 @@ object CarHotspotTethering {
                     stopped()?.let { return it }
                     return when {
                         error is InvocationTargetException -> if (error.targetException is SecurityException) Result.PERMISSION_REQUIRED else Result.FAILED
-                        error is ReflectiveOperationException -> Result.UNSUPPORTED
+                        error.isReflectionFailure() -> Result.UNSUPPORTED
                         error is SecurityException -> Result.PERMISSION_REQUIRED
                         else -> Result.FAILED
                     }
@@ -183,3 +184,12 @@ object CarHotspotTethering {
         }
     }
 }
+
+/**
+ * 等价于 `error is ReflectiveOperationException`，但只判断 API 1 就存在的具体异常类。
+ * ReflectiveOperationException 本身是 Java 7 类（Android API 19+ 才有），在 API 17 车机上
+ * instanceof 恒为 false，会把固件不支持误判成启动失败。
+ */
+private fun Throwable.isReflectionFailure(): Boolean =
+    this is NoSuchMethodException || this is NoSuchFieldException ||
+        this is IllegalAccessException || this is InstantiationException

@@ -33,7 +33,9 @@ Ask which goal the driver has when they look for the setting. Use the first row 
 | Navigation | location and turn-by-turn guidance | location to iPhone, BYD HUD and cluster guidance |
 | Vehicle | how CarPlay fits this car and its driver | driving side, wheel keys (Siri, BYD joystick and map zoom), car button, gestures that conflict with the head unit |
 | Diagnostics | troubleshooting evidence | diagnostic reports |
-| Advanced | experimental, firmware-specific or risky behavior | dashboard map, split screen, screen rotation, side panel, HEVC video, audio focus, audio channel mapping, buffered music, vehicle data |
+| Advanced | experimental, firmware-specific or risky behavior | dashboard map, split screen, screen rotation, side panel, HEVC video, audio focus, audio channel mapping, buffered music, vehicle data, navigation wheel keys, ambient lighting |
+| Language | the app display language | the language picker card; the rail destination opens this page directly |
+| About | nothing new | the About page (`page == "about"`): app name, version, open-source notes, and update checks |
 | Overview | nothing new | see "Overview" below |
 
 A setting goes to Advanced when it is experimental, depends on specific firmware, or is an opt-in that can break sound, video or the connection on some head units.
@@ -64,5 +66,22 @@ Each locale MUST use its existing form: `(تجريبي)`, `(experimental)`, `(э
 
 ### Overview
 
-Overview holds the connection status, links to the categories, quick settings, About and Language.
+Overview holds the connection status, links to the categories, and quick settings.
+ABOUT is not a card: `openSettingsCategory(SettingsCategory.ABOUT)` opens the About page.
+LANGUAGE links to its own category page, which renders the `SettingsSection.LANGUAGE` card.
 Do not add a new setting to Overview. Add it to its category. Then promote it to quick settings only if drivers change it often.
+
+## Settings layout
+
+Spacing, size and shape in the Settings screen MUST come from one place.
+
+1. A gap between blocks MUST use a named dp constant, such as `SETTINGS_BLOCK_GAP_DP`.
+   A new literal gap value MUST NOT be added.
+2. A size MUST NOT be a pixel constant (`*_PX`). Use dp, and clamp to the available window width.
+   Test a menu or panel on a narrow window and on a high-density screen.
+3. Controls in one row MUST have the same height.
+   Corner radius MUST follow the control height. A new button MUST NOT set its own radius.
+4. Every `SettingsCategory` except Overview MUST have a link on Overview.
+   `AdaptiveSettingsUiTest.overviewLinksToEveryOtherCategory` checks this.
+5. A layout change MUST include compact and full screenshots with a large font scale.
+   Add an Arabic (right-to-left) screenshot when the change touches row alignment.

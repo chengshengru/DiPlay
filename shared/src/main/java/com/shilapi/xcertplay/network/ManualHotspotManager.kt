@@ -315,12 +315,17 @@ class ManualHotspotManager(
             val ssid = unquote(configuration.SSID) ?: return null
             val channel = try {
                 WifiConfiguration::class.java.getField("apChannel").getInt(configuration)
-            } catch (_: ReflectiveOperationException) {
+            // ReflectiveOperationException 是 API 19+ 类，API 17 验证器会整类拒绝，改用具体异常。
+            } catch (_: NoSuchFieldException) {
+                0
+            } catch (_: IllegalAccessException) {
                 0
             }
             val band = try {
                 legacyHotspotBandToSoftApBand(WifiConfiguration::class.java.getField("apBand").getInt(configuration))
-            } catch (_: ReflectiveOperationException) {
+            } catch (_: NoSuchFieldException) {
+                null
+            } catch (_: IllegalAccessException) {
                 null
             }
             ManualApConfiguration(

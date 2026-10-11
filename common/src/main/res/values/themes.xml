@@ -14,4 +14,21 @@
         <item name="android:backgroundDimEnabled">false</item>
         <item name="android:windowDisablePreview">true</item>
     </style>
+    <!-- AppDialogs 取色用：API 17 基线走公开的 Holo Dialog（Theme.Holo.Dialog.Alert 为私有资源，
+         AAPT2 链接会报 private；按钮排版由 AlertDialog 自身决定，v21 覆盖为 Material Alert） -->
+    <style name="Theme.Xcertplay.Dialog.Dark" parent="android:Theme.Holo.Dialog">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">#151E2C</item>
+    </style>
+    <!-- main B8：浅色启动主题，仅用于 API 33+ setSplashScreenTheme 设置的下次启动窗口（作者：TRAE AI）。
+         API 17 基线只给背景色，状态栏等高版本属性由 values-v21 覆盖。 -->
+    <style name="Theme.Xcertplay.Light" parent="android:Theme.Holo.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">#E9EEF6</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="Theme.Xcertplay.Dialog.Light" parent="android:Theme.Holo.Light.Dialog">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">#F8FAFD</item>
+    </style>
 </resources>

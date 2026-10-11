@@ -1,3 +1,17 @@
+# DiPlay 0.2.16-api17 — 2026-10-11
+
+Android 4.2.2 (API 17) port of DiPlay 0.2.16 (`main` @ `6ebb582`, which also includes 0.2.15). All seven migration waves are complete; see the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for per-feature details and API 17 guards.
+
+- Send the Siri and call microphone through a bundled software Opus encoder, advertise Opus only when it can be encoded, and align echo reference, buffered-audio pacing and audio diagnostics (#468, #483, #421, #484, #499).
+- Fix wired NCM receive framing, extend the 16 KiB usbfs limit and the step-down USB read retries down to API 17–25 (#478, #495).
+- Refresh hotspot addresses after a first wireless timeout, guard the Android 17 local-network permission, handle missing VPN authorization screens, add WPA3 car-hotspot security, suspend car Bluetooth during sessions and wake the app on iPhone Bluetooth connect (#474, #465, #517, #501, #307, #439).
+- Add experimental low-latency decoding and direct video output, an FPS counter, a decoder attempt list with operating-rate hints and bounded video backlog recovery (#496, #456, #347, #417).
+- Add Light/Dark/Auto appearance, the DiLink setup wizard, a GitHub update check, inline Settings search, staged-change discard confirmation, the swipe-gesture off choice and Settings layout refinements — rebuilt on the branch View stack instead of Compose (#422, #420, #346, #416, #413, #450, #500, #487, #486, #490, #491, #482).
+- Place the dashboard car marker with 1% sliders, follow music with ambient lighting, steer navigation volume from wheel keys, route Platform-21 instruments, format DiLink 3 arrival times, repair ADB boot start and port the side panel (#494, #345, #344, #348, #458, #441, #480).
+- Skipped or degraded on API 17: Compose UI (rewritten with Views), side-panel blur (Android 12+), the small-window cluster mode domain (#493) and the Android 17 local-network permission request (no-op guard); minSdk stays 17 and the `-api17` suffix marks the port.
+
+See the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for skipped-item reasons; full-release vehicle acceptance is not claimed.
+
 # DiPlay 0.2.14 — 2026-10-07
 
 - Group Settings by driver goal with search, adaptive layouts, quick controls and reconnect notices (#369).

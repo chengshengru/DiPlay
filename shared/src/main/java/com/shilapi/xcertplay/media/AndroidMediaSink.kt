@@ -21,6 +21,7 @@ import com.shilapi.xcertplay.airplay.MediaSink
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.airplay.toHexString
+import com.shilapi.xcertplay.hud.BydBluetoothSuspend
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
@@ -57,7 +58,16 @@ internal class AudioFocusCoordinator(
     private fun listenerFor(generation: Long) = AudioManager.OnAudioFocusChangeListener { change ->
         synchronized(this) {
             // Android may have queued callbacks before a request was abandoned or replaced.
-            if (generation != focusGeneration || request == null || active.isEmpty()) return@synchronized
+            if (generation != focusGeneration || request == null || active.isEmpty()) {
+                // main #499：静默丢弃会掩盖最关键的窗口——通话音轨关闭与媒体
+                // 重开之间，车机保持焦点时看起来什么都没发生。记录回调到达与未处理原因。
+                runCatching {
+                    report("Audio: focus change=$change dropped" +
+                        " stale=${generation != focusGeneration} noRequest=${request == null}" +
+                        " activeTracks=${active.size}")
+                }
+                return@synchronized
+            }
             runCatching { report("Audio: focus change=$change activeTracks=${active.size}") }
             when (change) {
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> setMediaVolume(DUCKED_VOLUME)
@@ -196,10 +206,19 @@ class AndroidMediaSink(
      * decoded. Only a SurfaceView honours the timestamps, so the host sets it with one.
      */
     private val videoPacingDelayMillis: Int = 0,
+    // main #417：主屏帧率（帧率设置），作为解码器工作速率提示请求；0 表示不请求。
+    private val mainVideoFrameRate: Int = 0,
+    /**
+     * main #496：低延迟解码（设置项）：要求高通解码器每帧解码后立即输出，
+     * 并由专用线程把已解码帧交给屏幕。
+     */
+    private val vendorLowLatencyDecoder: Boolean = false,
 ) : MediaSink {
     // Each downlink publishes its own reference; a mic must match that stream and sample rate.
     private val callEchoReferences = ConcurrentHashMap<AudioStreamId, EchoReference>()
     private val appContext = context?.applicationContext
+    // main #345：氛围灯音乐跟随的 sink 令牌（作者：TRAE AI）
+    private val ambientSinkToken = AmbientMusicController.openSink(appContext)
     private val audioManager = appContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val audioFocusCoordinator = AudioFocusCoordinator(
         appContext,
@@ -377,6 +396,9 @@ class AndroidMediaSink(
     /** True when this sink paces main-screen frames (smooth video); fixed for its lifetime. */
     val videoPacingEnabled: Boolean get() = videoPacingDelayMillis > 0
 
+    /** main #496：主屏解码器的实时累计值，供 FPS 计数器读取；无解码器时为 null。 */
+    fun liveVideoCounters(): LiveVideoCounters? = videoDecoders[MAIN_SCREEN_TYPE]?.liveCounters()
+
     /** Requests a keyframe for stream [type], e.g. after its surface came back. */
     fun refreshPicture(type: Int) {
         videoDecoders[type]?.refreshPicture()
@@ -500,10 +522,14 @@ class AndroidMediaSink(
     override fun onMicrophoneStarted(id: AudioStreamId, config: MicrophoneConfig) {
         // This callback runs on the downlink thread; microphone failures must not stop playback.
         try {
-            if (config.audioType == "telephony") enterCommunicationMode(id)
+            // main #307：蓝牙被我们暂停时通话是"免提外放"场景，不走 SCO 通信模式。
+            val speakerphoneCall = config.audioType == "telephony" &&
+                appContext != null && BydBluetoothSuspend.isSuspendedByUs(appContext)
+            if (config.audioType == "telephony" && !speakerphoneCall) enterCommunicationMode(id)
             val uplink = microphoneUplinks.computeIfAbsent(id) {
                 MicrophoneUplink(config, onAudioDiagnostic,
-                    if (config.audioType == TELEPHONY_AUDIO_TYPE) callEchoReferences[id] else null)
+                    speakerphoneCall = speakerphoneCall,
+                    echoReference = if (config.audioType == TELEPHONY_AUDIO_TYPE) callEchoReferences[id] else null)
             }
             if (!uplink.start()) {
                 microphoneUplinks.remove(id, uplink)
@@ -533,6 +559,12 @@ class AndroidMediaSink(
             manager.mode = AudioManager.MODE_IN_COMMUNICATION
             communicationModeStream = id
             Log.i("xcertplay-usb", "audio mode $savedAudioMode -> ${manager.mode} for telephony stream=$id")
+            // main #499：写入诊断报告而非仅 logcat：停留在语音通道的车机不放媒体，
+            // 没有 adb 就无法诊断。上报失败不得干扰模式切换，故放在最后且不可抛出。
+            runCatching {
+                onAudioDiagnostic("Audio: mode entered communication from=$savedAudioMode" +
+                    " now=${manager.mode} stream=$id")
+            }
         }
     }
 
@@ -542,16 +574,26 @@ class AndroidMediaSink(
             val active = communicationModeStream ?: return
             if (id != null && id != active) return
             communicationModeStream = null
-            try {
+            // main #499：诊断文本在 try 内构造、在 try 外发送：在 try 内上报会让
+            // 失败的回调被当成失败的音频模式恢复而被捕获。
+            val line = try {
                 manager.mode = savedAudioMode
                 Log.i("xcertplay-usb", "audio mode restored to ${manager.mode}")
+                "Audio: mode restored requested=$savedAudioMode now=${manager.mode} stream=$active"
             } catch (error: RuntimeException) {
                 Log.w("xcertplay-usb", "could not restore audio mode $savedAudioMode", error)
+                // 读取当前模式本身也可能抛出（模式设置失败时），用 runCatching 兜底。
+                val currentMode = runCatching { manager.mode.toString() }.getOrDefault("unknown")
+                "Audio: mode restore failed requested=$savedAudioMode now=$currentMode" +
+                    " error=${error.javaClass.simpleName}"
             }
+            runCatching { onAudioDiagnostic(line) }
         }
     }
 
     fun close() {
+        // main #345：释放氛围灯 sink（作者：TRAE AI）
+        AmbientMusicController.closeSink(ambientSinkToken)
         synchronized(videoOwnershipLock) {
             videoClosed = true
             videoDecoders.entries.toList().forEach { (type, decoder) -> retire(type, decoder) }
@@ -607,6 +649,11 @@ class AndroidMediaSink(
         onExit = ::onVideoDecoderExit,
         // Only the main screen goes to the host's SurfaceView; mirrors and the cluster keep their path.
         pacingDelayNanos = if (type == MAIN_SCREEN_TYPE && statsLabel == null) videoPacingDelayMillis * 1_000_000L else 0L,
+        // main #417/#496/#456：仅主屏（无镜像标签）使用工作速率提示、厂商低延迟与一次多帧。
+        operatingRate = videoOperatingRate(type, statsLabel, mainVideoFrameRate),
+        vendorLowLatency = vendorLowLatencyDecoder,
+        dedicatedOutputThread = vendorLowLatencyDecoder,
+        framesAtOnce = type == MAIN_SCREEN_TYPE && statsLabel == null && videoPacingDelayMillis > 0,
     ).also { if (startImmediately) it.start() }
 
     @Synchronized
@@ -631,8 +678,13 @@ class AndroidMediaSink(
             navigationStreamType,
             mediaBufferMillis,
             onAudioDiagnostic,
-            echoReference,
-            callVoiceFilter && format.audioType == TELEPHONY_AUDIO_TYPE,
+            // main #345：氛围灯 sink 令牌（作者：TRAE AI）
+            ambientSinkToken = ambientSinkToken,
+            // main #307：蓝牙被我们暂停时通话走外放。
+            speakerphoneCall = format.audioType == "telephony" &&
+                appContext != null && BydBluetoothSuspend.isSuspendedByUs(appContext),
+            echoReference = echoReference,
+            voiceFilter = callVoiceFilter && format.audioType == TELEPHONY_AUDIO_TYPE,
         ).also { audioRenderers[id] = it }
     }
 
@@ -689,6 +741,72 @@ internal class ParkingOutput(width: Int, height: Int) {
     }
 }
 
+/**
+ * main #417：流解码器请求的工作速率，0 表示不请求：主屏按帧率设置（[frameRate]）
+ * 向 iPhone 请求同样的帧率。镜像与仪表流保持原格式。
+ */
+internal fun videoOperatingRate(type: Int, statsLabel: String?, frameRate: Int): Int =
+    if (type == MAIN_SCREEN_TYPE && statsLabel == null && frameRate > 0) frameRate else 0
+
+internal data class DecoderAttempt(val codecName: String?, val tuned: Boolean, val operatingRate: Int = 0)
+
+/**
+ * main #456/#496：按顺序尝试的配置组合。部分厂商解码器（如 MediaTek c2.mtk.avc.decoder）
+ * 会以 BAD_VALUE 拒绝调优参数，因此依次回退到最小格式再到软件解码器。[operatingRate]
+ * 先单独尝试，拒绝它的解码器仍可拿到不带速率的调优格式。[lowLatencyDecoder] 的调优尝试
+ * 排在默认解码器之前。
+ */
+internal fun videoDecoderAttempts(
+    operatingRate: Int,
+    softwareDecoder: String?,
+    lowLatencyDecoder: String? = null,
+): List<DecoderAttempt> = listOfNotNull(
+    lowLatencyDecoder?.let { DecoderAttempt(it, tuned = true, operatingRate = operatingRate).takeIf { operatingRate > 0 } },
+    lowLatencyDecoder?.let { DecoderAttempt(it, tuned = true) },
+    DecoderAttempt(codecName = null, tuned = true, operatingRate = operatingRate).takeIf { operatingRate > 0 },
+    DecoderAttempt(codecName = null, tuned = true),
+    DecoderAttempt(codecName = null, tuned = false),
+    softwareDecoder?.let { DecoderAttempt(it, tuned = false) },
+)
+
+/**
+ * main #417：下次配置请求的工作速率：速率被拒绝后由后续尝试成功时不再请求（[used]），
+ * 避免重复付出拒绝成本；全部尝试失败时保持不变。
+ */
+internal fun nextOperatingRate(requested: Int, used: DecoderAttempt?): Int =
+    if (requested > 0 && used != null && used.operatingRate == 0) 0 else requested
+
+/**
+ * main #496：高通厂商参数，让解码器按解码顺序立即输出每一帧；没有它们时
+ * c2.qti.avc.decoder 要等约两帧入队后才输出一帧（docs/SMOOTH_WIRELESS.md）。
+ * 其他解码器返回空。CarPlay 屏幕流没有 B 帧，解码序即显示序。
+ */
+internal fun vendorLowLatencyKeys(codecName: String): List<String> =
+    if (codecName.startsWith("c2.qti.") || codecName.startsWith("OMX.qcom.")) {
+        listOf("vendor.qti-ext-dec-low-latency.enable", "vendor.qti-ext-dec-picture-order.enable")
+    } else emptyList()
+
+/** 流类型的一个常规解码器候选，按 [lowLatencyDecoderName] 的视角描述。 */
+internal data class DecoderCandidate(val name: String, val hardware: Boolean, val alias: Boolean, val lowLatency: Boolean)
+
+/**
+ * main #496：平滑视频时主屏优先尝试的解码器：第一个声明低延迟特性的硬件解码器
+ *（非别名），其调优格式随后请求低延迟。默认 c2.qti.avc.decoder 不声明该特性。
+ */
+internal fun lowLatencyDecoderName(candidates: List<DecoderCandidate>): String? =
+    candidates.firstOrNull { it.lowLatency && it.hardware && !it.alias }?.name
+
+/** main #496：下次配置尝试的低延迟解码器：其他解码器接管后不再尝试。 */
+internal fun nextLowLatencyDecoder(requested: String?, used: DecoderAttempt?): String? =
+    if (requested != null && used != null && used.codecName != requested) null else requested
+
+/**
+ * main #456：高通解码器按解码顺序输出的参数。没有它时解码器要等后续一帧或两帧
+ * 入队后才释放当前帧。仅对无重排（B）帧的流成立；iPhone 的 CarPlay H.264 没有 B 帧。
+ * 只在主屏 H.264 平滑视频且解码器声明该参数时设置。
+ */
+internal const val PICTURE_ORDER_PARAMETER = "vendor.qti-ext-dec-picture-order.enable"
+
 /** Serial MediaCodec video decoder: one worker owns configure and frame feeding. */
 private class VideoDecoder(
     streamType: Int,
@@ -702,6 +820,20 @@ private class VideoDecoder(
     pacingDelayNanos: Long = 0L,
     /** Called on the worker as its last step, after it has released its codec. */
     private val onExit: (VideoDecoder) -> Unit = {},
+    // main #417：请求的工作速率，解码器拒绝后本流不再请求。
+    operatingRate: Int = 0,
+    /** main #496：在调优配置尝试上设置 [vendorLowLatencyKeys]。 */
+    private val vendorLowLatency: Boolean = false,
+    /**
+     * main #496：由等待解码器输出的专用线程释放已解码帧，而不是等工作线程下一次
+     * 回到队列或喂帧：帧一解码完就显示。
+     */
+    dedicatedOutputThread: Boolean = false,
+    /**
+     * main #456：平滑视频的主屏：H.264 优先尝试低延迟解码器（[lowLatencyDecoderName]），
+     * 并向声明 [PICTURE_ORDER_PARAMETER] 的解码器请求它，让每帧尽快离开解码器。
+     */
+    private val framesAtOnce: Boolean = false,
 ) : Closeable {
     private val pacer = FramePacer()
     private val pacingDelay = if (pacingDelayNanos > 0) PacingDelay(pacingDelayNanos) else null
@@ -727,17 +859,55 @@ private class VideoDecoder(
     private var outputSurface: Surface? = surface
     private var parking: ParkingOutput? = null
     private var lastConfig: VideoJob.Config? = null
-    private var renderedFrameLogged = false
+    @Volatile private var renderedFrameLogged = false
+    // main #417：仍在请求的工作速率（解码器拒绝后本流归零），以及当前 codec 实际配置的值。
+    private var operatingRate = operatingRate
+    private var configuredRate = 0
+    // main #496：正在配置的 codec 是否已设置厂商低延迟参数。
+    private var configuredVendorLowLatency = false
+    // main #496：低延迟解码器被拒后不再尝试；以及最近一次 tryConfigure 启动 codec 的实参。
+    private var lowLatencyDecoderRefused = false
+    private var startedLowLatency = false
+    private var startedPictureOrder = false
     private var submittedFrameLogged = false
     private var duplicateConfigLogged = false
     private var failureReports = 0
     private val referenceChain = VideoReferenceChain()
+    // main #347：积压恢复观察器。
+    private val backlogRecovery = VideoBacklogRecovery()
     private var lastKeyFrameRequestNs = 0L
     // The main screen keeps the historical log format; other screens are labelled.
     private val stats = VideoStats(statsLabel ?: if (streamType == MAIN_SCREEN_TYPE) "" else " stream=$streamType")
-    private val thread = Thread(::run, "carplay-video").apply { isDaemon = true }
+    // main #496：FPS 计数器的实时累计值，从 UI 线程读取。
+    private val liveReceived = AtomicLong()
+    private val liveRendered = AtomicLong()
+    private val liveDecodeNanos = AtomicLong()
+    private val liveDecodeSamples = AtomicLong()
 
-    fun start() { thread.start() }
+    /** main #496：当前累计值快照，供 FPS 计数器换算区间速率。 */
+    fun liveCounters() = LiveVideoCounters(
+        received = liveReceived.get(),
+        rendered = liveRendered.get(),
+        decodeNanos = liveDecodeNanos.get(),
+        decodeSamples = liveDecodeSamples.get(),
+    )
+    private val thread = Thread(::run, "carplay-video").apply { isDaemon = true }
+    // main #496：专用输出线程：等待 codec 输出并逐帧释放。
+    private val outputThread = if (dedicatedOutputThread) {
+        Thread(::runOutput, "carplay-video-output").apply { isDaemon = true }
+    } else null
+    // 保护 worker 与输出线程之间的 codec 交接：[decoder]/[outputSurface]/[parking] 的变更、
+    // 每帧记账、以及输出线程对单个 buffer 的处理。输出线程在 dequeueOutputBuffer 内等待时不持锁。
+    private val outputLock = Object()
+    // 输出线程正在等待的 codec；worker 释放该 codec 前必须等它返回。
+    private var dequeuing: MediaCodec? = null
+    // 输出线程上的异常，由 worker 当作自己的作业失败处理。
+    @Volatile private var outputFailure: Exception? = null
+
+    fun start() {
+        thread.start()
+        outputThread?.start()
+    }
 
     fun configure(codec: VideoCodec, codecData: ByteArray) {
         queue.offer(VideoJob.Config(codec, codecData))
@@ -745,6 +915,7 @@ private class VideoDecoder(
 
     fun submit(nalus: ByteArray, senderNanos: Long = 0L, arrivalNanos: Long = 0L) {
         stats.onReceived(nalus.size)
+        liveReceived.incrementAndGet()
         // Pacing runs on the worker, in queue order: callbacks of a replaced stream may still deliver here.
         queue.offer(VideoJob.Frame(nalus, senderNanos = senderNanos, arrivalNanos = arrivalNanos))
     }
@@ -801,10 +972,15 @@ private class VideoDecoder(
                     when (job) {
                         is VideoJob.Config -> configureDecoder(job)
                         is VideoJob.Frame -> {
-                            if (System.nanoTime() - job.receivedNs > MAX_FRAME_AGE_NS) {
-                                queue.discardFrames()
-                                recover("video backlog exceeded 250 ms")
-                            } else feed(job.nalus, localTimeOf(job))
+                            // main #347：观察持续积压；短暂延迟突发保留其参考链。
+                            val backlog = queue.backlogAfterCurrent()
+                            val overloaded = !referenceChain.needsKeyFrame && backlogRecovery.observe(
+                                System.nanoTime(), job.receivedNs,
+                                backlog.pendingFrames, backlog.newestPendingReceivedNs,
+                            )
+                            if (overloaded) {
+                                recover("video backlog kept growing or exceeded hard limit")
+                            } else feed(job.nalus, job.receivedNs, localTimeOf(job))
                         }
                         is VideoJob.SurfaceChanged -> changeSurface(job.surface)
                         is VideoJob.DetachSurface -> detach(job.request)
@@ -816,15 +992,12 @@ private class VideoDecoder(
                         is VideoJob.Resync -> recover("video queue overflow")
                         null -> Unit
                     }
-                    decoder?.let(::drainOutput)
+                    // main #496：有专用输出线程时不再由 worker 排空输出。
+                    if (outputThread == null) decoder?.let(::drainOutput)
                     stats.logIfDue()?.let(report)
                     if (referenceChain.needsKeyFrame && lastConfig != null && outputSurface != null) requestKeyFrameIfDue()
                 } catch (error: Exception) {
-                    if (running) Log.e(TAG, "video decoder job failed: ${job?.javaClass?.simpleName}", error)
-                    if (running) reportFailure("stage=${job?.javaClass?.simpleName ?: "drain"}", error)
-                    releaseDecoder()
-                    referenceChain.reset()
-                    requestKeyFrameIfDue()
+                    onJobFailure(job?.javaClass?.simpleName ?: "drain", error)
                 } catch (error: LinkageError) {
                     if (running) reportFailure("stage=${job?.javaClass?.simpleName ?: "drain"}", error)
                     throw error
@@ -833,12 +1006,71 @@ private class VideoDecoder(
         } catch (_: InterruptedException) {
             // Worker shut down.
         } finally {
+            running = false
             releaseDecoder()
+            // main #496：等输出线程退出后再关闭，避免它持有已释放的 codec。
+            outputThread?.let { output ->
+                output.interrupt()
+                joinUninterruptibly(output, OUTPUT_EXIT_WAIT_MS)
+            }
             // The codec is gone, so nothing renders to any surface or to the parking consumer any more.
             parking?.close()
             parking = null
             queue.drain().forEach { (it as? VideoJob.DetachSurface)?.request?.complete(DetachOutcome.RELEASED) }
             runCatching { onExit(this) }
+        }
+    }
+
+    /** main #347/#417：作业失败的统一处理（worker 自身或输出线程上报）。 */
+    private fun onJobFailure(stage: String, error: Exception) {
+        if (running) Log.e(TAG, "video decoder job failed: $stage", error)
+        if (running) reportFailure("stage=$stage", error)
+        // codec 可能接受速率却仍运行失败（start 错误可能在后续调用才浮现）：
+        // 带速率却在首帧前失败的 codec 不再获得该速率。
+        if (configuredRate > 0 && !renderedFrameLogged && error is MediaCodec.CodecException) {
+            dropOperatingRate("codec failed before its first frame")
+        }
+        releaseDecoder()
+        queue.discardCurrentChain()
+        referenceChain.reset()
+        requestKeyFrameIfDue()
+    }
+
+    /** main #496：输出线程——等待当前 codec 的输出，帧到即释放。 */
+    private fun runOutput() {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY) }
+        val info = MediaCodec.BufferInfo()
+        while (running) {
+            val codec = synchronized(outputLock) {
+                val current = decoder
+                if (current == null || outputFailure != null) {
+                    try { outputLock.wait(OUTPUT_IDLE_WAIT_MS) } catch (_: InterruptedException) { return }
+                    null
+                } else {
+                    dequeuing = current
+                    current
+                }
+            } ?: continue
+            var index = MediaCodec.INFO_TRY_AGAIN_LATER
+            var failure: Exception? = null
+            try {
+                index = codec.dequeueOutputBuffer(info, OUTPUT_TIMEOUT_US)
+            } catch (error: Exception) {
+                failure = error
+            }
+            synchronized(outputLock) {
+                dequeuing = null
+                outputLock.notifyAll()
+                // worker 期间已释放或替换的 codec 没有 buffer 可交。
+                if (decoder === codec) {
+                    try {
+                        if (failure != null) throw failure
+                        handleOutput(codec, index, info)
+                    } catch (error: Exception) {
+                        if (running) outputFailure = error
+                    }
+                }
+            }
         }
     }
 
@@ -874,25 +1106,38 @@ private class VideoDecoder(
                 pps.takeIf { it.isNotEmpty() }?.let { START_CODE + it },
             )
         }
-        // Some vendor decoders (e.g. MediaTek c2.mtk.avc.decoder) reject the tuned
-        // parameters with BAD_VALUE. Fall back to a minimal format, then to software.
-        val attempts = listOf(
-            DecoderAttempt(codecName = null, tuned = true),
-            DecoderAttempt(codecName = null, tuned = false),
-        ) + softwareDecoderName(mime)?.let { listOf(DecoderAttempt(it, tuned = false)) }.orEmpty()
+        // main #417/#496/#456：按尝试列表顺序配置；速率/低延迟被拒后回退到不带这些参数的格式。
+        val requestedRate = operatingRate
+        val atOnce = framesAtOnce && codec == VideoCodec.H264
+        val requestedLowLatency = if (atOnce && !lowLatencyDecoderRefused) findLowLatencyDecoder(mime) else null
         var next: MediaCodec? = null
-        for (attempt in attempts) {
-            next = tryConfigure(mime, csd, surface, attempt)
-            if (next != null) break
+        var used: DecoderAttempt? = null
+        for (attempt in videoDecoderAttempts(requestedRate, softwareDecoderName(mime), requestedLowLatency)) {
+            next = tryConfigure(mime, csd, surface, attempt, atOnce)
+            if (next != null) { used = attempt; break }
         }
         if (next == null) {
+            queue.discardCurrentChain()
             report("decoder configuration failed mime=$mime size=${width}x$height")
         }
-        decoder = next
+        if (nextOperatingRate(requestedRate, used) != requestedRate) dropOperatingRate("refused at configure")
+        if (nextLowLatencyDecoder(requestedLowLatency, used) != requestedLowLatency) {
+            report("low-latency decoder $requestedLowLatency dropped: refused at configure")
+            lowLatencyDecoderRefused = true
+        }
         renderedFrameLogged = false
         submittedFrameLogged = false
+        synchronized(outputLock) {
+            decoder = next
+            outputLock.notifyAll()
+        }
+        configuredRate = used?.operatingRate ?: 0
         if (next != null) {
-            report("decoder=${next.name} mime=$mime size=${width}x$height")
+            val rate = if (requestedRate > 0) " operatingRate=$configuredRate" else ""
+            val lowLatency = if (vendorLowLatency) " vendorLowLatency=$configuredVendorLowLatency" else ""
+            val output = if (outputThread != null) " outputThread=true" else ""
+            val atOnceReport = if (atOnce) " lowLatency=$startedLowLatency pictureOrder=$startedPictureOrder" else ""
+            report("decoder=${next.name} mime=$mime size=${width}x$height$rate$lowLatency$output$atOnceReport")
             Log.i(
                 TAG,
                 "video decoder configured name=${next.name} mime=$mime size=${width}x$height",
@@ -900,13 +1145,21 @@ private class VideoDecoder(
         }
     }
 
-    private data class DecoderAttempt(val codecName: String?, val tuned: Boolean)
+    /** main #417：本流放弃工作速率提示并记录原因。 */
+    private fun dropOperatingRate(reason: String) {
+        report("operating rate $operatingRate dropped: $reason")
+        operatingRate = 0
+    }
 
-    private fun buildFormat(mime: String, csd: List<ByteArray>, tuned: Boolean): MediaFormat =
+    private fun buildFormat(mime: String, csd: List<ByteArray>, attempt: DecoderAttempt): MediaFormat =
         MediaFormat.createVideoFormat(mime, width, height).apply {
-            if (tuned) {
+            if (attempt.tuned) {
                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_SIZE)
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
+                // API 17 迁移：KEY_OPERATING_RATE 是 API 23+，低版本直接跳过（main #417 守卫）。
+                if (attempt.operatingRate > 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    setInteger(MediaFormat.KEY_OPERATING_RATE, attempt.operatingRate)
+                }
             }
             csd.forEachIndexed { index, bytes -> setByteBuffer("csd-$index", ByteBuffer.wrap(bytes)) }
         }
@@ -916,31 +1169,76 @@ private class VideoDecoder(
         csd: List<ByteArray>,
         surface: Surface,
         attempt: DecoderAttempt,
+        /** main #456：解码器声明 [PICTURE_ORDER_PARAMETER] 时请求它（[framesAtOnce]、H.264）。 */
+        atOnce: Boolean = false,
     ): MediaCodec? {
         var candidate: MediaCodec? = null
+        var codecName = attempt.codecName ?: "default"
+        var phase = "create"
+        var phaseStartNs = System.nanoTime()
+        val startedNs = phaseStartNs
         return try {
-            val format = buildFormat(mime, csd, attempt.tuned)
+            val format = buildFormat(mime, csd, attempt)
             val codec = attempt.codecName?.let { MediaCodec.createByCodecName(it) } ?: createDecoder(mime)
             candidate = codec
-            if (attempt.tuned && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                codec.codecInfo.getCapabilitiesForType(mime).isFeatureSupported("low-latency")) {
-                format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-            }
+            codecName = runCatching { codec.name }.getOrDefault(codecName)
+            phase = "configure"
+            phaseStartNs = System.nanoTime()
+            val lowLatency = attempt.tuned && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                codec.codecInfo.getCapabilitiesForType(mime).isFeatureSupported("low-latency")
+            if (lowLatency) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+            // main #496：厂商低延迟键只在高通解码器上设置；API 17 的解码器不识别时
+            // configure 抛 BAD_VALUE，由尝试列表回退到不带这些键的格式。
+            val vendorKeys = if (attempt.tuned && vendorLowLatency) vendorLowLatencyKeys(codec.name.orEmpty()) else emptyList()
+            vendorKeys.forEach { format.setInteger(it, 1) }
+            configuredVendorLowLatency = vendorKeys.isNotEmpty()
+            val pictureOrder = attempt.tuned && atOnce && listsPictureOrder(codec)
+            if (pictureOrder) format.setInteger(PICTURE_ORDER_PARAMETER, 1)
             codec.configure(format, surface, null, 0)
+            phase = "start"
+            phaseStartNs = System.nanoTime()
             codec.start()
+            startedLowLatency = lowLatency
+            startedPictureOrder = pictureOrder
             codec
         } catch (error: Exception) {
-            runCatching { candidate?.release() }
-            reportFailure("stage=configure tuned=${attempt.tuned} mime=$mime", error)
+            val phaseMs = (System.nanoTime() - phaseStartNs) / 1_000_000
+            val elapsedMs = (System.nanoTime() - startedNs) / 1_000_000
+            runCatching { candidate?.release() }.onFailure {
+                Log.w(TAG, "video decoder candidate release failed name=$codecName", it)
+            }
+            reportFailure("stage=configure tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} mime=$mime", error)
             Log.w(
                 TAG,
-                "video decoder configure failed name=${attempt.codecName ?: "default"} " +
-                    "tuned=${attempt.tuned} mime=$mime size=${width}x$height",
+                "video decoder configure failed name=$codecName phase=$phase phaseMs=$phaseMs elapsedMs=$elapsedMs " +
+                    "tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} mime=$mime size=${width}x$height",
                 error,
             )
             null
         }
     }
+
+    /** main #496：Android 11 起有低延迟特性；别名与软件标志自 Android 10 起可用。 */
+    private fun findLowLatencyDecoder(mime: String): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return runCatching {
+            lowLatencyDecoderName(MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+                .filter { !it.isEncoder && mime in it.supportedTypes }
+                .map { info ->
+                    DecoderCandidate(
+                        name = info.name,
+                        hardware = info.isHardwareAccelerated,
+                        alias = info.isAlias,
+                        lowLatency = info.getCapabilitiesForType(mime).isFeatureSupported("low-latency"),
+                    )
+                })
+        }.getOrNull()
+    }
+
+    /** main #456：Android 12 起解码器可声明厂商参数。 */
+    private fun listsPictureOrder(codec: MediaCodec): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            runCatching { PICTURE_ORDER_PARAMETER in codec.supportedVendorParameters }.getOrDefault(false)
 
     private fun softwareDecoderName(mime: String): String? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
@@ -974,7 +1272,8 @@ private class VideoDecoder(
         } else 0L
 
     /** Completes [request] once the codec no longer renders to its surface, whatever happens here. */
-    private fun detach(request: SurfaceDetachRequest) {
+    // main #496：与输出线程互斥，避免 surface/parking 变更与帧释放竞争。
+    private fun detach(request: SurfaceDetachRequest): Unit = synchronized(outputLock) {
         var outcome = DetachOutcome.RELEASED
         try {
             outcome = detachAction(outputSurface, request.surface, request.park, decoder != null)
@@ -1009,11 +1308,14 @@ private class VideoDecoder(
         }
     }
 
-    private fun changeSurface(surface: Surface?) {
+    // main #496：与输出线程互斥。
+    private fun changeSurface(surface: Surface?): Unit = synchronized(outputLock) {
         if (outputSurface === surface) return
         outputSurface = surface
         if (surface == null) {
             releaseDecoder()
+            // main #347：surface 消失，当前链的帧不再有效。
+            queue.discardCurrentChain()
             Log.i(TAG, "video decoder detached from surface")
             return
         }
@@ -1028,10 +1330,12 @@ private class VideoDecoder(
             }
         }
         releaseDecoder()
+        queue.discardCurrentChain()
+        referenceChain.reset()
         lastConfig?.let(::configureDecoder)
     }
 
-    private fun feed(nalus: ByteArray, presentNs: Long = 0L) {
+    private fun feed(nalus: ByteArray, receivedNs: Long, presentNs: Long = 0L) {
         val annexB = MediaCodecSupport.toAnnexB(nalus)
         val config = lastConfig ?: return
         if (outputSurface == null) return
@@ -1042,6 +1346,15 @@ private class VideoDecoder(
         }
         if (decoder == null) configureDecoder(config)
         val codec = decoder ?: return
+        // main #347：缓慢重建不应立刻在已作废的触发 IDR 上再次重启。
+        if (referenceChain.needsKeyFrame && VideoRecoveryFrameAge.isObsolete(
+                System.nanoTime(), receivedNs, queue.backlogAfterCurrent(),
+            )) {
+            queue.discardCurrentChain()
+            backlogRecovery.reset()
+            requestKeyFrameIfDue()
+            return
+        }
         if (!submittedFrameLogged) {
             submittedFrameLogged = true
             Log.i(
@@ -1050,7 +1363,7 @@ private class VideoDecoder(
             )
         }
         val index = VideoInputPump.acquire(
-            running = { running }, drain = { drainOutput(codec) },
+            running = { running }, drain = { if (outputThread == null) drainOutput(codec) },
             dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
         )
         if (index < 0) { recover("video decoder input stalled"); return }
@@ -1060,30 +1373,33 @@ private class VideoDecoder(
             input.put(annexB)
             // A paced frame carries its local time; MediaCodec returns it with the decoded output.
             val presentationUs = if (presentNs > 0) presentNs / 1000 else System.nanoTime() / 1000
-            codec.queueInputBuffer(index, 0, annexB.size, presentationUs, 0)
-            val queuedNow = System.nanoTime()
-            if (lastQueuedNanos != 0L && queuedNow - lastQueuedNanos > STILL_GAP_NS) resumedAtNanos = queuedNow
-            lastQueuedNanos = queuedNow
-            queuedPresentationUs[queuedSlot] = presentationUs
-            queuedAtNanos[queuedSlot] = queuedNow
-            queuedPaced[queuedSlot] = presentNs > 0
-            queuedBeforePause[queuedSlot] = false
-            if (presentNs > 0) {
-                // A gap between consecutive iPhone frame times, not a decoder backlog, marks a pause.
-                if (lastQueuedLocalNanos != 0L && presentNs - lastQueuedLocalNanos > SENDER_PAUSE_NS) {
-                    recentPacedSlots.forEach { if (it >= 0) queuedBeforePause[it] = true }
+            // main #496：入队前记录：输出线程可能在帧入队的瞬间就把它取出。
+            synchronized(outputLock) {
+                val queuedNow = System.nanoTime()
+                if (lastQueuedNanos != 0L && queuedNow - lastQueuedNanos > STILL_GAP_NS) resumedAtNanos = queuedNow
+                lastQueuedNanos = queuedNow
+                queuedPresentationUs[queuedSlot] = presentationUs
+                queuedAtNanos[queuedSlot] = queuedNow
+                queuedPaced[queuedSlot] = presentNs > 0
+                queuedBeforePause[queuedSlot] = false
+                if (presentNs > 0) {
+                    // A gap between consecutive iPhone frame times, not a decoder backlog, marks a pause.
+                    if (lastQueuedLocalNanos != 0L && presentNs - lastQueuedLocalNanos > SENDER_PAUSE_NS) {
+                        recentPacedSlots.forEach { if (it >= 0) queuedBeforePause[it] = true }
+                    }
+                    lastQueuedLocalNanos = presentNs
+                    recentPacedSlots.copyInto(recentPacedSlots, 1, 0, PAUSE_HELD_FRAMES - 1)
+                    recentPacedSlots[0] = queuedSlot
                 }
-                lastQueuedLocalNanos = presentNs
-                recentPacedSlots.copyInto(recentPacedSlots, 1, 0, PAUSE_HELD_FRAMES - 1)
-                recentPacedSlots[0] = queuedSlot
+                queuedSlot = (queuedSlot + 1) % queuedPresentationUs.size
             }
-            queuedSlot = (queuedSlot + 1) % queuedPresentationUs.size
+            codec.queueInputBuffer(index, 0, annexB.size, presentationUs, 0)
             referenceChain.onQueued()
         } else {
             recover("video frame exceeded codec input capacity")
             return
         }
-        drainOutput(codec)
+        if (outputThread == null) drainOutput(codec)
     }
 
     private fun recover(reason: String) {
@@ -1092,6 +1408,8 @@ private class VideoDecoder(
         report("recovery: $reason; waiting for keyframe")
         // Recreate with codec-specific data: flush can discard CSD before the first output.
         releaseDecoder()
+        // main #347：只丢弃失效的链；后续帧归下一个 config/surface。
+        queue.discardCurrentChain()
         referenceChain.reset()
         requestKeyFrameIfDue()
     }
@@ -1109,46 +1427,59 @@ private class VideoDecoder(
     private fun drainOutput(codec: MediaCodec) {
         val info = MediaCodec.BufferInfo()
         while (running) {
-            val index = codec.dequeueOutputBuffer(info, 0)
-            when {
-                index == MediaCodec.INFO_TRY_AGAIN_LATER -> return
-                index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> logOutputFormat(codec.outputFormat)
-                index >= 0 -> {
-                    val render = outputSurface != null
-                    // Parked output goes to the offscreen consumer: it keeps the codec's state, but it is
-                    // not shown, so it is neither paced nor counted.
-                    val shown = render && outputSurface !== parking?.surface
-                    val now = System.nanoTime()
-                    val slot = queuedSlotOf(info.presentationTimeUs)
-                    val queued = if (slot >= 0) queuedAtNanos[slot] else 0L
-                    val heldOverGap = queued in 1 until resumedAtNanos
-                    if (queued > 0 && !heldOverGap) stats.onDecodeLatency(now - queued)
-                    val delay = pacingDelay
-                    val paced = shown && delay != null && slot >= 0 && queuedPaced[slot]
-                    val localNs = info.presentationTimeUs * 1000
-                    val pauseHeld = paced && queuedBeforePause[slot]
-                    val targetNs = if (paced && delay != null) {
-                        if (!heldOverGap && !pauseHeld) delay.onFrame(now - localNs)
-                        stats.onPacingDelay(delay.nanos)
-                        localNs + delay.nanos
-                    } else 0L
-                    if (targetNs - now in 1..MAX_PACING_AHEAD_NS) {
-                        codec.releaseOutputBuffer(index, targetNs)
-                    } else {
-                        if (shown && delay != null && !heldOverGap && !pauseHeld) stats.onLate()
-                        codec.releaseOutputBuffer(index, render)
-                    }
-                    if (shown) stats.onRendered()
-                    if (shown && !renderedFrameLogged) {
-                        renderedFrameLogged = true
-                        report("first frame rendered")
-                        Log.i(TAG, "video decoder rendered first frame bytes=${info.size}")
-                    }
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
-                }
-                else -> return
-            }
+            if (!handleOutput(codec, codec.dequeueOutputBuffer(info, 0), info)) return
         }
+    }
+
+    /** main #496：处理一次 dequeueOutputBuffer 结果；false 表示当前没有更多输出可排空。 */
+    private fun handleOutput(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo): Boolean {
+        when {
+            index == MediaCodec.INFO_TRY_AGAIN_LATER -> return false
+            index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> logOutputFormat(codec.outputFormat)
+            index >= 0 -> {
+                val render = outputSurface != null
+                // Parked output goes to the offscreen consumer: it keeps the codec's state, but it is
+                // not shown, so it is neither paced nor counted.
+                val shown = render && outputSurface !== parking?.surface
+                val now = System.nanoTime()
+                val slot = queuedSlotOf(info.presentationTimeUs)
+                val queued = if (slot >= 0) queuedAtNanos[slot] else 0L
+                val heldOverGap = queued in 1 until resumedAtNanos
+                if (queued > 0 && !heldOverGap) {
+                    stats.onDecodeLatency(now - queued)
+                    // main #496：FPS 计数器累计解码耗时。
+                    liveDecodeNanos.addAndGet(now - queued)
+                    liveDecodeSamples.incrementAndGet()
+                }
+                val delay = pacingDelay
+                val paced = shown && delay != null && slot >= 0 && queuedPaced[slot]
+                val localNs = info.presentationTimeUs * 1000
+                val pauseHeld = paced && queuedBeforePause[slot]
+                val targetNs = if (paced && delay != null) {
+                    if (!heldOverGap && !pauseHeld) delay.onFrame(now - localNs)
+                    stats.onPacingDelay(delay.nanos)
+                    localNs + delay.nanos
+                } else 0L
+                if (targetNs - now in 1..MAX_PACING_AHEAD_NS) {
+                    codec.releaseOutputBuffer(index, targetNs)
+                } else {
+                    if (shown && delay != null && !heldOverGap && !pauseHeld) stats.onLate()
+                    codec.releaseOutputBuffer(index, render)
+                }
+                if (shown) {
+                    stats.onRendered()
+                    liveRendered.incrementAndGet()
+                }
+                if (shown && !renderedFrameLogged) {
+                    renderedFrameLogged = true
+                    report("first frame rendered")
+                    Log.i(TAG, "video decoder rendered first frame bytes=${info.size}")
+                }
+                if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return false
+            }
+            else -> return false
+        }
+        return true
     }
 
     private fun logOutputFormat(format: MediaFormat) {
@@ -1179,10 +1510,17 @@ private class VideoDecoder(
             MediaFailureSummary.describe(error)) }
     }
 
-    @Synchronized
+    // main #496：仅 worker 调用；[outputLock] 负责与输出线程的次序。
     private fun releaseDecoder() {
-        val codec = decoder
-        decoder = null
+        backlogRecovery.reset()
+        val codec: MediaCodec?
+        synchronized(outputLock) {
+            codec = decoder
+            decoder = null
+            // 输出线程会在超时内从 dequeueOutputBuffer 返回，然后发现 codec 已不在。
+            awaitNotDequeuing(codec)
+        }
+        configuredRate = 0
         if (codec != null) {
             try {
                 codec.stop()
@@ -1197,11 +1535,39 @@ private class VideoDecoder(
         }
     }
 
+    /** main #496：持有 [outputLock] 等待输出线程不再等待 [codec]；保留中断标志。 */
+    private fun awaitNotDequeuing(codec: MediaCodec?) {
+        if (codec == null) return
+        var interrupted = false
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(OUTPUT_EXIT_WAIT_MS)
+        while (dequeuing === codec) {
+            val leftMillis = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+            if (leftMillis <= 0) break
+            try { outputLock.wait(leftMillis) } catch (_: InterruptedException) { interrupted = true }
+        }
+        if (interrupted) Thread.currentThread().interrupt()
+    }
+
+    /** main #496：不可中断地等待线程在时限内退出。 */
+    private fun joinUninterruptibly(thread: Thread, timeoutMillis: Long) {
+        var interrupted = false
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+        while (thread.isAlive) {
+            val leftMillis = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+            if (leftMillis <= 0) break
+            try { thread.join(leftMillis) } catch (_: InterruptedException) { interrupted = true }
+        }
+        if (interrupted) Thread.currentThread().interrupt()
+    }
+
     private companion object {
         const val TAG = "xcertplay-usb"
         const val MAX_INPUT_SIZE = 8 * 1024 * 1024
+        // main #496：输出线程等待解码帧的时长；释放 codec 最多等它这么久返回。
+        const val OUTPUT_TIMEOUT_US = 10_000L
+        const val OUTPUT_IDLE_WAIT_MS = 10L
+        const val OUTPUT_EXIT_WAIT_MS = 500L
         const val INPUT_TIMEOUT_US = 10_000L
-        const val MAX_FRAME_AGE_NS = 250_000_000L
         // A paced frame more than this ahead is treated as a bad mapping and shown at once.
         const val MAX_PACING_AHEAD_NS = 1_000_000_000L
         // Longer input gaps are a still screen, not decoding work.
@@ -1213,6 +1579,15 @@ private class VideoDecoder(
         const val PAUSE_HELD_FRAMES = 3
         val START_CODE = byteArrayOf(0x00, 0x00, 0x00, 0x01)
     }
+}
+
+/** main #347：仅当本控制段内仍有更新的帧时，才按旧的硬积压时限判定该帧已作废。 */
+internal object VideoRecoveryFrameAge {
+    fun isObsolete(nowNs: Long, receivedNs: Long, backlog: VideoDecodeQueue.Backlog): Boolean =
+        nowNs >= receivedNs && nowNs - receivedNs >= 1_500_000_000L &&
+            backlog.pendingFrames > 0 && backlog.newestPendingReceivedNs?.let {
+                it <= nowNs && it - receivedNs >= 100_000_000L
+            } == true
 }
 
 private fun MediaFormat.intOrNull(key: String): Int? =
@@ -1237,6 +1612,10 @@ private class AudioRenderer(
     private val navigationStreamType: Int,
     private val mediaBufferMillis: Int,
     private val report: (String) -> Unit,
+    // main #345：氛围灯 sink 令牌；仅 MEDIA 声道渲染器使用（作者：TRAE AI）
+    private val ambientSinkToken: Long,
+    // main #307：蓝牙被我们暂停时通话走外放（无 SCO 链路）。
+    private val speakerphoneCall: Boolean = false,
     /** Receives the played call audio so the call microphone can cancel its echo. */
     private val echoReference: EchoReference? = null,
     voiceFilter: Boolean = false,
@@ -1248,6 +1627,9 @@ private class AudioRenderer(
 
     private var trackAttributes: AudioAttributes? = null
     private var mappedChannel: AudioChannel? = null
+    // main #344：导航播报流追踪令牌与实际 legacy 流类型（作者：TRAE AI）
+    private val navigationPlaybackToken = NavigationPlayback.open()
+    private var actualLegacyStreamType: Int? = null
     private val queue = LinkedBlockingQueue<AudioPacket>(MAX_QUEUED_PACKETS)
     @Volatile private var running = true
     @Volatile private var started = false
@@ -1274,6 +1656,10 @@ private class AudioRenderer(
     private val maxArrivalGapMs = AtomicLong()
     private val frameBytes = if (format.channels >= 2) 4 else 2
     private var totalWrittenFrames = 0L
+    // main #345：氛围灯 PCM 包络与低音分析器（作者：TRAE AI）
+    private val ambientEnvelope = AmbientMusicEnvelope()
+    private val ambientBass = AmbientMusicBassAnalyzer(format.sampleRate, format.channels)
+    private var ambientRendererToken = 0L
     private var writtenFramesThisWindow = 0L
     private var writeErrorsThisWindow = 0
     private var lastWriteErrorCode: Int? = null
@@ -1317,6 +1703,10 @@ private class AudioRenderer(
     }
 
     override fun close() {
+        // main #345：释放氛围灯渲染器（作者：TRAE AI）
+        AmbientMusicController.closeRenderer(ambientRendererToken)
+        // main #344：注销导航播报追踪（作者：TRAE AI）
+        NavigationPlayback.close(navigationPlaybackToken)
         running = false
         thread.interrupt()
     }
@@ -1424,6 +1814,8 @@ private class AudioRenderer(
         val selection = mappedSelection()
         mappedChannel = selection.channel
         val streamOverride = channelOverride(selection.channel)
+        // main #344：记录实际 legacy 流类型供方向盘音量路由使用（作者：TRAE AI）
+        actualLegacyStreamType = streamOverride.takeIf { it != 0 }
         var attributes = audioAttributesFor(selection, streamOverride)
         trackAttributes = attributes
         val plan = MediaAudioBuffer.plan(selection.channel == AudioChannel.MEDIA,
@@ -1454,6 +1846,8 @@ private class AudioRenderer(
                 createFallback = {
                     diagnosticStage = "track-fallback-build"
                     routeLabel = "streamType=$streamType(fallback=usage)"
+                    // main #344：回退到 usage 路由后无法确定 legacy 流类型（作者：TRAE AI）
+                    actualLegacyStreamType = null
                     Log.w(TAG, "streamType=$streamType rejected by this ROM; falling back to usage-based track")
                     attributes = audioAttributesFor(selection)
                     AudioTrack.Builder()
@@ -1466,6 +1860,12 @@ private class AudioRenderer(
             )
         }
         track = built
+        // main #345：MEDIA 声道渲染器注册氛围灯包络回调（作者：TRAE AI）
+        if (mappedChannel == AudioChannel.MEDIA) {
+            ambientRendererToken = AmbientMusicController.openRenderer(ambientSinkToken, ambientEnvelope) {
+                built.playbackHeadPosition to (running && built.playState == AudioTrack.PLAYSTATE_PLAYING)
+            }
+        }
         diagnosticStage = "track-attributes"
         trackAttributes = audioTrackAttributesForFocus(built, attributes)
         diagnosticStage = "track-capacity"
@@ -1533,11 +1933,13 @@ private class AudioRenderer(
         } else {
             AudioChannelMappingMode.MOBILE_COMPATIBLE
         }
-        return AudioChannelMapper.map(
+        val selection = AudioChannelMapper.map(
             audioType = format.audioType,
             payloadType = format.payloadType,
             mode = mode,
         )
+        // main #307：无 SCO 时通话走媒体喇叭。
+        return if (speakerphoneCall) AudioChannelMapper.playCallOnSpeaker(selection) else selection
     }
 
     private fun audioAttributesFor(selection: AudioChannelSelection): AudioAttributes =
@@ -1743,17 +2145,24 @@ private class AudioRenderer(
                             )
                         }
                     }
-                    if (size > 0) {
-                        val output = codec.getOutputBuffer(index)
-                        if (output != null) {
-                            if (size > pcm.size) pcm = ByteArray(size)
-                            output.position(info.offset)
-                            output.limit(info.offset + size)
-                            output.get(pcm, 0, size)
-                            writePcm(pcm, 0, size)
+                    // main #347：先释放 codec 输出缓冲区，再在缓冲区外写 PCM，
+                    // 避免慢设备上的阻塞写长时间占用解码器输出。
+                    var copied = false
+                    try {
+                        if (size > 0) {
+                            val output = codec.getOutputBuffer(index)
+                            if (output != null) {
+                                if (size > pcm.size) pcm = ByteArray(size)
+                                output.position(info.offset)
+                                output.limit(info.offset + size)
+                                output.get(pcm, 0, size)
+                                copied = true
+                            }
                         }
+                    } finally {
+                        codec.releaseOutputBuffer(index, false)
                     }
-                    codec.releaseOutputBuffer(index, false)
+                    if (copied) writePcm(pcm, 0, size)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
                 }
                 else -> return
@@ -1797,12 +2206,20 @@ private class AudioRenderer(
                 break
             }
             if (count < writeLength) partialWritesThisWindow++
-            written += count
             val framesWritten = count / frameBytes
+            // main #345：氛围灯需要 PCM 时采集包络（作者：TRAE AI）
+            if (mappedChannel == AudioChannel.MEDIA && AmbientMusicController.wantsPcm(ambientRendererToken)) {
+                ambientEnvelope.append(totalWrittenFrames, framesWritten.toLong(),
+                    AmbientMusicEnvelope.pcmRms(data, offset + written, count),
+                    ambientBass.rms(data, offset + written, count))
+            }
+            written += count
             totalWrittenFrames += framesWritten
             writtenFramesThisWindow += framesWritten
             bufferProgress.written(count)
             lastPcmWriteNs = System.nanoTime()
+            // main #344：播放中上报导航播报状态（作者：TRAE AI）
+            if (playbackStarted) reportNavigationPlayback(track)
             if (!playbackStarted) {
                 prebufferBytes += count
                 if (prebufferBytes >= startThresholdBytes) {
@@ -1826,17 +2243,37 @@ private class AudioRenderer(
         underrunsAtPlaybackStart = track.underrunCount
         track.play()
         playbackStarted = true
+        // main #344：起播时立即上报导航播报状态（作者：TRAE AI）
+        reportNavigationPlayback(track)
+    }
+
+    /** main #344：向导航播报追踪器上报缓冲时长，供方向盘音量路由判定；异常绝不影响音频。 */
+    private fun reportNavigationPlayback(track: AudioTrack) {
+        if (!running) return
+        val priorityVoice = mappedChannel == AudioChannel.PHONE || mappedChannel == AudioChannel.ASSISTANT
+        if (mappedChannel != AudioChannel.NAVIGATION && !priorityVoice) return
+        runCatching {
+            val pendingFrames = bufferProgress.queuedBytes(track.playbackHeadPosition) / frameBytes
+            val bufferedMillis = (pendingFrames * 1000L + format.sampleRate - 1L) / format.sampleRate
+            NavigationPlayback.played(navigationPlaybackToken, actualLegacyStreamType, bufferedMillis, priorityVoice)
+        }
     }
 
     private fun maintainPlaybackBuffer() {
         val track = track ?: return
         if (bufferProgress.shouldRebuffer(mappedChannel == AudioChannel.MEDIA, playbackStarted,
-                track.underrunCount > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition)) {
-            // The hardware buffer has actually drained. Pause without flushing or discarding PCM,
-            // then use the configured start threshold again when music resumes.
+                track.underrunCount > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition,
+                // main #401：电平回落到启动阈值一半即视为排空，重新武装 rebuffer。
+                startThresholdBytes / 2L)) {
+            // main #401：硬件缓冲已饿死到恢复下限。暂停但不 flush、不丢弃 PCM，
+            // 音乐恢复时重新使用配置的启动阈值。
             track.pause()
             playbackStarted = false
-            prebufferBytes = 0
+            // 暂停会保留已排队的 PCM。把它计入重启阈值，防止阻塞写入在
+            // 调用 play() 之前就把暂停中的音轨填满（main #401 记账修复）。
+            prebufferBytes = bufferProgress.queuedBytes(track.playbackHeadPosition)
+                .coerceAtMost(startThresholdBytes.toLong()).toInt()
+            lastPcmWriteNs = System.nanoTime()
             rebufferCount++
         }
         // A short final burst may never reach the start threshold. Play it after a bounded wait.
@@ -1927,6 +2364,10 @@ private class AudioRenderer(
 
     @Synchronized
     private fun release() {
+        // main #344：注销导航播报追踪（作者：TRAE AI）
+        NavigationPlayback.close(navigationPlaybackToken)
+        // main #345：释放氛围灯渲染器（作者：TRAE AI）
+        AmbientMusicController.closeRenderer(ambientRendererToken)
         abandonAudioFocus()
         val codec = codec
         this.codec = null

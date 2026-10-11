@@ -16,7 +16,6 @@ import org.bouncycastle.crypto.signers.Ed25519Signer
 import java.nio.ByteBuffer
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
-import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -27,6 +26,10 @@ object AirPlayCrypto {
     private const val NONCE_SIZE = 12
     private const val LABEL_SIZE = 8
     private const val MAX_RETAINED_BUFFER = 1024 * 1024
+    // javax.crypto.AEADBadTagException 自 API 18 才存在；API 17 的 Dalvik 校验器
+    // 无法解析 catch 子句中的缺失类，会导致整个类抛出 VerifyError。
+    // 因此这里只按类名识别认证标签校验失败，不做直接引用。
+    private const val AEAD_BAD_TAG_CLASS = "javax.crypto.AEADBadTagException"
     private val random = SecureRandom()
     // Android's Conscrypt name first, then a desktop JDK's (unit tests).
     private val PLATFORM_CHACHA_NAMES = listOf("ChaCha20/Poly1305/NoPadding", "ChaCha20-Poly1305")
@@ -153,10 +156,10 @@ object AirPlayCrypto {
             val written = cipher.doFinal(source, target)
             target.flip()
             ByteArray(written).also { target.get(it); state.implementation = cipher.provider.name }
-        } catch (failure: AEADBadTagException) {
-            throw failure
-        } catch (_: GeneralSecurityException) {
-            null
+        } catch (failure: GeneralSecurityException) {
+            // 认证标签校验失败必须向上抛出；API 17 没有 AEADBadTagException 类，
+            // 只能按类名识别，避免 catch 子句直接引用缺失类导致 VerifyError。
+            if (failure.javaClass.name == AEAD_BAD_TAG_CLASS) throw failure else null
         }
     }
 

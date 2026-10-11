@@ -13,11 +13,13 @@ import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toBitmap
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.host.R
@@ -55,6 +57,8 @@ internal object CarPlayMediaKeys {
     private var controller: CarPlayController? = null
     private var session: MediaSession? = null
     private var focusRequest: AudioFocusRequest? = null
+    // API 21-25 没有 AudioFocusRequest（API 26），用旧版 requestAudioFocus 监听器替代。
+    private var legacyFocusListener: AudioManager.OnAudioFocusChangeListener? = null
     private var focusOwner: Any? = null
     private var focusEventRevision = 0L
     private var focusHeld = false
@@ -74,7 +78,12 @@ internal object CarPlayMediaKeys {
         }
         appContext = context.applicationContext
         controller = next
-        next.playbackListener = { playing -> onIphonePlaying(next, playing) }
+        // 氛围灯音乐跟随：绑定 iPhone 播放状态回调（作者：TRAE AI）
+        com.shilapi.xcertplay.media.AmbientMusicController.claimPlaybackOwner(next)
+        next.playbackListener = { playing ->
+            com.shilapi.xcertplay.media.AmbientMusicController.phonePlaybackChanged(next, playing)
+            onIphonePlaying(next, playing)
+        }
         next.nowPlayingListener = { update -> onNowPlayingChanged(next, update) }
         next.artworkListener = { id, bytes -> onArtworkChanged(next, id, bytes) }
     }
@@ -83,6 +92,8 @@ internal object CarPlayMediaKeys {
     @Synchronized
     fun detach(expected: CarPlayController?) {
         if (expected == null || controller !== expected) return
+        // 氛围灯音乐跟随：释放播放属主（作者：TRAE AI）
+        com.shilapi.xcertplay.media.AmbientMusicController.releasePlaybackOwner(expected)
         expected.playbackListener = null
         expected.nowPlayingListener = null
         expected.artworkListener = null
@@ -151,10 +162,19 @@ internal object CarPlayMediaKeys {
     // keys. When CarPlay starts playing again it becomes the car's media source again, as any player
     // would; only the start counts, so a car source picked while the iPhone plays on is not undone.
     private fun regainFocusLocked() {
-        val request = focusRequest ?: return
         if (focusHeld) return
         val audio = appContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
-        focusHeld = audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        val request = focusRequest
+        val granted = if (request != null) {
+            audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            // API 21-25 走旧版焦点接口；两者皆空说明会话尚未建立或被释放。
+            val listener = legacyFocusListener ?: return
+            @Suppress("DEPRECATION")
+            audio.requestAudioFocus(listener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) ==
+                AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+        focusHeld = granted
         if (focusHeld) forwardGrantedFocusLocked()
         Log.i(TAG, "audio focus regained=$focusHeld")
     }
@@ -168,23 +188,36 @@ internal object CarPlayMediaKeys {
     }
 
     private fun start(context: Context) {
+        // MediaSession 与 PlaybackState 均为 API 21+；API 17-20 车机直接跳过整个媒体会话功能。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return
         val expectedController = controller ?: return
         val owner = Any().also { focusOwner = it }
         focusEventRevision = 0L
         val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build(),
-            )
-            .setOnAudioFocusChangeListener({ change ->
-                onFocusChanged(expectedController, owner, change)
-            }, mainHandler)
-            .build()
-        val granted = audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        focusRequest = request
+        val listener = AudioManager.OnAudioFocusChangeListener { change ->
+            onFocusChanged(expectedController, owner, change)
+        }
+        val granted: Boolean
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // API 26+：使用 AudioFocusRequest。
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build(),
+                )
+                .setOnAudioFocusChangeListener(listener, mainHandler)
+                .build()
+            focusRequest = request
+            granted = audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            // API 21-25：AudioFocusRequest 不存在，走旧版 requestAudioFocus。
+            @Suppress("DEPRECATION")
+            granted = audio?.requestAudioFocus(listener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) ==
+                AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            legacyFocusListener = listener
+        }
         focusHeld = granted
         if (granted) forwardGrantedFocusLocked()
         session = MediaSession(context, "DiPlay CarPlay").apply {
@@ -239,10 +272,18 @@ internal object CarPlayMediaKeys {
         nowPlaying = CarPlayNowPlaying()
         artwork = null
         artworkCache.clear()
+        val audio = appContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         focusRequest?.let { request ->
-            (appContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.abandonAudioFocusRequest(request)
+            // API 26+ 的焦点请求用新接口释放。
+            audio?.abandonAudioFocusRequest(request)
+        }
+        legacyFocusListener?.let { listener ->
+            // API 21-25 的旧版焦点用 abandonAudioFocus 释放。
+            @Suppress("DEPRECATION")
+            audio?.abandonAudioFocus(listener)
         }
         focusRequest = null
+        legacyFocusListener = null
         focusHeld = false
     }
 
@@ -278,10 +319,14 @@ internal object CarPlayMediaKeys {
         Log.i(TAG, "media key $source -> CarPlay $index sent=$sent")
     }
 
-    private val callback = CarPlayMediaCallback(
-        experimentalDiLink3Keys = { appContext?.let(BydOutputSettings::carPlayCallControls) == true },
-        send = ::send,
-    )
+    // 懒加载：CarPlayMediaCallback 继承 MediaSession.Callback（API 21）。
+    // API 17 设备上若在 <clinit> 中直接构造，会触发 NoClassDefFoundError 导致整个对象初始化失败而闪退。
+    private val callback: CarPlayMediaCallback by lazy {
+        CarPlayMediaCallback(
+            experimentalDiLink3Keys = { appContext?.let(BydOutputSettings::carPlayCallControls) == true },
+            send = ::send,
+        )
+    }
 
     /** Whether [next] changes what the media session's metadata shows; position and play state do not. */
     internal fun metadataChanged(previous: CarPlayNowPlaying, next: CarPlayNowPlaying): Boolean =
@@ -310,8 +355,8 @@ internal object CarPlayMediaKeys {
     private fun shownArtworkLocked(): Bitmap? =
         artwork ?: placeholder ?: appContext?.let(::placeholderArt)?.also { placeholder = it }
 
-    internal fun placeholderArt(context: Context): Bitmap? = context
-        .getDrawable(R.drawable.art_now_playing_placeholder)
+    internal fun placeholderArt(context: Context): Bitmap? = ContextCompat
+        .getDrawable(context, R.drawable.art_now_playing_placeholder)
         ?.toBitmap(MAX_ARTWORK_DIMENSION, MAX_ARTWORK_DIMENSION)
 
     /**

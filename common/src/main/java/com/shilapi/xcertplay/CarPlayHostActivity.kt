@@ -1,7 +1,12 @@
 package com.shilapi.xcertplay
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Context
+import android.app.AlertDialog
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
 import android.content.res.ColorStateList
@@ -9,11 +14,18 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorFilter
 import android.graphics.Matrix
+import android.graphics.PixelFormat
+import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.net.Uri
@@ -32,6 +44,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.Surface
 import android.view.SurfaceHolder
+import android.view.ViewConfiguration
 import android.view.SurfaceView
 import android.view.TextureView
 import android.view.ViewTreeObserver
@@ -116,7 +129,7 @@ import kotlin.math.roundToInt
  *
  * Apple devices are discovered by vendor ID; CH341 uses the configured VID/PID below.
  */
-class CarPlayHostActivity : ComponentActivity() {
+class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private data class SettingsBaseline(
         val safeAreaRects: MutableMap<DisplaySize, SafeAreaRect?>,
         val customIconBytes: ByteArray?,
@@ -188,13 +201,8 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private val vpnConsent =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            awaitingVpnConsent = false
-            if (result.resultCode == RESULT_OK) {
-                vpnReady = true
-                maybeStartCarPlay()
-            } else {
-                setStatus(getString(R.string.vpn_consent_was_denied))
-            }
+            // main 4aee3f80：授权页缺失时 launch 已失败并清除 pending 状态，迟到结果不得放行本次尝试。
+            onVpnConsentResult(result.resultCode)
         }
     private val wirelessPermissions =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -276,6 +284,10 @@ class CarPlayHostActivity : ComponentActivity() {
     private var fallbackVideoBounds: CarPlaySurfaceBounds? = null
     // Smooth video (a setting): SurfaceView output with frames released at the iPhone's frame time.
     private var smoothVideo = false
+    // 直接视频输出（设置项，main #496）：帧绕过应用绘制，直接交给系统合成器。
+    private var directVideoOutput = false
+    // 诊断设置项（main #496）：画面右上角的 FPS 计数器。
+    private var fpsCounter: FpsCounterOverlay? = null
     // Sinks whose sessions are being torn down; their decoders may still render to the current surface
     // until they have released their codecs, so a destroyed surface is detached from them too. A restart
     // and a shutdown can overlap, so this is a set.
@@ -295,6 +307,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var remoteMfiServerInput: EditText? = null
     private var remoteMfiTokenInput: EditText? = null
     private var settingsBaseline: SettingsBaseline? = null
+    // main #500：菜单打开时的暂存设置签名（哈希而非原值，其中含热点口令），离开时判断是否有未保存的修改（作者：TRAE AI）。
+    private var menuSettingsSignature: Int? = null
     private var locationReportingSwitch: Switch? = null
     private var statusView: TextView? = null
     private var statusScrollView: ScrollView? = null
@@ -409,6 +423,10 @@ class CarPlayHostActivity : ComponentActivity() {
     private var menuOpen = false
     private var latestStage = "Preparing CarPlay"
     private var darkMode = false
+    // main B7：应用外观联动——主机页持有外观归属权并向运行时发布当前夜间态（作者：TRAE AI）。
+    override val currentAppNight: Boolean get() = appNight
+    private var appNight = true
+    private var hostAppearanceResumed = false
     private var paintWaitingScreen: () -> Unit = {}
     private var carPlayNightMode = CarPlayNightMode.SYSTEM
     private var nightSchedule = CarPlayNightSchedule()
@@ -422,7 +440,11 @@ class CarPlayHostActivity : ComponentActivity() {
             initialNight = darkMode,
             onNightChanged = { night ->
                 darkMode = night
+                // main B7：夜控结果发布到外观运行时并刷新应用外观（作者：TRAE AI）。
+                if (hostAppearanceResumed) AppAppearanceRuntime.publishHost(this, night)
+                refreshAppAppearance()
                 paintWaitingScreen()
+                paintSidePanelTheme()
                 applyClusterTurnOverlay()
                 appendLog("CarPlay switched to ${if (night) "night" else "day"} mode")
                 logThemeState(nightModeDiagnosticSource, resources.configuration)
@@ -450,7 +472,43 @@ class CarPlayHostActivity : ComponentActivity() {
     private val shuttingDown = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var sidePanel: LinearLayout? = null
+    // 侧栏卡片上的全部内容（main #480；分支跳过 resize 模糊，此处仅作内容容器）。
+    private var sidePanelContents: LinearLayout? = null
     private var sidePanelBattery: TextView? = null
+    // 侧栏的轮胎气压（TPMS）：左前、右前、左后、右后；没有读数时隐藏。
+    private var sidePanelTyres: LinearLayout? = null
+    private var sidePanelTyreTexts: List<TextView> = emptyList()
+    // 侧栏整块屏幕在窗口像素中的位置，以及面板朝向 CarPlay 的那条边
+    // （面板在 CarPlay 右侧时为 Gravity.START，左侧时为 END，下方时为 TOP），用于拖拽这条边。
+    private var sidePanelScreen: RectF? = null
+    private var sidePanelEdge = Gravity.START
+    private var sidePanelDrag: FloatArray? = null
+    // 面板把手在侧栏打开或其边被触摸时显示几秒，然后淡出。
+    private var sidePanelGrip: Drawable? = null
+    private var sidePanelGripAlpha = 255
+    private var sidePanelGripAnimator: ValueAnimator? = null
+    private val sidePanelGripFade = Runnable { animateSidePanelGrip(0, 600L) }
+    // 屏幕边缘的把手小条：把它拖出来即打开侧栏（drag 为 null 表示尚未开始拖拽）。
+    private var sidePanelTab: View? = null
+    private var sidePanelTabDrag: FloatArray? = null
+    // 在把手上的触摸被判定为拖拽之前，它的事件副本暂存在这里；若不是拖拽（轻点、沿边缘滑动、长按），
+    // 把手下方的 CarPlay 会收到这些事件以及该次触摸的后续部分。
+    private val sidePanelTabHeld = mutableListOf<MotionEvent>()
+    private var sidePanelTabToCarPlay = false
+    private val sidePanelTabLongPress = Runnable {
+        val tab = sidePanelTab
+        if (tab != null && sidePanelTabDrag?.get(1) == 0f) handSidePanelTabTouchToCarPlay(tab)
+    }
+    private var sidePanelTabFrom: Int? = null
+    // 把手的药丸提示在会话开始或把手被轻点时显示几秒，然后淡出；即使没有药丸，把手仍可拖拽。
+    private var sidePanelTabHintFor: CarPlayViewAreas? = null
+    private var sidePanelTabHint = false
+    private val sidePanelTabFade = Runnable {
+        sidePanelTabHint = false
+        sidePanelTab?.background?.let { pill ->
+            ObjectAnimator.ofInt(pill, "alpha", pill.alpha, 0).setDuration(600L).start()
+        }
+    }
     private var sidePanelShown = false
     private val sidePanelTick = object : Runnable {
         override fun run() {
@@ -590,7 +648,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     if (picturePanel != null) {
                         closePicturePanel()
                     } else if (menuOpen) {
-                        if (safeAreaEditorActive) closeSafeAreaEditor() else cancelSettingsEdits()
+                        if (safeAreaEditorActive) closeSafeAreaEditor() else leaveSettingsMenu()
                     } else {
                         showDiPlayHome()
                     }
@@ -711,17 +769,55 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun hasFineLocationPermission(): Boolean =
         PermissionCompat.hasPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
 
+    // main 4aee3f80：VPN 授权页缺失/被阻塞（车机 ROM 精简了系统 VPN 设置页）时不崩溃，给出可诊断的降级提示。
     private fun requestVpnConsent() {
         if (awaitingVpnConsent) return
-        val consent = CarPlayVpnService.prepare(this)
+        val consent = try {
+            CarPlayVpnService.prepare(this)
+        } catch (error: ActivityNotFoundException) {
+            onVpnConsentUnavailable("prepare", null, error)
+            return
+        } catch (error: SecurityException) {
+            onVpnConsentUnavailable("prepare", null, error)
+            return
+        }
         if (consent == null) {
             vpnReady = true
             maybeStartCarPlay()
-        } else {
-            vpnReady = false
-            awaitingVpnConsent = true
-            vpnConsent.launch(consent)
+            return
         }
+        vpnReady = false
+        awaitingVpnConsent = true
+        try {
+            vpnConsent.launch(consent)
+        } catch (error: ActivityNotFoundException) {
+            onVpnConsentUnavailable("launch", consent, error)
+        } catch (error: SecurityException) {
+            onVpnConsentUnavailable("launch", consent, error)
+        }
+    }
+
+    private fun onVpnConsentResult(resultCode: Int) {
+        // A failed launch clears the pending state; a late result must not authorize that attempt.
+        if (!awaitingVpnConsent) return
+        awaitingVpnConsent = false
+        vpnReady = resultCode == RESULT_OK
+        if (vpnReady) {
+            maybeStartCarPlay()
+        } else {
+            setStatus(getString(R.string.vpn_consent_was_denied))
+        }
+    }
+
+    private fun onVpnConsentUnavailable(operation: String, consent: Intent?, error: RuntimeException) {
+        awaitingVpnConsent = false
+        vpnReady = false
+        val diagnostic = "VPN consent unavailable operation=$operation " +
+            "failureClass=${error.javaClass.simpleName} " +
+            "component=${consent?.component?.flattenToString() ?: "none"}"
+        Log.w(TAG, diagnostic, error)
+        appendLog(diagnostic)
+        setStatus(getString(R.string.vpn_authorization_unavailable))
     }
 
     private fun requestWirelessPermissions() {
@@ -741,23 +837,10 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun hasRequiredWirelessPermissions(): Boolean =
         requiredWirelessPermissions().all { PermissionCompat.hasPermission(this, it) }
 
-    private fun requiredWirelessPermissions(): List<String> = when {
-        wirelessHotspotMode == WirelessHotspotMode.EXISTING_WIFI ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) listOf(Manifest.permission.BLUETOOTH_CONNECT) else emptyList()
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> listOf(
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.NEARBY_WIFI_DEVICES,
-        )
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> listOf(
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-        )
-        else -> listOf(
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-        )
-    }
+    // 移植 main #465：权限清单抽取到 WirelessPermissions 以保持版本门控可测试；
+    // API 17 上 sdkInt < 21，走 ACCESS_COARSE/FINE_LOCATION 分支，ACCESS_LOCAL_NETWORK 为 no-op。
+    private fun requiredWirelessPermissions(): List<String> =
+        WirelessPermissions.required(wirelessHotspotMode, Build.VERSION.SDK_INT)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -796,10 +879,14 @@ class CarPlayHostActivity : ComponentActivity() {
         CenterMapOverlay.onDiPlayScreenShown()
         homeMonitor?.stop()
         homeScreenVisible = null
+        // 在此读取设置，使在设置页中的修改能在回到投屏画面时生效（main #496）。
+        if (AirPlayPersistence.loadFpsCounter(this)) fpsCounter?.start() else fpsCounter?.stop()
     }
 
     override fun onResume() {
         super.onResume()
+        // main B7：恢复期间本页持有外观归属权（作者：TRAE AI）。
+        hostAppearanceResumed = true
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
         val savedDelay = AirPlayPersistence.loadAmbientDelaySeconds(this)
@@ -815,6 +902,9 @@ class CarPlayHostActivity : ComponentActivity() {
                 nightSchedule)
         }
         nightModeController.resume(systemNight)
+        // main B7：发布主机页当前夜间态并按应用外观偏好刷新（作者：TRAE AI）。
+        AppAppearanceRuntime.publishHost(this, darkMode)
+        refreshAppAppearance()
         if (!menuOpen) {
             displayScalePercent = AirPlayPersistence.loadDisplayScalePercent(this)
             displayScaleTenths = CarPlayDisplayScale.sanitize((displayScalePercent + 5) / 10)
@@ -848,7 +938,7 @@ class CarPlayHostActivity : ComponentActivity() {
             clusterMonitor = null
         }
         if (!menuOpen) gestureFingerCount = AirPlayPersistence.loadSettingsGestureFingers(this)
-        settingsGestureHint?.text = getString(R.string.open_diplay_settings_hint, gestureFingerCount)
+        settingsGestureHint?.text = settingsGestureHintText()
         ensureClusterPresentation()
         AirPlayPersistence.overlaySettingsListener = { runOnUiThread { applyClusterTurnOverlay() } }
         com.shilapi.xcertplay.hud.BydNavigationOutputs.setTurnOverlayListener(clusterTurnOverlayListener)
@@ -1054,9 +1144,9 @@ class CarPlayHostActivity : ComponentActivity() {
             adbClusterConfigured = true
             clusterStreamOnDisplay = true
             return DiLink4ClusterDisplay.streamConfig(AirPlayPersistence.loadClusterContent(this),
-                AirPlayPersistence.loadClusterMarkerHorizontalStep(this),
-                AirPlayPersistence.loadClusterMarkerVerticalStep(this),
-                AirPlayPersistence.loadClusterSafeAreaRect(this)).also {
+                safeAreaRect = AirPlayPersistence.loadClusterSafeAreaRect(this),
+                markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+                markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this)).also {
                 MapMirrors.streamAspect = it.widthPixels.toDouble() / it.heightPixels
                 appendLog("Cluster activity: requesting stream 111 at ${it.widthPixels}x${it.heightPixels}; safeArea=${it.safeArea} drawOutside=${it.safeAreaDrawOutside}; ADB task routing")
             }
@@ -1077,9 +1167,9 @@ class CarPlayHostActivity : ComponentActivity() {
                 if (DiLink4ClusterDisplay.matches(display.name, size.x, size.y)) {
                     return DiLink4ClusterDisplay.streamConfig(
                         AirPlayPersistence.loadClusterContent(this),
-                        AirPlayPersistence.loadClusterMarkerHorizontalStep(this),
-                        AirPlayPersistence.loadClusterMarkerVerticalStep(this),
-                        AirPlayPersistence.loadClusterSafeAreaRect(this),
+                        safeAreaRect = AirPlayPersistence.loadClusterSafeAreaRect(this),
+                        markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+                        markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this),
                     ).also { MapMirrors.streamAspect = it.widthPixels.toDouble() / it.heightPixels }
                 }
                 val requestedScale = AirPlayPersistence.loadClusterMapScalePercent(this)
@@ -1087,9 +1177,11 @@ class CarPlayHostActivity : ComponentActivity() {
                     size.x,
                     size.y,
                     scale,
-                    AirPlayPersistence.loadClusterMarkerHorizontalStep(this),
-                    AirPlayPersistence.loadClusterMarkerVerticalStep(this),
+                    0,
+                    0,
                     AirPlayPersistence.loadClusterContent(this),
+                    markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+                    markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this),
                 )
                 val requested = streamAt(requestedScale)
                 // The smaller-map preset enlarges the encoded canvas beyond this panel. Probe
@@ -1223,11 +1315,15 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        // main B7：暂停即释放外观归属权（作者：TRAE AI）。
+        hostAppearanceResumed = false
+        AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
         super.onPause()
     }
 
     override fun onStop() {
+        fpsCounter?.stop()
         closePicturePanel()
         // The controller, USB/iAP2 link, and VPN attachment intentionally outlive the UI.
         isActivityStarted = false
@@ -1319,6 +1415,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onDestroy() {
         resetSidePanel()
+        releaseSidePanelEffects()
+        // main B7：销毁时释放外观归属权（作者：TRAE AI）。
+        hostAppearanceResumed = false
+        AppAppearanceRuntime.clearHost(this)
         nightModeController.pause()
         pictureBinding?.close()
         pictureBinding = null
@@ -1440,7 +1540,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         panel.addView(back, LinearLayout.LayoutParams(dp(300), dp(64)))
         val gestureHint = TextView(this).apply {
-            text = getString(R.string.open_diplay_settings_hint, gestureFingerCount)
+            text = settingsGestureHintText()
             gravity = Gravity.CENTER
         }
         panel.addView(gestureHint)
@@ -1457,6 +1557,8 @@ class CarPlayHostActivity : ComponentActivity() {
         root.addView(viewport, FrameLayout.LayoutParams(-1, -1))
         // Above the video and gesture layer, below the menus.
         sidePanel = buildSidePanel().also { root.addView(it, FrameLayout.LayoutParams(0, 0)) }
+        // 侧栏把手小条（main #480），位于视频与手势层之上、菜单之下。
+        sidePanelTab = buildSidePanelTab().also { root.addView(it, FrameLayout.LayoutParams(0, 0)) }
         var preparationHeight = -1
         fun updatePreparationLayout() {
             val height = viewport.height - viewport.paddingTop - viewport.paddingBottom
@@ -1509,12 +1611,20 @@ class CarPlayHostActivity : ComponentActivity() {
             insets
         }
         ViewCompat.requestApplyInsets(viewport)
+        // 覆盖画面与连接面板，位于设置菜单之下（main #496 FPS 计数器）。
+        fpsCounter = FpsCounterOverlay(this, mainHandler) { sink?.liveVideoCounters() }.also { counter ->
+            // CarPlay 画面永不镜像，因此在从右到左的语言里计数器仍保持在右上角。
+            root.addView(counter.view, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.RIGHT).apply {
+                setMargins(0, dp(12), dp(12), 0)
+            })
+        }
         settingsMenu = buildSettingsMenu().apply { visibility = View.GONE }
         root.addView(settingsMenu, FrameLayout.LayoutParams(-1, -1))
         safeAreaEditor = buildSafeAreaEditor().apply { visibility = View.GONE }
         root.addView(safeAreaEditor, FrameLayout.LayoutParams(-1, -1))
         videoView = video
         smoothVideo = AirPlayPersistence.loadSmoothVideo(this)
+        directVideoOutput = AirPlayPersistence.loadDirectVideoOutput(this)
         observeVideoWindow(video)
         gestureOverlay = gestureLayer
         settingsGestureHint = gestureHint
@@ -1524,37 +1634,224 @@ class CarPlayHostActivity : ComponentActivity() {
         return root
     }
 
+    // 侧栏卡片跟随应用主题：深色模式为黑、浅色为白（main #480 移植，分支以 darkMode 代替 appNight）。
+    private val SIDE_PANEL_CARD: Int get() = if (darkMode) Color.BLACK else Color.WHITE
+    private val SIDE_PANEL_PRIMARY: Int get() = if (darkMode) Color.WHITE else Color.rgb(28, 28, 30)
+    private val SIDE_PANEL_SECONDARY: Int get() = if (darkMode) MENU_SECONDARY else Color.rgb(96, 102, 108)
+
     // DiPlay's side panel: placed over the part of the stream CarPlay leaves black (placeSidePanel), so it
     // follows the video when it is letterboxed; touches elsewhere still reach the gesture layer and CarPlay.
+    // main #480：卡片背景带把手、可拖拽边缘；分支按迁移指南跳过 resize 模糊（Android 12 RenderEffect）。
     private fun buildSidePanel(): LinearLayout {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             isClickable = true
             visibility = View.GONE
-            setBackgroundColor(Color.rgb(16, 16, 18))
+            background = sidePanelBackground()
+        }
+        panel.setOnTouchListener { view, event -> onSidePanelTouch(view, event) }
+        val contents = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
             setPadding(dp(24), dp(24), dp(24), dp(24))
         }
-        panel.addView(android.widget.TextClock(this).apply {
+        sidePanelContents = contents
+        panel.addView(contents, LinearLayout.LayoutParams(-1, -1))
+        contents.addView(android.widget.TextClock(this).apply {
             format24Hour = "HH:mm"
             format12Hour = "h:mm"
             textSize = 72f
-            setTextColor(Color.WHITE)
+            setTextColor(SIDE_PANEL_PRIMARY)
             gravity = Gravity.CENTER
         })
         sidePanelBattery = TextView(this).apply {
             textSize = 30f
-            setTextColor(Color.rgb(200, 200, 205))
+            setTextColor(SIDE_PANEL_SECONDARY)
             gravity = Gravity.CENTER
             setPadding(0, dp(24), 0, dp(32))
         }
-        panel.addView(sidePanelBattery)
-        panel.addView(Button(this).apply {
-            text = getString(R.string.side_panel_full_screen)
-            textSize = 22f
-            setOnClickListener { showSidePanel(false) }
-        })
+        contents.addView(sidePanelBattery)
+        contents.addView(buildSidePanelTyres())
         return panel
+    }
+
+    // 类似 CarPlay 的圆角卡片，靠 CarPlay 的一边带把手。
+    private fun sidePanelBackground(): Drawable {
+        val card = GradientDrawable().apply {
+            setColor(SIDE_PANEL_CARD)
+            cornerRadius = dp(28).toFloat()
+        }
+        val across = sidePanelEdge != Gravity.TOP
+        val grip = GradientDrawable().apply {
+            // 把手位于 CarPlay 旁的黑色空隙里，因此两种主题下都保持浅色。
+            setColor(Color.rgb(170, 180, 190))
+            cornerRadius = dp(3).toFloat()
+            setSize(if (across) dp(6) else dp(72), if (across) dp(72) else dp(6))
+        }
+        grip.alpha = sidePanelGripAlpha
+        sidePanelGrip = grip
+        // 只在朝向 CarPlay 的一侧留出放把手的缺口；贴着 CarPlay 的底边与其 Dock 齐平。
+        val bottom = if (across) dp(6) else 0
+        // setLayerGravity/setLayerInsetBottom 是 API 23 方法，低版本走自绘等效实现，避免 NoSuchMethodError。
+        if (Build.VERSION.SDK_INT >= 23) {
+            return LayerDrawable(arrayOf(card, grip)).apply {
+                when (sidePanelEdge) {
+                    Gravity.TOP -> setLayerInset(0, 0, dp(10), 0, 0)
+                    Gravity.END -> setLayerInset(0, 0, 0, dp(10), bottom)
+                    else -> setLayerInset(0, dp(10), 0, 0, bottom)
+                }
+                setLayerInset(1, 0, 0, 0, bottom)
+                setLayerGravity(1, when (sidePanelEdge) {
+                    Gravity.TOP -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    Gravity.END -> Gravity.RIGHT or Gravity.CENTER_VERTICAL
+                    else -> Gravity.LEFT or Gravity.CENTER_VERTICAL
+                })
+            }
+        }
+        val cardInsets = when (sidePanelEdge) {
+            Gravity.TOP -> intArrayOf(0, dp(10), 0, 0)
+            Gravity.END -> intArrayOf(0, 0, dp(10), bottom)
+            else -> intArrayOf(dp(10), 0, 0, bottom)
+        }
+        val gripGravity = when (sidePanelEdge) {
+            Gravity.TOP -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            Gravity.END -> Gravity.RIGHT or Gravity.CENTER_VERTICAL
+            else -> Gravity.LEFT or Gravity.CENTER_VERTICAL
+        }
+        return GravityLayerDrawable(
+            arrayOf(card, grip),
+            arrayOf(cardInsets, intArrayOf(0, 0, 0, bottom)),
+            intArrayOf(Gravity.FILL, gripGravity),
+        )
+    }
+
+    /**
+     * 拖拽面板朝向 CarPlay 的那条边：面板跟随手指；松手时 CarPlay 移动到离松手位置最近的
+     * 声明份额（屏幕的三分之二、一半或三分之一），若在离对侧更近处松手则 CarPlay 占全屏并关闭面板。
+     */
+    private fun onSidePanelTouch(panel: View, event: MotionEvent): Boolean {
+        val screen = sidePanelScreen ?: return false
+        val params = panel.layoutParams as? FrameLayout.LayoutParams ?: return false
+        val vertical = sidePanelEdge == Gravity.TOP
+        val raw = if (vertical) event.rawY else event.rawX
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // 只有靠近那条边的触摸才会拖拽；面板其余部分保留点击。
+                val distance = when (sidePanelEdge) {
+                    Gravity.TOP -> event.y
+                    Gravity.END -> panel.width - event.x
+                    else -> event.x
+                }
+                if (distance > dp(56)) return false
+                showSidePanelGripHint()
+                val edge = when (sidePanelEdge) {
+                    Gravity.TOP -> params.topMargin.toFloat()
+                    Gravity.END -> (params.leftMargin + params.width).toFloat()
+                    else -> params.leftMargin.toFloat()
+                }
+                sidePanelDrag = floatArrayOf(raw, edge)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val drag = sidePanelDrag ?: return false
+                // CarPlay 至少保留四分之一屏幕，也可以占满全屏。
+                val quarter = sidePanelEdgeAt(screen, 0.25f)
+                val whole = sidePanelEdgeAt(screen, 1f)
+                val edge = (drag[1] + raw - drag[0]).coerceIn(minOf(quarter, whole), maxOf(quarter, whole))
+                panel.alpha = if (sidePanelCarPlayShare(screen, edge) > SIDE_PANEL_CLOSE_SHARE) 0.5f else 1f
+                when (sidePanelEdge) {
+                    Gravity.TOP -> { params.topMargin = Math.round(edge); params.height = Math.round(screen.bottom - edge) }
+                    Gravity.END -> { params.leftMargin = Math.round(screen.left); params.width = Math.round(edge - screen.left) }
+                    else -> { params.leftMargin = Math.round(edge); params.width = Math.round(screen.right - edge) }
+                }
+                panel.layoutParams = params
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val drag = sidePanelDrag ?: return false
+                sidePanelDrag = null
+                panel.alpha = 1f
+                val carPlay = sidePanelCarPlayShare(screen, drag[1] + raw - drag[0])
+                if (event.actionMasked == MotionEvent.ACTION_UP && carPlay > SIDE_PANEL_CLOSE_SHARE) {
+                    appendLog("Side panel closed by dragging its edge")
+                    showSidePanel(false)
+                    if (sidePanelShown) videoView?.let { updateVideoLayout(it.width, it.height) }
+                    return true
+                }
+                val sixths = CarPlayViewAreas.nearestSidePanelSixths(carPlay.toDouble())
+                if (event.actionMasked == MotionEvent.ACTION_UP && sixths != SidePanelSettings.sixths(this)) {
+                    SidePanelSettings.setSixths(this, sixths)
+                    appendLog("Side panel resized: CarPlay $sixths/6 of the screen")
+                    showSidePanel(true)
+                } else {
+                    videoView?.let { updateVideoLayout(it.width, it.height) }
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun showSidePanelGripHint() {
+        if (sidePanelGripAlpha < 255) animateSidePanelGrip(255, 200L)
+        mainHandler.removeCallbacks(sidePanelGripFade)
+        mainHandler.postDelayed(sidePanelGripFade, SIDE_PANEL_TAB_HINT_MILLIS)
+    }
+
+    private fun animateSidePanelGrip(to: Int, millis: Long) {
+        sidePanelGripAnimator?.cancel()
+        sidePanelGripAnimator = ValueAnimator.ofInt(sidePanelGripAlpha, to).setDuration(millis).apply {
+            addUpdateListener {
+                sidePanelGripAlpha = it.animatedValue as Int
+                sidePanelGrip?.alpha = sidePanelGripAlpha
+            }
+            start()
+        }
+    }
+
+    // CarPlay 占 [share] 屏幕时面板边所在的位置，以及边在 [edge] 时 CarPlay 的份额。
+    private fun sidePanelEdgeAt(screen: RectF, share: Float): Float = when (sidePanelEdge) {
+        Gravity.TOP -> screen.top + screen.height() * share
+        Gravity.END -> screen.right - screen.width() * share
+        else -> screen.left + screen.width() * share
+    }
+
+    private fun sidePanelCarPlayShare(screen: RectF, edge: Float): Float = when (sidePanelEdge) {
+        Gravity.TOP -> (edge - screen.top) / screen.height()
+        Gravity.END -> (screen.right - edge) / screen.width()
+        else -> (edge - screen.left) / screen.width()
+    }
+
+    // 与仪表盘一致的胎压显示：前轮在上排、后轮在下排，左右两列。
+    private fun buildSidePanelTyres(): LinearLayout {
+        val texts = List(4) { position ->
+            TextView(this).apply {
+                textSize = 24f
+                setTextColor(SIDE_PANEL_PRIMARY)
+                gravity = if (position % 2 == 0) Gravity.START else Gravity.END
+            }
+        }
+        sidePanelTyreTexts = texts
+        fun row(left: TextView, right: TextView) = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(left, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(right, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setPadding(dp(8), 0, dp(8), dp(28))
+            addView(TextView(this@CarPlayHostActivity).apply {
+                text = "TPMS"
+                textSize = 18f
+                setTextColor(SIDE_PANEL_SECONDARY)
+                gravity = Gravity.CENTER
+            })
+            addView(row(texts[0], texts[1]))
+            addView(row(texts[2], texts[3]))
+        }.also { sidePanelTyres = it }
     }
 
     // The panel's strip of the stream, mapped through the video's layout in the window.
@@ -1573,6 +1870,249 @@ class CarPlayHostActivity : ComponentActivity() {
             // Stream coordinates are physical pixels, independent of the UI's reading direction.
             Gravity.TOP or Gravity.LEFT,
         ).apply { leftMargin = left; topMargin = top }
+        val screen = display.viewAreas?.let { it.layoutArea(it.current) } ?: return
+        sidePanelScreen = sidePanelScreenRect(viewWidth, viewHeight)
+        sidePanelEdge = when {
+            strip.height < screen.height -> Gravity.TOP
+            strip.originX > screen.originX -> Gravity.START
+            else -> Gravity.END
+        }
+        panel.background = sidePanelBackground()
+    }
+
+    // CarPlay 布局所依据的整块屏幕（含面板条带）在窗口中的位置。
+    private fun sidePanelScreenRect(viewWidth: Int, viewHeight: Int): RectF? {
+        val display = sessionDisplay ?: return null
+        val screen = display.viewAreas?.let { it.layoutArea(it.current) } ?: return null
+        val content = contentRect(viewWidth, viewHeight)
+        val scaleX = content.width / display.width
+        val scaleY = content.height / display.height
+        return RectF(content.left + screen.originX * scaleX, content.top + screen.originY * scaleY,
+            content.left + (screen.originX + screen.width) * scaleX, content.top + (screen.originY + screen.height) * scaleY)
+    }
+
+    // CarPlay 边缘上的小药丸条，离屏幕边缘有一点距离；车机保留它自身的返回滑动。
+    private fun buildSidePanelTab(): View = View(this).apply {
+        visibility = View.GONE
+        setOnTouchListener { view, event -> onSidePanelTabTouch(view, event) }
+    }
+
+    private fun placeSidePanelTab(viewWidth: Int, viewHeight: Int) {
+        val tab = sidePanelTab ?: return
+        val from = sidePanelOpenEdge()
+        val screen = sidePanelScreenRect(viewWidth, viewHeight)
+        if (from == null || screen == null || sidePanelTabDrag != null) {
+            if (sidePanelTabDrag == null) tab.visibility = View.GONE
+            return
+        }
+        val across = from != Gravity.BOTTOM
+        val reach = dp(64)
+        val length = dp(160)
+        if (from != sidePanelTabFrom) tab.background = sidePanelTabPill(from).apply { alpha = if (sidePanelTabHint) 255 else 0 }
+        sidePanelTabFrom = from
+        val areas = sessionDisplay?.viewAreas
+        if (areas !== sidePanelTabHintFor) {
+            sidePanelTabHintFor = areas
+            showSidePanelTabHint()
+        }
+        val params = FrameLayout.LayoutParams(if (across) reach else length, if (across) length else reach,
+            Gravity.TOP or Gravity.LEFT).apply {
+            leftMargin = Math.round(when (from) {
+                Gravity.BOTTOM -> screen.centerX() - length / 2f
+                Gravity.LEFT -> screen.left
+                else -> screen.right - reach
+            })
+            topMargin = Math.round(if (across) screen.centerY() - length / 2f else screen.bottom - reach)
+        }
+        val old = tab.layoutParams as? FrameLayout.LayoutParams
+        if (old == null || old.width != params.width || old.height != params.height ||
+            old.leftMargin != params.leftMargin || old.topMargin != params.topMargin) tab.layoutParams = params
+        tab.visibility = View.VISIBLE
+    }
+
+    private fun showSidePanelTabHint() {
+        sidePanelTabHint = true
+        sidePanelTab?.background?.let { pill ->
+            if (pill.alpha < 255) ObjectAnimator.ofInt(pill, "alpha", pill.alpha, 255).setDuration(200L).start()
+        }
+        mainHandler.removeCallbacks(sidePanelTabFade)
+        mainHandler.postDelayed(sidePanelTabFade, SIDE_PANEL_TAB_HINT_MILLIS)
+    }
+
+    private fun sidePanelTabPill(from: Int): Drawable {
+        val across = from != Gravity.BOTTOM
+        val pill = GradientDrawable().apply {
+            setColor(0xDDFFFFFF.toInt())
+            setStroke(dp(1), 0x66000000)
+            cornerRadius = dp(4).toFloat()
+            setSize(if (across) dp(8) else dp(88), if (across) dp(88) else dp(8))
+        }
+        // setLayerGravity/setLayerInsetLeft 等均是 API 23 方法，低版本走自绘等效实现。
+        val gravity = when (from) {
+            Gravity.BOTTOM -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            Gravity.LEFT -> Gravity.LEFT or Gravity.CENTER_VERTICAL
+            else -> Gravity.RIGHT or Gravity.CENTER_VERTICAL
+        }
+        val inset = dp(20)
+        val insets = when (from) {
+            Gravity.BOTTOM -> intArrayOf(0, 0, 0, inset)
+            Gravity.LEFT -> intArrayOf(inset, 0, 0, 0)
+            else -> intArrayOf(0, 0, inset, 0)
+        }
+        if (Build.VERSION.SDK_INT >= 23) {
+            return LayerDrawable(arrayOf(pill)).apply {
+                setLayerGravity(0, gravity)
+                setLayerInset(0, insets[0], insets[1], insets[2], insets[3])
+            }
+        }
+        return GravityLayerDrawable(arrayOf(pill), arrayOf(insets), intArrayOf(gravity))
+    }
+
+    /**
+     * 把手跟随时面板本身跟随手指；松手时 CarPlay 移动到离松手位置最近的声明份额，
+     * 若在离屏幕边缘更近处松手则什么都不发生。轻点会重新显示药丸。
+     */
+    private fun onSidePanelTabTouch(tab: View, event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            sidePanelTabToCarPlay = false
+            dropHeldSidePanelTabTouch()
+        }
+        if (sidePanelTabToCarPlay) {
+            forwardSidePanelTabTouch(tab, event)
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                sidePanelTabToCarPlay = false
+            }
+            return true
+        }
+        val panel = sidePanel ?: return false
+        val vertical = sidePanelOpenEdge() == Gravity.BOTTOM
+        val position = if (vertical) tab.y + event.y else tab.x + event.x
+        val across = if (vertical) tab.x + event.x else tab.y + event.y
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val from = sidePanelOpenEdge() ?: return false
+                val view = videoView ?: return false
+                sidePanelScreen = sidePanelScreenRect(view.width, view.height) ?: return false
+                sidePanelEdge = when (from) {
+                    Gravity.BOTTOM -> Gravity.TOP
+                    Gravity.LEFT -> Gravity.END
+                    else -> Gravity.START
+                }
+                // 面板从左往右拉出时方向为正，其余朝 x 或 y 变小的方向。
+                sidePanelTabDrag = floatArrayOf(position, 0f, across, if (from == Gravity.LEFT) 1f else -1f)
+                holdSidePanelTabTouch(event)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val drag = sidePanelTabDrag ?: return false
+                val screen = sidePanelScreen ?: return false
+                if (drag[1] == 0f) {
+                    when (sidePanelTabIntent((position - drag[0]) * drag[3], Math.abs(across - drag[2]), dp(8).toFloat())) {
+                        SidePanelTabIntent.UNDECIDED -> {
+                            holdSidePanelTabTouch(event)
+                            return true
+                        }
+                        SidePanelTabIntent.CARPLAY -> {
+                            handSidePanelTabTouchToCarPlay(tab, event)
+                            return true
+                        }
+                        SidePanelTabIntent.OPEN_PANEL -> dropHeldSidePanelTabTouch()
+                    }
+                }
+                drag[1] = 1f
+                tab.alpha = 0f
+                val quarter = sidePanelEdgeAt(screen, 0.25f)
+                val whole = sidePanelEdgeAt(screen, 1f)
+                val edge = position.coerceIn(minOf(quarter, whole), maxOf(quarter, whole))
+                panel.alpha = if (sidePanelCarPlayShare(screen, edge) > SIDE_PANEL_CLOSE_SHARE) 0.5f else 1f
+                panel.layoutParams = (panel.layoutParams as FrameLayout.LayoutParams).apply {
+                    gravity = Gravity.TOP or Gravity.LEFT
+                    when (sidePanelEdge) {
+                        Gravity.TOP -> { leftMargin = Math.round(screen.left); width = Math.round(screen.width()); topMargin = Math.round(edge); height = Math.round(screen.bottom - edge) }
+                        Gravity.END -> { leftMargin = Math.round(screen.left); width = Math.round(edge - screen.left); topMargin = Math.round(screen.top); height = Math.round(screen.height()) }
+                        else -> { leftMargin = Math.round(edge); width = Math.round(screen.right - edge); topMargin = Math.round(screen.top); height = Math.round(screen.height()) }
+                    }
+                }
+                if (panel.visibility != View.VISIBLE) {
+                    panel.background = sidePanelBackground()
+                    refreshSidePanel()
+                    panel.visibility = View.VISIBLE
+                }
+                return true
+            }
+            MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP -> {
+                // 多指从不拖拽面板（设置滑动、捏合）：它们交给 CarPlay。
+                if (sidePanelTabDrag?.get(1) == 0f) handSidePanelTabTouchToCarPlay(tab, event)
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val drag = sidePanelTabDrag ?: return false
+                if (drag[1] == 0f) {
+                    // 不是拖拽：轻点交给把手下方的 CarPlay 并重新显示药丸。
+                    if (event.actionMasked == MotionEvent.ACTION_UP) {
+                        handSidePanelTabTouchToCarPlay(tab, event)
+                        sidePanelTabToCarPlay = false
+                        showSidePanelTabHint()
+                    } else {
+                        dropHeldSidePanelTabTouch()
+                        sidePanelTabDrag = null
+                    }
+                    return true
+                }
+                sidePanelTabDrag = null
+                panel.alpha = 1f
+                tab.alpha = 1f
+                val screen = sidePanelScreen
+                val carPlay = if (screen != null) sidePanelCarPlayShare(screen, position) else null
+                if (event.actionMasked == MotionEvent.ACTION_UP && carPlay != null && carPlay <= SIDE_PANEL_CLOSE_SHARE) {
+                    SidePanelSettings.setSixths(this, CarPlayViewAreas.nearestSidePanelSixths(carPlay.toDouble()))
+                    appendLog("Side panel opened from its tab: CarPlay ${SidePanelSettings.sixths(this)}/6 of the screen")
+                    showSidePanel(true)
+                }
+                if (!sidePanelShown) panel.visibility = View.GONE
+                videoView?.let { updateVideoLayout(it.width, it.height) }
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun holdSidePanelTabTouch(event: MotionEvent) {
+        if (sidePanelTabHeld.isEmpty()) {
+            mainHandler.postDelayed(sidePanelTabLongPress, ViewConfiguration.getLongPressTimeout().toLong())
+        }
+        sidePanelTabHeld += MotionEvent.obtain(event)
+    }
+
+    private fun dropHeldSidePanelTabTouch() {
+        mainHandler.removeCallbacks(sidePanelTabLongPress)
+        sidePanelTabHeld.forEach(MotionEvent::recycle)
+        sidePanelTabHeld.clear()
+    }
+
+    /** 把手上的触摸不是拖拽：CarPlay 收到暂存的事件、[event] 以及该次触摸的其余部分。 */
+    private fun handSidePanelTabTouchToCarPlay(tab: View, event: MotionEvent? = null) {
+        mainHandler.removeCallbacks(sidePanelTabLongPress)
+        sidePanelTabHeld.forEach { held ->
+            forwardSidePanelTabTouch(tab, held)
+            held.recycle()
+        }
+        sidePanelTabHeld.clear()
+        event?.let { forwardSidePanelTabTouch(tab, it) }
+        sidePanelTabDrag = null
+        sidePanelTabToCarPlay = true
+    }
+
+    /** 把把手上的触摸按手势层的坐标交给其下方的 CarPlay 触摸层。 */
+    private fun forwardSidePanelTabTouch(tab: View, event: MotionEvent) {
+        val layer = gestureOverlay ?: return
+        val forwarded = MotionEvent.obtain(event)
+        forwarded.offsetLocation(tab.x - layer.x, tab.y - layer.y)
+        try {
+            onHostTouch(layer, forwarded)
+        } finally {
+            forwarded.recycle()
+        }
     }
 
     private fun showSidePanel(show: Boolean) {
@@ -1580,7 +2120,7 @@ class CarPlayHostActivity : ComponentActivity() {
         val view = videoView ?: return
         val split = isMultiWindowActive()
         val portrait = if (split) screenPortrait() else view.height > view.width
-        val target = if (show) areas.sidePanel(portrait) else areas.indexFor(view.width, view.height, split, portrait)
+        val target = if (show) areas.sidePanel(portrait, SidePanelSettings.sixths(this)) else areas.indexFor(view.width, view.height, split, portrait)
         val sent = target != null && controller?.showViewArea(target) == true
         appendLog("Side panel ${if (show) "shown" else "hidden"}: view area $target sent=$sent")
         if (!sent || target == null) return
@@ -1588,7 +2128,9 @@ class CarPlayHostActivity : ComponentActivity() {
         sidePanelShown = show
         sidePanel?.visibility = if (show) View.VISIBLE else View.GONE
         mainHandler.removeCallbacks(sidePanelTick)
+        if (show) startSidePanelTyres() else com.shilapi.xcertplay.hud.BydTyreStatus.stop()
         if (show) sidePanelTick.run()
+        if (show) showSidePanelGripHint()
         updateVideoLayout(view.width, view.height)
     }
 
@@ -1596,6 +2138,36 @@ class CarPlayHostActivity : ComponentActivity() {
         sidePanelShown = false
         sidePanel?.visibility = View.GONE
         mainHandler.removeCallbacks(sidePanelTick)
+        com.shilapi.xcertplay.hud.BydTyreStatus.stop()
+        videoView?.let { placeSidePanelTab(it.width, it.height) }
+    }
+
+    // 轮胎数据通过车机的 adb shell 读取；没有 BYD autoservice 时读取器会自行停止。
+    private fun startSidePanelTyres() {
+        com.shilapi.xcertplay.hud.BydTyreStatus.start(this)
+    }
+
+    // 停止即将销毁的宿主的把手提示（分支无 resize 模糊，只清理提示与暂存事件）。
+    private fun releaseSidePanelEffects() {
+        dropHeldSidePanelTabTouch()
+        sidePanelTabToCarPlay = false
+        mainHandler.removeCallbacks(sidePanelGripFade)
+        mainHandler.removeCallbacks(sidePanelTabFade)
+        sidePanelGripAnimator?.cancel()
+    }
+
+    // 侧栏现在会占据的屏幕边（即把手所在处）；已显示或不可用时为 null。
+    private fun sidePanelOpenEdge(): Int? {
+        if (sidePanelShown) return null
+        val areas = sessionDisplay?.viewAreas ?: return null
+        val view = videoView ?: return null
+        val portrait = if (isMultiWindowActive()) screenPortrait() else view.height > view.width
+        val index = areas.sidePanel(portrait, SidePanelSettings.sixths(this)) ?: return null
+        return when {
+            portrait -> Gravity.BOTTOM
+            areas.areas[index].originX > 0 -> Gravity.LEFT
+            else -> Gravity.RIGHT
+        }
     }
 
     // The battery shows only where DiPlay already reads it for the iPhone.
@@ -1604,6 +2176,64 @@ class CarPlayHostActivity : ComponentActivity() {
             com.shilapi.xcertplay.hud.BydNavigationOutputs.batteryStatus(applicationContext).snapshot()
         } else null
         sidePanelBattery?.text = battery?.let { "🔋 ${Math.round(it.batteryPercent)} %  ·  ${it.rangeKm} km" }.orEmpty()
+        val tyres = com.shilapi.xcertplay.hud.BydTyreStatus.latest()
+        sidePanelTyres?.visibility = if (tyres == null) View.GONE else View.VISIBLE
+        if (tyres != null) sidePanelTyreTexts.forEachIndexed { tyre, text ->
+            val pressure = tyres.pressureKpa.getOrNull(tyre)?.let { "$it kPa" } ?: "—"
+            val temperature = tyres.temperatureC.getOrNull(tyre)?.let { "\n$it °C" }.orEmpty()
+            text.text = pressure + temperature
+        }
+    }
+
+    // 日夜切换时刷新侧栏卡片的配色（分支无 overlayPalette，按 darkMode 直接重涂）。
+    private fun paintSidePanelTheme() {
+        sidePanel?.let { panel ->
+            panel.background = sidePanelBackground()
+            val contents = sidePanelContents ?: return@let
+            (contents.getChildAt(0) as? TextView)?.setTextColor(SIDE_PANEL_PRIMARY)
+            sidePanelBattery?.setTextColor(SIDE_PANEL_SECONDARY)
+            sidePanelTyreTexts.forEach { it.setTextColor(SIDE_PANEL_PRIMARY) }
+            (sidePanelTyres?.getChildAt(0) as? TextView)?.setTextColor(SIDE_PANEL_SECONDARY)
+        }
+    }
+
+    // main B7：应用外观（DARK/LIGHT/AUTO）解析出的夜间态与主机页不同时，重建设置菜单
+    // 并重涂侧栏（作者：TRAE AI）。菜单色在分支仍为静态深色，重建主要恢复滚动与焦点。
+    private fun refreshAppAppearance() {
+        val nextNight = resolveAppNightNow(darkMode)
+        if (nextNight == appNight) return
+        appNight = nextNight
+
+        settingsMenu?.let { previous ->
+            val parent = previous.parent as? ViewGroup ?: return@let
+            val index = parent.indexOfChild(previous)
+            val visible = previous.visibility
+            val scrollY = findDescendant<ScrollView>(previous)?.scrollY ?: 0
+            val focusDescription = previous.findFocus()?.contentDescription?.toString()
+            parent.removeView(previous)
+            val replacement = buildSettingsMenu().apply { visibility = visible }
+            settingsMenu = replacement
+            parent.addView(replacement, index, FrameLayout.LayoutParams(-1, -1))
+            replacement.post {
+                findDescendant<ScrollView>(replacement)?.scrollTo(0, scrollY)
+                if (focusDescription != null) {
+                    findDescendants(replacement).firstOrNull {
+                        it.contentDescription?.toString() == focusDescription
+                    }?.requestFocus()
+                }
+            }
+        }
+        paintSidePanelTheme()
+    }
+
+    private inline fun <reified T : View> findDescendant(root: View): T? =
+        findDescendants(root).filterIsInstance<T>().firstOrNull()
+
+    private fun findDescendants(root: View): Sequence<View> = sequence {
+        yield(root)
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) yieldAll(findDescendants(root.getChildAt(index)))
+        }
     }
 
     private fun buildSettingsMenu(): View {
@@ -2034,11 +2664,12 @@ class CarPlayHostActivity : ComponentActivity() {
         val gestureButton = Button(this).apply {
             isAllCaps = false
             setOnClickListener {
-                gestureFingerCount = if (gestureFingerCount >= 4) 2 else gestureFingerCount + 1
-                text = getString(R.string.settings_gesture_fingers, gestureFingerCount)
+                // main #487：0 = 禁用手势；循环为 0→2→3→4→0（作者：TRAE AI）。
+                gestureFingerCount = when (gestureFingerCount) { 0 -> 2; 4 -> 0; else -> gestureFingerCount + 1 }
+                text = settingsGestureButtonText()
             }
         }
-        gestureButton.text = getString(R.string.settings_gesture_fingers, gestureFingerCount)
+        gestureButton.text = settingsGestureButtonText()
         content.addView(gestureButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
         val openDiPlaySettingsButton = Button(this).apply {
@@ -2049,8 +2680,8 @@ class CarPlayHostActivity : ComponentActivity() {
             UiCompat.setBackgroundTint(this, ColorStateList.valueOf(MENU_TRACK_OFF))
             minHeight = dp(52)
             setOnClickListener {
-                cancelSettingsEdits()
-                showDiPlayHome("settings")
+                // main #500：跳转完整设置页前确认丢弃（作者：TRAE AI）。
+                leaveSettingsMenu { showDiPlayHome("settings") }
             }
         }
         content.addView(
@@ -2121,6 +2752,15 @@ class CarPlayHostActivity : ComponentActivity() {
         return overlay
     }
 
+    // main #487：手势数 0（禁用）时提示与按钮显示专用文案（作者：TRAE AI）。
+    private fun settingsGestureHintText(): String =
+        if (gestureFingerCount == 0) getString(R.string.settings_gesture_disabled_hint)
+        else getString(R.string.open_diplay_settings_hint, gestureFingerCount)
+
+    private fun settingsGestureButtonText(): String =
+        if (gestureFingerCount == 0) getString(R.string.settings_gesture_disabled_action)
+        else getString(R.string.settings_gesture_fingers, gestureFingerCount)
+
     private fun persistMenuSettings() {
         AirPlayPersistence.saveSettingsGestureFingers(this, gestureFingerCount)
         AirPlayPersistence.saveWirelessEnabled(this, wirelessEnabled)
@@ -2156,6 +2796,17 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveSafeAreaDrawOutside(this, safeAreaDrawOutside)
     }
 
+    /** main #500：镜像 [persistMenuSettings]——凡在那里暂存的字段都必须参与签名（作者：TRAE AI）。 */
+    private fun menuSettingsSignature(): Int = listOf(
+        gestureFingerCount, wirelessEnabled, mfiTarget, mfiI2cPath, remoteMfiServer, remoteMfiToken,
+        wirelessHotspotMode, existingWifiSsid, existingWifiPassphrase, manualHotspotSsid,
+        manualHotspotPassphrase, manualHotspotBand, manualHotspotChannel, manualHotspotSecurity,
+        locationReportingEnabled, autoStartOnBoot, advancedAudioChannelMapping, displayScaleTenths,
+        displayScalePercent, fps, widthPhysicalMm, physicalSizeBasis, hevcEnabled,
+        hevcSoftwareDecoderEnabled, manufacturer, model, oemLabel, debugLogsEnabled, rightHandDrive,
+        carPlayDock, hideTopBar, hideBottomBar, safeAreaDrawOutside,
+    ).joinToString("|").hashCode()
+
     private fun captureSettingsBaseline(): SettingsBaseline {
         val safeAreaSize = currentActivitySize()
         val customIconBytes = try {
@@ -2174,6 +2825,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun restoreSettingsBaseline() {
         val baseline = settingsBaseline ?: return
+        // main #501：记录预览期间系统栏是否真的变化，未变化时取消菜单不应触发重新协商。
+        val previewChangedSystemBars = hideTopBar != AirPlayPersistence.loadHideTopBar(this) ||
+            hideBottomBar != AirPlayPersistence.loadHideBottomBar(this)
         loadPersistedSettings()
         baseline.safeAreaRects.forEach { (size, savedRect) ->
             savedRect?.let { rect ->
@@ -2208,8 +2862,12 @@ class CarPlayHostActivity : ComponentActivity() {
         updateHotspotStatusBlock()
         updateResolutionMenu()
         updateDebugOverlays()
-        applyFullscreenMode()
-        refreshDisplaySizeAfterLayout()
+        // main #501：关闭未变化的菜单不得调度显示重新协商；真实的状态栏预览
+        // 取消后仍需恢复窗口并重新测量。
+        if (previewChangedSystemBars) {
+            applyFullscreenMode()
+            refreshDisplaySizeAfterLayout()
+        }
     }
 
     private fun buildMfiTargetSection(): View {
@@ -2419,15 +3077,8 @@ class CarPlayHostActivity : ComponentActivity() {
             val switch = Switch(this@CarPlayHostActivity).apply {
                 isChecked = locationReportingEnabled
                 contentDescription = getString(R.string.report_android_location_to_the_iphone)
-                showText = false
-                thumbTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT, MENU_SECONDARY),
-                )
-                trackTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
-                )
+                // main 9c7fda97：覆盖层开关统一用大开关样式（内部已做 API 17 适配）（作者：TRAE AI）。
+                SettingsWidgets.applyLargeSwitchStyle(this, MENU_ACCENT, MENU_SECONDARY, MENU_ACCENT_TRACK, MENU_TRACK_OFF)
                 setOnCheckedChangeListener { _, checked ->
                     onLocationReportingChanged(checked)
                 }
@@ -2523,9 +3174,8 @@ class CarPlayHostActivity : ComponentActivity() {
         val seekBar = SeekBar(this).apply {
             max = (values.size - 1).coerceAtLeast(0)
             progress = selectedIndex
-            splitTrack = false
-            progressTintList = ColorStateList.valueOf(MENU_ACCENT)
-            thumbTintList = ColorStateList.valueOf(MENU_ACCENT)
+            // splitTrack/progressTintList/thumbTintList 均为 API 21+，走 UiCompat 兼容 API 17
+            UiCompat.setSeekBarTints(this, MENU_ACCENT)
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -3013,9 +3663,13 @@ class CarPlayHostActivity : ComponentActivity() {
                 text = label
                 textSize = 18f
                 setTextColor(MENU_SECONDARY)
-                buttonTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT, MENU_SECONDARY),
+                // setButtonTintList 是 API 21+，API 17 设备直接调用会抛 NoSuchMethodError，走 UiCompat 兜底
+                UiCompat.setButtonTint(
+                    this,
+                    ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(MENU_ACCENT, MENU_SECONDARY),
+                    ),
                 )
                 tag = mode
                 isChecked = wirelessHotspotMode == mode
@@ -3578,6 +4232,9 @@ class CarPlayHostActivity : ComponentActivity() {
         appendLog(requestSummary)
         appendLog(support.details)
         appendLog(effectiveSummary)
+        // main #432：CarPlay 音频走车机蓝牙（实验性）。
+        val carBluetoothAudio = AirPlayPersistence.loadCarBluetoothAudio(this)
+        if (carBluetoothAudio) logCarBluetoothAudio()
         return AirPlayConfig(
             deviceName = "DiPlay",
             deviceId = DiPlayBootstrap.deviceId(airPlayIdentity),
@@ -3594,7 +4251,37 @@ class CarPlayHostActivity : ComponentActivity() {
             icons = listOf(loadAirPlayIcon()),
             videoInCar = com.shilapi.xcertplay.hud.BydOutputSettings.videoWhileParkedActive(this),
             mainBufferedAudio = AirPlayPersistence.loadMainBufferedAudio(this),
+            disableAudioOutput = carBluetoothAudio,
         )
+    }
+
+    /** 车机蓝牙音频：记录 iPhone 当前及 CarPlay 运行后是否与车机保持 A2DP/HFP（main #432）。 */
+    private fun logCarBluetoothAudio() {
+        appendLog("Car Bluetooth audio: on; CarPlay audio not offered")
+        // API 17 适配：getSystemService(Class) 为 API 23+，统一走 BluetoothCompat.getAdapter。
+        val adapter = runCatching { com.shilapi.xcertplay.compat.BluetoothCompat.getAdapter(this) }.getOrNull()
+            ?: return appendLog("Car Bluetooth audio: no Bluetooth adapter")
+        fun probe(moment: String) {
+            for ((name, profile) in listOf("A2DP" to android.bluetooth.BluetoothProfile.A2DP,
+                    "HFP" to android.bluetooth.BluetoothProfile.HEADSET)) {
+                runCatching {
+                    @SuppressLint("MissingPermission")
+                    val started = adapter.getProfileProxy(applicationContext, object : android.bluetooth.BluetoothProfile.ServiceListener {
+                        @SuppressLint("MissingPermission")
+                        override fun onServiceConnected(id: Int, proxy: android.bluetooth.BluetoothProfile) {
+                            val devices = runCatching { proxy.connectedDevices.map { it.name ?: "?" } }
+                                .getOrElse { listOf("unreadable:${it.javaClass.simpleName}") }
+                            appendLog("Car Bluetooth audio: $moment $name connected=$devices")
+                            adapter.closeProfileProxy(id, proxy)
+                        }
+                        override fun onServiceDisconnected(id: Int) = Unit
+                    }, profile)
+                    if (!started) appendLog("Car Bluetooth audio: $moment $name unavailable")
+                }.onFailure { appendLog("Car Bluetooth audio: $moment $name unavailable ${it.javaClass.simpleName}") }
+            }
+        }
+        probe("start")
+        mainHandler.postDelayed({ if (!isDestroyed) probe("after30s") }, 30_000L)
     }
 
     private fun loadAirPlayIcon(): AirPlayIcon {
@@ -3789,6 +4476,10 @@ class CarPlayHostActivity : ComponentActivity() {
             callVoiceFilter = AirPlayPersistence.loadCallVoiceFilter(this),
             // Only a SurfaceView honours release timestamps; smooth video always selects one.
             videoPacingDelayMillis = if (smoothVideo) smoothVideoDelayMillis(fps) else 0,
+            // main #417：主屏解码器按帧率设置申请工作速率。
+            mainVideoFrameRate = fps,
+            // main #496：低延迟解码（实验性设置），下次连接时生效。
+            vendorLowLatencyDecoder = AirPlayPersistence.loadLowLatencyDecoder(this),
         )
     }
 
@@ -3948,7 +4639,9 @@ class CarPlayHostActivity : ComponentActivity() {
             // unused strip instead of leaving a blank third when a new host adopts the session.
             sidePanelShown = true
             sidePanel?.visibility = View.VISIBLE
+            startSidePanelTyres()
             sidePanelTick.run()
+            showSidePanelGripHint()
         }
         MapMirrors.reapply()
         CarPlayBackgroundSession.store(snapshot.controller, snapshot.sink, snapshot.width, snapshot.height,
@@ -4294,8 +4987,11 @@ class CarPlayHostActivity : ComponentActivity() {
         val display = sessionDisplay ?: return false
         if (display.rotation != displayRotation()) return true
         if (display.hideTopBar != hideTopBar || display.hideBottomBar != hideBottomBar) return true
-        if (newSize != null && newSize.width > 0 && newSize.height > 0) {
-            val baseAspect = display.width.toDouble() / display.height
+        if (newSize != null && newSize.width > 0 && newSize.height > 0 &&
+            display.windowWidth > 0 && display.windowHeight > 0) {
+            // main #501：协商画布可能是正方形以支持屏幕旋转；应比较实际启动窗口，
+            // 否则每次回到横屏窗口都会被误判为画中画。
+            val baseAspect = display.windowWidth.toDouble() / display.windowHeight
             val currentAspect = newSize.width.toDouble() / newSize.height
             val aspectDiff = kotlin.math.abs(currentAspect / baseAspect - 1.0)
             if (aspectDiff > 0.08 && AirPlayPersistence.loadAdaptPipResolution(this)) {
@@ -4346,6 +5042,7 @@ class CarPlayHostActivity : ComponentActivity() {
             })
         }
         if (sidePanelShown) placeSidePanel(viewWidth, viewHeight)
+        placeSidePanelTab(viewWidth, viewHeight)
     }
 
     private fun recordDetectedMaximum(size: DisplaySize) {
@@ -4364,9 +5061,11 @@ class CarPlayHostActivity : ComponentActivity() {
             return
         }
         if (controller == null && adoptBackgroundSession()) return
-        // The video view is chosen once per activity; a changed Smooth video setting needs a new one.
-        if (controller == null && AirPlayPersistence.loadSmoothVideo(this) != smoothVideo) {
-            appendLog("Smooth video setting changed; rebuilding the video view")
+        // The video view is chosen once per activity; a changed Smooth video or Direct video output
+        // setting needs a new one.（平滑视频或直接视频输出变更时需要重建视频视图）
+        if (controller == null && (AirPlayPersistence.loadSmoothVideo(this) != smoothVideo ||
+                AirPlayPersistence.loadDirectVideoOutput(this) != directVideoOutput)) {
+            appendLog("Video output setting changed; rebuilding the video view")
             // No session runs here, but a restart keeps this host as the session owner; the new instance
             // must be able to start its own.
             if (CarPlayBackgroundSession.isOwner(this)) CarPlayBackgroundSession.clear()
@@ -4500,6 +5199,7 @@ class CarPlayHostActivity : ComponentActivity() {
         controller?.sendTouch(emptyList())
         loadPersistedSettings()
         settingsBaseline = captureSettingsBaseline()
+        menuSettingsSignature = menuSettingsSignature()
         // Rebuild controls from saved values so a cancelled edit cannot reappear on reopening.
         settingsMenu?.let { previous ->
             val parent = previous.parent as ViewGroup
@@ -4558,12 +5258,37 @@ class CarPlayHostActivity : ComponentActivity() {
         finishSettingsMenu("Settings changes discarded", reconnect = false)
     }
 
+    /**
+     * main #500：不主动声明丢弃的出口——返回手势与跳转完整设置页的链接。关闭控件的文案本身
+     * 已说明会丢弃，USB 插入也不算司机离开，因此这两处仍直接调用 [cancelSettingsEdits] 不弹询问。
+     * [onLeft] 只在菜单真正关闭后运行，避免有导航发生在对话框背后（作者：TRAE AI）。
+     */
+    private fun leaveSettingsMenu(onLeft: () -> Unit = {}) {
+        if (!menuOpen) return
+        if (menuSettingsSignature?.let { it != menuSettingsSignature() } == true) {
+            // 对话框明暗跟随菜单外观，与 DiPlay 其它对话框一致。
+            AlertDialog.Builder(this, if (appNight) R.style.Theme_Xcertplay_Dialog_Dark else R.style.Theme_Xcertplay_Dialog_Light)
+                .setTitle(getString(R.string.settings_discard_pending_title))
+                .setMessage(getString(R.string.settings_discard_pending_message))
+                .setPositiveButton(getString(R.string.save_and_reconnect)) { _, _ -> saveSettingsAndReconnect() }
+                .setNegativeButton(getString(R.string.settings_discard_pending_confirm)) { _, _ ->
+                    cancelSettingsEdits()
+                    onLeft()
+                }
+                .show()
+            return
+        }
+        cancelSettingsEdits()
+        onLeft()
+    }
+
     private fun finishSettingsMenu(prefix: String, reconnect: Boolean) {
         if (!menuOpen) return
         menuOpen = false
+        menuSettingsSignature = null
         settingsMenu?.visibility = View.GONE
         gestureOverlay?.visibility = View.VISIBLE
-        settingsGestureHint?.text = getString(R.string.open_diplay_settings_hint, gestureFingerCount)
+        settingsGestureHint?.text = settingsGestureHintText()
         updateDebugOverlays()
         logLines.clear()
         appendLog(
@@ -4635,12 +5360,13 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun observeVideoWindow(texture: TextureView) {
         val probe = object : ViewTreeObserver.OnPreDrawListener {
             override fun onPreDraw(): Boolean {
-                if (!texture.isAttachedToWindow) return true
+                // isAttachedToWindow 是 API 19+，API 17 设备直接调用会抛 NoSuchMethodError，走 UiCompat 兜底
+                if (!UiCompat.isAttachedToWindow(texture)) return true
                 removeVideoSurfaceProbe()
                 if (isDestroyed || videoView !== texture) return true
-                val mode = carPlayVideoSurfaceMode(texture.isHardwareAccelerated, smoothVideo)
+                val mode = carPlayVideoSurfaceMode(texture.isHardwareAccelerated, smoothVideo, directVideoOutput)
                 appendLog("Video output mode=$mode windowHardwareAccelerated=${texture.isHardwareAccelerated} " +
-                    "smoothVideo=$smoothVideo")
+                    "smoothVideo=$smoothVideo directVideoOutput=$directVideoOutput")
                 if (mode == CarPlayVideoSurfaceMode.TEXTURE) return true
                 useFallbackVideoSurface(texture)
                 return false // Measure the replacement before drawing the software window.
@@ -4685,6 +5411,9 @@ class CarPlayHostActivity : ComponentActivity() {
         appendLog(if (smoothVideo) {
             "Using SurfaceView video output: smooth video, frames shown at the iPhone's frame time + a delay " +
                 "starting at ${smoothVideoDelayMillis(fps)} ms; picture adjustments unavailable"
+        } else if (directVideoOutput) {
+            "Using SurfaceView video output: direct video output, frames shown as soon as they are decoded; " +
+                "picture adjustments unavailable"
         } else {
             "Using SurfaceView video output: window has no hardware acceleration; picture adjustments unavailable"
         })
@@ -4714,7 +5443,8 @@ class CarPlayHostActivity : ComponentActivity() {
                 gestureTracking = false
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (event.pointerCount == gestureFingerCount && !gestureSequenceActive) {
+                // main #487：手势数 0 表示禁用，不进入追踪（作者：TRAE AI）。
+                if (gestureFingerCount > 0 && event.pointerCount == gestureFingerCount && !gestureSequenceActive) {
                     gestureSequenceActive = true
                     gestureTracking = true
                     gestureStartX = pointerCentroid(event, horizontal = true)
@@ -4836,6 +5566,8 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun friendlyStage(message: String): String = when {
+        // main 4aee3f80：VPN 授权不可用的提示本身就是用户可读文案，不能被通用 "permission" 分支吞掉。
+        message == getString(R.string.vpn_authorization_unavailable) -> message
         message == getString(R.string.waiting_for_mfi_coprocessor) ||
             message == getString(R.string.requesting_mfi_usb_permission) -> message
         message.contains("Turn on Wi-Fi", true) -> getString(R.string.turn_on_wi_fi_in_the_head_unit_s_settings_to_connect)
@@ -4962,6 +5694,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private companion object {
         const val SIDE_PANEL_REFRESH_MILLIS = 5_000L
+        /** 拖拽面板边关闭面板的阈值：CarPlay 份额超过它（三分之二到全屏的中点）即关闭。 */
+        const val SIDE_PANEL_CLOSE_SHARE = 5f / 6f
+        /** 侧栏把手药丸（及面板把手）出现或被轻点后的显示时长。 */
+        const val SIDE_PANEL_TAB_HINT_MILLIS = 10_000L
         const val TAG = "xcertplay-usb"
         const val SCREEN_TYPE_MAIN = 110
         const val SCREEN_TYPE_ALT = 111
@@ -5087,4 +5823,61 @@ internal object CarPlayBackgroundSession {
         height = 0
         display = null
     }
+}
+
+/**
+ * API 17-22 的 LayerDrawable 没有 setLayerGravity/setLayerInsetBottom 等 API 23 方法，
+ * 该类手动摆放各层作为等效实现：每层先在 bounds 内按 insets 收缩，
+ * 层有固有尺寸时按 gravity 对齐放置，无固有尺寸时拉伸填满，行为与新版一致。
+ *
+ * @author TRAE AI
+ * @since 2026-10-10
+ */
+private class GravityLayerDrawable(
+    private val layers: Array<GradientDrawable>,
+    private val insets: Array<IntArray>,
+    private val gravities: IntArray,
+) : Drawable() {
+    private var alpha = 255
+
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        for (i in layers.indices) {
+            val ins = insets[i]
+            // 每层的可用区域：bounds 收缩 insets，层在该区域内按 gravity 放置。
+            val area = Rect(b.left + ins[0], b.top + ins[1], b.right - ins[2], b.bottom - ins[3])
+            val layer = layers[i]
+            val w = if (layer.intrinsicWidth >= 0) layer.intrinsicWidth else area.width()
+            val h = if (layer.intrinsicHeight >= 0) layer.intrinsicHeight else area.height()
+            val gravity = gravities[i]
+            val x = when (gravity and Gravity.HORIZONTAL_GRAVITY_MASK) {
+                Gravity.LEFT -> area.left
+                Gravity.RIGHT -> area.right - w
+                else -> area.left + (area.width() - w) / 2
+            }
+            val y = when (gravity and Gravity.VERTICAL_GRAVITY_MASK) {
+                Gravity.TOP -> area.top
+                Gravity.BOTTOM -> area.bottom - h
+                else -> area.top + (area.height() - h) / 2
+            }
+            layer.setBounds(x, y, x + w, y + h)
+            layer.draw(canvas)
+        }
+    }
+
+    override fun setAlpha(value: Int) {
+        if (alpha == value) return
+        alpha = value
+        layers.forEach { it.alpha = value }
+        invalidateSelf()
+    }
+
+    override fun getAlpha(): Int = alpha
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        layers.forEach { it.colorFilter = colorFilter }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }

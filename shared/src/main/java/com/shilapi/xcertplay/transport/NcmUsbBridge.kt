@@ -44,6 +44,9 @@ class NcmUsbBridge internal constructor(
     private var queuedBytes = 0
     private var buffered = ByteArray(0)
     private var bufferedSize = 0
+    // 波次二 #478：恰好结束于 USB 包边界的 NTB 块可能带一个可选零字节填充（或 ZLP）。
+    // 跨次 USB 完成保持该状态，不要把下一个 NTB 的头当成填充字节吞掉。
+    private var optionalShortPacketPad = false
     private val readBuffer = ByteArray(READ_CHUNK_BYTES)
     // Bulk IN uses one persistent async request: bulkTransfer() pins its byte[] in a JNI critical
     // section for the whole wait, which blocks ART's GC thread flip and, with it, every other USB
@@ -52,14 +55,9 @@ class NcmUsbBridge internal constructor(
     private val directReadBuffer = ByteBuffer.allocateDirect(READ_CHUNK_BYTES)
     private var readRequest: UsbRequest? = null
     private var readQueued = false
-    // API 17 迁移：API 17-20 的 UsbRequest.queue 行为不同，使用更保守的 8KB 兼容回退
-    private val readQueuePolicy = UsbReadQueuePolicy(
-        compatibilityBytes = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            LEGACY_COMPATIBILITY_BYTES
-        } else {
-            DEFAULT_COMPATIBILITY_BYTES
-        },
-    )
+    // 波次二：按平台构造读队列策略（API 17-27 首提上限 16 KiB + 阶梯降级重试），
+    // 取代旧的按版本注入 compatibilityBytes 的方式。
+    private val readQueuePolicy = UsbReadQueuePolicy.forCurrentPlatform()
     // API 17 迁移：requestWait(timeout) 是 API 26 新增重载。API 26+ 直接调用；
     // API 17-25 由守护线程调用阻塞式 requestWait()（API 12+），完成的请求经队列交给读者，
     // poll 超时即模拟原有的超时返回 null 行为。
@@ -214,22 +212,32 @@ class NcmUsbBridge internal constructor(
 
     private fun drainFrames() {
         while (true) {
+            // 波次二 #478：wBlockLength 描述完整 NTB。包对齐的 USB 传输可能以 ZLP 结束
+            // （缓冲区没有多余字节），也可能携带一个零字节强制短包。不要等待这个可选字节，
+            // 也不要吞掉下一个 NTB 的头当填充。可选填充跨次完成到达时保持该状态。
+            if (optionalShortPacketPad && bufferedSize > 0) {
+                when (buffered[0].toInt() and 0xff) {
+                    0 -> {
+                        buffered.copyInto(buffered, 0, 1, bufferedSize)
+                        bufferedSize -= 1
+                    }
+                    Ntb16Codec.NTH16_SIG and 0xff -> Unit // 下一个 NTB 头在下方校验。
+                    else -> throw failSession("Invalid NTB16 short-packet pad")
+                }
+                optionalShortPacketPad = false
+            }
             if (bufferedSize < 12) return
             if (readU32(buffered, 0) != Ntb16Codec.NTH16_SIG) {
                 throw failSession("NCM read buffer does not begin with an NTB16 header")
             }
             val blockLength = readU16(buffered, 8)
             if (blockLength < 28) throw failSession("Invalid NTB16 block length $blockLength")
-            val padded = blockLength % USB_PACKET_SIZE == 0
-            val wireLength = blockLength + if (padded) 1 else 0
-            if (bufferedSize < wireLength) return
-            if (padded && buffered[blockLength].toInt() != 0) {
-                throw failSession("Invalid NTB16 short-packet pad")
-            }
+            if (bufferedSize < blockLength) return
             for (frame in Ntb16Codec.parse(buffered, 0, blockLength)) enqueueFrame(frame)
-            val remaining = bufferedSize - wireLength
-            buffered.copyInto(buffered, 0, wireLength, bufferedSize)
+            val remaining = bufferedSize - blockLength
+            buffered.copyInto(buffered, 0, blockLength, bufferedSize)
             bufferedSize = remaining
+            optionalShortPacketPad = blockLength % USB_PACKET_SIZE == 0
         }
     }
 
@@ -275,7 +283,7 @@ class NcmUsbBridge internal constructor(
                 }
                 if (!readQueued) {
                     directReadBuffer.clear()
-                    val queued = readQueuePolicy.queue(directReadBuffer, ::checkOpenLocked, current::queue)
+                    val queued = readQueuePolicy.queue(directReadBuffer, ::checkOpenLocked) { current.queueRead(it) }
                     if (!queued.queued) throw failSession(
                         "Android could not queue the NCM read request (api=${Build.VERSION.SDK_INT} " +
                             "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queued.firstBytes} " +
@@ -363,9 +371,6 @@ class NcmUsbBridge internal constructor(
 
     companion object {
         private const val READ_CHUNK_BYTES = 32 * 1024
-        // API 17 迁移：兼容回退大小按系统版本选择（API 21+ 16KB，API 17-20 8KB）
-        private const val DEFAULT_COMPATIBILITY_BYTES = 16 * 1024
-        private const val LEGACY_COMPATIBILITY_BYTES = 8 * 1024
         private const val USB_PACKET_SIZE = 512
         private const val STATUS_POLL_TIMEOUT_MILLIS = 20
         private const val STATUS_POLL_INTERVAL_MILLIS = 500L

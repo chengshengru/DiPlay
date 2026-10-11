@@ -53,6 +53,16 @@ internal object AudioChannelMapper {
     fun usesNavigationStream(audioType: String, payloadType: Int, advanced: Boolean): Boolean =
         !advanced && map(audioType, payloadType, AudioChannelMappingMode.MOBILE_COMPATIBLE).channel == AudioChannel.NAVIGATION
 
+    /**
+     * main #307：车机蓝牙已关闭时没有 SCO 链路，CarPlay 通话流必须走媒体喇叭而不是电话通道。
+     */
+    fun playCallOnSpeaker(selection: AudioChannelSelection): AudioChannelSelection =
+        if (selection.channel == AudioChannel.PHONE) {
+            AudioChannelSelection(AudioChannel.MEDIA, AudioContentType.SPEECH, selection.streamType)
+        } else {
+            selection
+        }
+
     private fun mapMobileCompatible(
         audioType: String,
         payloadType: Int,

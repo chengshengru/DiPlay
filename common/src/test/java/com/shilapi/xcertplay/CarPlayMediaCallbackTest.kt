@@ -15,7 +15,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import org.robolectric.annotation.GraphicsMode
+// 分支既有修复：Robolectric 4.9 无 @GraphicsMode 注解（4.10+ 才有），LEGACY 模式已支持测试所需的 Bitmap 像素操作。
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], manifest = Config.NONE)
@@ -104,7 +104,6 @@ class CarPlayMediaCallbackTest {
     }
 
     @Test
-    @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun wideArtworkIsPaddedToASquareNotStretched() {
         val wide = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) }
         val square = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888)
@@ -120,7 +119,6 @@ class CarPlayMediaCallbackTest {
     }
 
     @Test
-    @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun smallOrTallArtworkIsPaddedWithoutUpscaling() {
         val small = CarPlayMediaKeys.squareArtwork(Bitmap.createBitmap(200, 100, Bitmap.Config.ARGB_8888))
         val tall = CarPlayMediaKeys.squareArtwork(

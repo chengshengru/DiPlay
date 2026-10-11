@@ -3,9 +3,14 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
-// Optional local-only input. CI and ordinary source builds contain no accessory identity.
-val localAuthenticationAssets = providers.environmentVariable("DIPLAY_AUTH_ASSETS_DIR")
-    .orNull?.let { file(it).canonicalFile }
+// 可选的本地认证资产输入；CI 与普通源码构建不包含配件身份。
+// 优先使用 DIPLAY_AUTH_ASSETS_DIR 环境变量；未设置时回退到本地 .private/runtime-assets
+// （已被 gitignore 排除）。这样在 IDEA 直接 Run 时也会自动打包认证文件，而 CI 上该目录
+// 不存在，行为保持 source-only 不变。
+val localAuthenticationAssets = (providers.environmentVariable("DIPLAY_AUTH_ASSETS_DIR").orNull
+    ?: File(rootDir, ".private/runtime-assets").takeIf {
+        it.resolve("offline-mfi/identity.pk8").isFile && it.resolve("offline-mfi/certificate.p7b").isFile
+    }?.path)?.let { file(it).canonicalFile }
 
 android {
     namespace = "com.shilapi.xcertplay"
@@ -16,8 +21,8 @@ android {
         applicationId = "com.shihab.diplay"
         minSdk = 17
         targetSdk = 17
-        versionCode = 33
-        versionName = "0.2.14-api17"
+        versionCode = 35
+        versionName = "0.2.16-api17"
 
         // API 17-20：desugaring 要求 legacy multidex
         multiDexEnabled = true

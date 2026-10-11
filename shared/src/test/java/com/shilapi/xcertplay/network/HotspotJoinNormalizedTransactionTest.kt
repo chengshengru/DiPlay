@@ -109,7 +109,9 @@ class HotspotJoinNormalizedTransactionTest {
             SoftApConfiguration.Builder::class.java.getConstructor(SoftApConfiguration::class.java).newInstance(config)
         private fun config(userConfigured: Boolean): SoftApConfiguration {
             val builder = SoftApConfiguration.Builder()
-                .setPassphrase("synthetic-password", SoftApConfiguration.SECURITY_TYPE_WPA2_PSK)
+            // setPassphrase 在 android-36 stub jar 中不可见（系统 API），走反射调用
+            builder.javaClass.getMethod("setPassphrase", String::class.java, Int::class.javaPrimitiveType)
+                .invoke(builder, "synthetic-password", SoftApConfiguration.SECURITY_TYPE_WPA2_PSK)
             builder.javaClass.getMethod("setSsid", String::class.java).invoke(builder, "synthetic-network")
             builder.javaClass.getMethod("setBand", Int::class.javaPrimitiveType).invoke(builder, 2)
             builder.javaClass.getMethod("setHiddenSsid", Boolean::class.javaPrimitiveType).invoke(builder, true)

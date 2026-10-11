@@ -16,6 +16,7 @@ import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -34,11 +35,24 @@ import android.widget.*
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.ViewCompat
 import androidx.core.view.doOnLayout
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.shilapi.xcertplay.adb.LocalAdb
+import com.shilapi.xcertplay.compat.PermissionCompat
+// main B4：连接向导逻辑与 DiLink 代际识别（作者：TRAE AI）。
+import com.shilapi.xcertplay.setup.DiLinkGeneration
+import com.shilapi.xcertplay.setup.SetupGuide
+// main B5：应用内更新（作者：TRAE AI）。
+import androidx.core.content.FileProvider
+import com.shilapi.xcertplay.update.UpdateCatalog
+import com.shilapi.xcertplay.update.UpdateClient
+import com.shilapi.xcertplay.update.UpdateChecksums
+import com.shilapi.xcertplay.update.UpdateRelease
+import com.shilapi.xcertplay.update.UpdateVersion
+import java.io.IOException
 import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.airplay.ClusterTurnCardOverlay
@@ -51,9 +65,15 @@ import com.shilapi.xcertplay.hud.BydVehicleField
 import com.shilapi.xcertplay.hud.BydVehicleFieldStore
 import com.shilapi.xcertplay.hud.BydVehicleProbeOutcome
 import com.shilapi.xcertplay.host.R
+// main #345：BYD 氛围灯音乐跟随（作者：TRAE AI）
+import com.shilapi.xcertplay.media.AmbientColorMode
+import com.shilapi.xcertplay.media.AmbientColorSpeed
+import com.shilapi.xcertplay.media.AmbientMusicController
+import com.shilapi.xcertplay.media.AmbientMusicSettings
 import com.shilapi.xcertplay.network.CarHotspotSettings
 import com.shilapi.xcertplay.network.CarHotspotTethering
 import com.shilapi.xcertplay.network.WifiP2pChannels
+import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import com.shilapi.xcertplay.settings.SettingsTheme
 import com.shilapi.xcertplay.settings.SettingsWidgets
@@ -65,13 +85,17 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 internal enum class SettingsCategory {
-    OVERVIEW, CONNECTION, DISPLAY, AUDIO, NAVIGATION, VEHICLE, DIAGNOSTICS, ADVANCED,
+    OVERVIEW, CONNECTION, DISPLAY, AUDIO, NAVIGATION, VEHICLE, LANGUAGE, ABOUT, DIAGNOSTICS, ADVANCED,
 }
 
 /** A settings card. Every entry needs one category in [SettingsInformationArchitecture]; see AGENTS.md. */
 internal enum class SettingsSection {
     CARPLAY_CONTROLS,
     WHEEL_KEYS,
+    // main #345：BYD 氛围灯音乐跟随入口（作者：TRAE AI）
+    AMBIENT_LIGHTING,
+    // main #344：导航播报方向盘音量入口（作者：TRAE AI）
+    NAVIGATION_WHEEL,
     CONNECTION_SETUP,
     DIAGNOSTICS,
     AUTOMATIC_CONNECTION,
@@ -85,13 +109,15 @@ internal enum class SettingsSection {
     CLUSTER_MAP,
     BYD_NAVIGATION,
     PERMISSIONS_AND_HELP,
-    ABOUT,
     LANGUAGE,
 }
 
 internal object SettingsInformationArchitecture {
+    // main #422：LANGUAGE 与 ABOUT 独立分类页；Overview 不再并载两张卡片（作者：TRAE AI）。
     val sectionsByCategory: Map<SettingsCategory, Set<SettingsSection>> = mapOf(
-        SettingsCategory.OVERVIEW to setOf(SettingsSection.ABOUT, SettingsSection.LANGUAGE),
+        SettingsCategory.OVERVIEW to emptySet(),
+        SettingsCategory.LANGUAGE to setOf(SettingsSection.LANGUAGE),
+        SettingsCategory.ABOUT to emptySet(),
         SettingsCategory.CONNECTION to setOf(
             SettingsSection.CONNECTION_SETUP,
             SettingsSection.AUTOMATIC_CONNECTION,
@@ -111,17 +137,30 @@ internal object SettingsInformationArchitecture {
             SettingsSection.CLUSTER_MAP,
             SettingsSection.EXPERIMENTAL_DISPLAY,
             SettingsSection.ADVANCED_MEDIA,
+            SettingsSection.NAVIGATION_WHEEL,
+            SettingsSection.AMBIENT_LIGHTING,
         ),
     )
 }
 
 /** DiAuto's visual language, with a connection flow for an independent CarPlay receiver. */
-class DiPlayActivity : ComponentActivity() {
+class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private val handler = Handler(Looper.getMainLooper())
+    // main #422：设置页日夜外观切换闭环（作者：TRAE AI）。
+    // appNight 为解析后的当前日夜态；palette 是对应的语义调色板，全部 UI 取色走它。
+    private var appNight = true
+    override val currentAppNight: Boolean get() = appNight
+    private var palette = DiPlayPalette.DARK
+    private var appearanceObserverRemoval: (() -> Unit)? = null
+    private var appearanceUpdatesResumed = false
+    private var appearanceRenderPending = false
+    private var appearanceButtonFocusPending = false
     private var windowLearning: WindowKeyLearning? = null
     private val windowLearningPresses = WheelKeyPresses()
     private val endWindowLearning = Runnable { cancelKeyLearning() }
     private var page = "home"
+    // main #345：氛围灯支持性只读检查，可在测试中替换（作者：TRAE AI）
+    internal var ambientSupportCheck: (Context) -> java.util.concurrent.CompletableFuture<Boolean> = AmbientMusicController::checkSupport
     private var settingsCategory = SettingsCategory.OVERVIEW
     private var connectionSettingsReturnCategory: SettingsCategory? = null
     private var settingsSectionFilter: Set<SettingsSection>? = null
@@ -152,6 +191,23 @@ class DiPlayActivity : ComponentActivity() {
     private var reconnectBar: View? = null
     private var readinessCard: LinearLayout? = null
     private var searchIndexSink: MutableList<String>? = null
+    // main B4：连接向导当前步骤与来源（设置页入口 or 首启自动打开）（作者：TRAE AI）。
+    private var setupStep = SetupGuide.STEP_CAR
+    private var setupFromSettings = false
+    // main B5：应用内更新状态机（作者：TRAE AI）。
+    @Volatile private var updateStage = UpdateStage.IDLE
+    @Volatile private var updateGeneration = 0
+    @Volatile private var updateProgress: Int? = null
+    private var updateRelease: UpdateRelease? = null
+    private var updateFile: File? = null
+    private var updateMessage: String? = null
+    // main B3：内嵌搜索状态——常驻输入框、下拉结果弹层、索引与焦点恢复标记（作者：TRAE AI）。
+    private var settingsSearchBox: EditText? = null
+    private var settingsSearchPopup: PopupWindow? = null
+    private var settingsSearchIndex: List<SettingsSearchResult>? = null
+    private var settingsSearchQuery = ""
+    private var settingsSearchIndexing = false
+    private var settingsSearchRestoreFocus = false
     private var renderedReadiness: SettingsReadiness? = null
     private var renderedPage: String? = null
     private var renderedSettingsCategory: SettingsCategory? = null
@@ -214,8 +270,25 @@ class DiPlayActivity : ComponentActivity() {
     private val tick = object : Runnable {
         override fun run() { refreshStatus(); handler.postDelayed(this, 1000) }
     }
+    // 外观轮询：无 runtime 观察者事件时兜底检查（定时计划切换等）（作者：TRAE AI）。
+    private val appearancePoll = object : Runnable {
+        override fun run() {
+            checkForAppearanceChange()
+            if (appearanceUpdatesResumed) handler.postDelayed(this, APPEARANCE_POLL_MILLIS)
+        }
+    }
     private val bluetoothPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) choosePhone() else permissionHelp(getString(R.string.nearby_devices), getString(R.string.allow_nearby_devices_so_diplay_can_connect_to_your_paired))
+    }
+    // main #439：开启"iPhone 蓝牙重连时自动连接"时请求 BLUETOOTH_CONNECT。
+    private val bluetoothAutoConnectPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            if (DiPlayPreferences.phoneAddress(this) == null) choosePhone()
+        } else {
+            DiPlayPreferences.saveConnectOnPhoneBluetooth(this, false)
+            render()
+            permissionHelp(getString(R.string.nearby_devices), getString(R.string.allow_nearby_devices_so_diplay_can_connect_to_your_paired))
+        }
     }
     private val locationPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (hasPreciseLocation()) {
@@ -276,11 +349,11 @@ class DiPlayActivity : ComponentActivity() {
         com.shilapi.xcertplay.hud.BydNavigationOutputs.onAppOpened(applicationContext)
         WheelKeyService.restoreIfNeeded(this)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        UiCompat.setSystemBarColors(window, BG)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-            hide(WindowInsetsCompat.Type.statusBars())
-        }
+        // 外观接入：解析日夜态并应用到窗口背景/系统栏/全屏模式（作者：TRAE AI）。
+        refreshAppearance()
+        applyWindowAppearance()
+        // main B8：下次启动的 splash 主题跟随当前外观（作者：TRAE AI）。
+        rememberLaunchAppearance()
         setupError = runCatching { DiPlayBootstrap.ensure(this, AirPlayPersistence.loadMfiTarget(this)) }.exceptionOrNull()?.let {
             android.util.Log.e("DiPlaySetup", "CarPlay authentication could not be loaded", it)
             getString(R.string.setup_error_auth)
@@ -292,10 +365,23 @@ class DiPlayActivity : ComponentActivity() {
             ?: SettingsCategory.OVERVIEW
         connectionSettingsReturnCategory = savedInstanceState?.getString("connection_settings_return_category")
             ?.let { runCatching { SettingsCategory.valueOf(it) }.getOrNull() }
-        page = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: "home"
+        // main B4：向导步骤随实例状态恢复；仅首启未看过向导且未选 iPhone 时自动打开（作者：TRAE AI）。
+        setupStep = savedInstanceState?.getInt("setup_step") ?: SetupGuide.STEP_CAR
+        setupFromSettings = savedInstanceState?.getBoolean("setup_from_settings") ?: false
+        page = savedInstanceState?.getString("page") ?: intent.getStringExtra("page")
+            ?: if (setupError == null && SetupGuide.shouldOpenOnLaunch(SetupGuide.seen(this),
+                    DiPlayPreferences.phoneAddress(this) != null)) "setup" else "home"
         render()
         scheduleAutomaticVehicleValidation()
         handleWirelessRecovery()
+        // main #439：蓝牙唤醒启动时自动发起连接。
+        if (consumeBluetoothAutoConnectIntent(intent)) {
+            if (initialLaunch) {
+                initialLaunch = false
+                startCarHotspotOnLaunch()
+            }
+            handler.post { connect(true) }
+        }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (page != "home") navigateBack()
@@ -316,13 +402,34 @@ class DiPlayActivity : ComponentActivity() {
         automaticVehicleValidationStarted = false
         scheduleAutomaticVehicleValidation()
         handleWirelessRecovery()
+        // main #439：单实例复用时的蓝牙唤醒自动连接。
+        if (consumeBluetoothAutoConnectIntent(intent)) {
+            if (initialLaunch) {
+                initialLaunch = false
+                startCarHotspotOnLaunch()
+            }
+            handler.post { connect(true) }
+        }
     }
+
+    /** 消费蓝牙唤醒 Intent 的自动连接标记，避免重复触发。 */
+    private fun consumeBluetoothAutoConnectIntent(intent: Intent): Boolean {
+        val requested = intent.getBooleanExtra(PhoneBluetoothReceiver.EXTRA_AUTO_CONNECT, false)
+        intent.removeExtra(PhoneBluetoothReceiver.EXTRA_AUTO_CONNECT)
+        return requested && DiPlayPreferences.connectOnPhoneBluetooth(this) &&
+            DiPlayPreferences.phoneAddress(this) != null && setupError == null &&
+            !CarPlayBackgroundSession.hasSession()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("page", page)
         outState.putString("settings_category", settingsCategory.name)
         connectionSettingsReturnCategory?.let { outState.putString("connection_settings_return_category", it.name) }
         outState.putBoolean("pending_car_hotspot", pendingCarHotspotSetup)
         outState.putBoolean("byd_vehicle_advanced", bydVehicleAdvancedExpanded)
+        // main B4：保存向导步骤与来源（作者：TRAE AI）。
+        outState.putInt("setup_step", setupStep)
+        outState.putBoolean("setup_from_settings", setupFromSettings)
         super.onSaveInstanceState(outState)
     }
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -368,12 +475,17 @@ class DiPlayActivity : ComponentActivity() {
     private fun notifyPreviousCrash() {
         if (crashNoticeShown) return
         val public = CrashFileLogger.publicCrashFile()
-        if (!public.isFile && !CrashFileLogger.lastCrashFile(this).isFile) return
+        val last = CrashFileLogger.lastCrashFile(this)
+        // 只提示真实存在的文件路径：公共目录 /sdcard/DiPlay 的写入可能因存储未挂载
+        // 或权限失败而缺失，此时应指向应用私有目录的副本，避免 Toast 指向不存在的 sdcard 路径。
+        val target = when {
+            public.isFile -> public
+            last.isFile -> last
+            else -> return
+        }
         crashNoticeShown = true
         // Reuses the existing "saved to path" string to avoid adding untranslated resources.
-        // Point at the public /sdcard/DiPlay/ copy, which is retrievable even when the app
-        // (the head unit's launcher UI) is dead.
-        android.widget.Toast.makeText(this, getString(R.string.diagnostic_report_saved_to_path, public.absolutePath), android.widget.Toast.LENGTH_LONG).show()
+        android.widget.Toast.makeText(this, getString(R.string.diagnostic_report_saved_to_path, target.absolutePath), android.widget.Toast.LENGTH_LONG).show()
     }
 
     override fun onStop() {
@@ -386,6 +498,7 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        applyFullscreenMode()
         // Returning from another activity can bring the head unit's own density back.
         if (enforceInterfaceSize()) render()
         if (Build.VERSION.SDK_INT < 33 && AppLocale.preference(this) != languagePreferenceAtCreate) {
@@ -396,6 +509,8 @@ class DiPlayActivity : ComponentActivity() {
         // Back from the car settings: refresh the car hotspot reminder on the home page.
         if (!initialLaunch && !adbSwitchChangePending && !pausedForAdbSwitchChange &&
             (page == "home" || page == "settings" || page == "connection")) render()
+        // 恢复外观观察与轮询（作者：TRAE AI）。
+        startAppearanceUpdates()
         pausedForAdbSwitchChange = false
         if (initialLaunch) {
             initialLaunch = false
@@ -407,6 +522,11 @@ class DiPlayActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        // 停止外观观察与轮询（作者：TRAE AI）。
+        appearanceUpdatesResumed = false
+        appearanceObserverRemoval?.invoke()
+        appearanceObserverRemoval = null
+        handler.removeCallbacks(appearancePoll)
         cancelKeyLearning()
         pausedForAdbSwitchChange = adbSwitchChangePending
         handler.removeCallbacks(tick)
@@ -414,6 +534,12 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        // main B3：先收起搜索下拉弹层（作者：TRAE AI）。
+        settingsSearchPopup?.dismiss()
+        // 清理外观观察（作者：TRAE AI）。
+        appearanceObserverRemoval?.invoke()
+        appearanceObserverRemoval = null
+        handler.removeCallbacks(appearancePoll)
         hotspotJoinControls?.close()
         cancelUsbPermissionSetup()
         cancelKeyLearning()
@@ -432,6 +558,7 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+        applyFullscreenMode()
         if (updateInterfaceSize(newConfig)) return
         render()
     }
@@ -444,19 +571,52 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyFullscreenMode()
         // Some head units put their own density back without any other callback.
         if (hasFocus && enforceInterfaceSize()) render()
     }
 
-    private val isExpandedSettingsLayout: Boolean
+    // main B6：自然完整布局判定（未勾选强制时的原始阈值结果）（作者：TRAE AI）。
+    private val isNaturallyExpandedSettingsLayout: Boolean
         get() = resources.configuration.let {
             SettingsLayoutPolicy.isExpanded(it.screenWidthDp, it.screenHeightDp, it.fontScale)
         }
 
-    private fun render() {
+    // main B6：横屏强制完整布局——勾选后横屏始终用 rail 布局，竖屏自动回退（作者：TRAE AI）。
+    private val isExpandedSettingsLayout: Boolean
+        get() = SettingsLayoutPreferences.isActive(this) || isNaturallyExpandedSettingsLayout
+
+    private fun render() = render(appearanceOnly = false)
+
+    // 外观重渲染时保留焦点用的快照（main #422，作者：TRAE AI）。
+    private data class FocusSnapshot(
+        val tag: Any?,
+        val contentDescription: String?,
+        val label: String?,
+    )
+
+    private fun focusLabel(view: View): String? = when (view) {
+        is TextView -> view.text?.toString()
+        is ViewGroup -> descendants(view).filterIsInstance<TextView>()
+            .firstOrNull { it.text.isNotEmpty() }?.text?.toString()
+        else -> null
+    }
+
+    private fun render(appearanceOnly: Boolean, preferredFocusTag: Any? = null) {
         enforceInterfaceSize()
+        refreshAppearance()
+        applyWindowAppearance()
         // A pending assignment belongs to the widgets being replaced, never to another page.
-        cancelKeyLearning()
+        if (!appearanceOnly) cancelKeyLearning()
+        val focusSnapshot = if (appearanceOnly) {
+            currentFocus?.let { focused ->
+                FocusSnapshot(
+                    tag = preferredFocusTag ?: focused.tag,
+                    contentDescription = focused.contentDescription?.toString(),
+                    label = focusLabel(focused),
+                )
+            } ?: preferredFocusTag?.let { FocusSnapshot(it, null, null) }
+        } else null
         // A restore still waiting for layout keeps its target: the old page was never laid out.
         val sameDestination = renderedPage == page &&
             (page != "settings" || renderedSettingsCategory == settingsCategory)
@@ -468,6 +628,11 @@ class DiPlayActivity : ComponentActivity() {
         val restoreRailFocus = keepRailPosition &&
             (pendingRailFocus || settingsRailScroll?.hasFocus() == true)
         settingsRailScroll = null
+        // main B3：结果挂在旧头部上；若搜索继续，由新头部重新打开（作者：TRAE AI）。
+        settingsSearchPopup?.dismiss()
+        settingsSearchPopup = null
+        settingsSearchBox = null
+        if (page != "settings") clearSettingsSearchState()
         status = null; connectButton = null; disconnectButton = null; lastRunning = null; carButtonCard = null
         reconnectBar = null
         readinessCard = null
@@ -475,7 +640,11 @@ class DiPlayActivity : ComponentActivity() {
         bydAdbControls = null
         adbSwitches.clear()
         adbStatus = null
-        val compact = isCompactLayout
+        // main B6：设置页横屏强制完整布局时不压缩间距（作者：TRAE AI）。
+        val compact = isCompactLayout && when (page) {
+            "settings" -> !SettingsLayoutPreferences.isActive(this)
+            else -> true
+        }
         val scroll = ScrollView(this).apply { setBackgroundColor(BG); isFillViewport = true; clipToPadding = false }
         rootScroll = scroll
         val content = column()
@@ -497,6 +666,8 @@ class DiPlayActivity : ComponentActivity() {
                 "connection" -> connectionSetup(content)
                 "settings" -> settingsCategoryContent(content)
                 "about" -> about(content)
+                // main B4：连接向导独立页面（作者：TRAE AI）。
+                "setup" -> setupGuide(content)
                 else -> home(content)
             }
             scroll
@@ -505,6 +676,20 @@ class DiPlayActivity : ComponentActivity() {
         renderedPage = page
         renderedSettingsCategory = settingsCategory.takeIf { page == "settings" }
         refreshStatus()
+        // 外观重渲染后按快照恢复焦点（main #422，作者：TRAE AI）。
+        focusSnapshot?.let { snapshot ->
+            root.doOnLayout {
+                descendants(root).firstOrNull { candidate ->
+                    candidate.isFocusable && when {
+                        snapshot.tag != null -> candidate.tag == snapshot.tag
+                        snapshot.contentDescription != null ->
+                            candidate.contentDescription?.toString() == snapshot.contentDescription
+                        snapshot.label != null -> focusLabel(candidate) == snapshot.label
+                        else -> false
+                    }
+                }?.requestFocus()
+            }
+        }
         pendingScrollY = previousScrollY
         // A stopped window still dispatches pre-draw but skips layout, so wait for a real layout;
         // the listener stays on this view and goes away with it.
@@ -534,15 +719,160 @@ class DiPlayActivity : ComponentActivity() {
         }
     }
 
+    // ===== 外观切换闭环（main #422，作者：TRAE AI）=====
+    // API < 20：WindowInsetsControllerCompat 不实现系统栏可见性，回退到老式窗口标志。
+    private fun applyFullscreenMode() {
+        val multiWindow = Build.VERSION.SDK_INT >= 24 && isInMultiWindowMode
+        val hideTop = AirPlayPersistence.loadHideTopBar(this) && !multiWindow
+        val hideBottom = AirPlayPersistence.loadHideBottomBar(this) && !multiWindow
+        if (LegacyFullscreen.apply(window, hideTop, hideBottom)) return
+        WindowCompat.setDecorFitsSystemWindows(window, !(hideTop && hideBottom))
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.isAppearanceLightStatusBars = palette.systemBarIconsAreDark
+        controller.isAppearanceLightNavigationBars = palette.systemBarIconsAreDark
+        if (hideTop) {
+            controller.hide(WindowInsetsCompat.Type.statusBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.statusBars())
+        }
+        if (hideBottom) {
+            controller.hide(WindowInsetsCompat.Type.navigationBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.navigationBars())
+        }
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        ViewCompat.requestApplyInsets(window.decorView)
+    }
+
+    // 注册 runtime 观察者并启动兜底轮询；resume 期间挂起的重渲染在此补做。
+    private fun startAppearanceUpdates() {
+        appearanceUpdatesResumed = true
+        appearanceObserverRemoval?.invoke()
+        appearanceObserverRemoval = AppAppearanceRuntime.observeHost {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                checkForAppearanceChange()
+            } else {
+                handler.post { if (appearanceUpdatesResumed) checkForAppearanceChange() }
+            }
+        }
+        handler.removeCallbacks(appearancePoll)
+        handler.post(appearancePoll)
+        applyPendingAppearanceRender()
+    }
+
+    private fun checkForAppearanceChange() {
+        if (refreshAppearance()) {
+            requestAppearanceRender()
+        }
+    }
+
+    // 外观变化的重渲染入口；按键学习期间延迟，避免打断学习流程。
+    private fun requestAppearanceRender(focusAppearanceButton: Boolean = false) {
+        appearanceRenderPending = true
+        appearanceButtonFocusPending = appearanceButtonFocusPending || focusAppearanceButton
+        if (!appearanceUpdatesResumed || shouldDeferAppearanceRender(
+                windowKeyLearning = windowLearning != null,
+                serviceKeyLearning = WheelKeyService.isLearning(),
+            )
+        ) return
+        appearanceRenderPending = false
+        val restoreAppearanceButton = appearanceButtonFocusPending
+        appearanceButtonFocusPending = false
+        render(
+            appearanceOnly = true,
+            preferredFocusTag = APPEARANCE_BUTTON_TAG.takeIf { restoreAppearanceButton },
+        )
+    }
+
+    private fun applyPendingAppearanceRender() {
+        if (!appearanceRenderPending) return
+        handler.post {
+            if (appearanceRenderPending && appearanceUpdatesResumed &&
+                !shouldDeferAppearanceRender(
+                    windowKeyLearning = windowLearning != null,
+                    serviceKeyLearning = WheelKeyService.isLearning(),
+                )
+            ) {
+                requestAppearanceRender()
+            }
+        }
+    }
+
+    // 重取日夜态与调色板；返回 true 表示发生了变化需要重渲染。
+    private fun refreshAppearance(): Boolean {
+        val resolved = resolveAppNightNow()
+        if (resolved == appNight && palette === DiPlayPalette.of(resolved)) return false
+        appNight = resolved
+        palette = DiPlayPalette.of(resolved)
+        return true
+    }
+
+    // 窗口背景与系统栏跟随调色板；系统栏图标明暗随外观切换。
+    private fun applyWindowAppearance() {
+        window.setBackgroundDrawable(ColorDrawable(palette.background))
+        UiCompat.setSystemBarColors(window, palette.systemBar)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = palette.systemBarIconsAreDark
+            isAppearanceLightNavigationBars = palette.systemBarIconsAreDark
+        }
+        applyFullscreenMode()
+    }
+
+    // main B8：系统在下一次启动时、任何应用代码运行前绘制启动窗口，API 33 起应用才能选择它的主题；
+    // 更旧的车机保持深色边框。AUTO 维持深色：无法预知下次启动的时段，白天显示深色框比夜间显示亮框安全。
+    private fun rememberLaunchAppearance() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val light = AirPlayPersistence.loadAppAppearance(this) == AppAppearance.LIGHT
+        splashScreen.setSplashScreenTheme(if (light) R.style.Theme_Xcertplay_Light else R.style.Theme_Xcertplay)
+    }
+
+    // 外观切换按钮：点击在深色/浅色间切换并触发增量重渲染（main #422，作者：TRAE AI）。
+    private fun appearanceButton(): ImageButton = iconButton(
+        icon = if (appNight) R.drawable.ic_dp_night else R.drawable.ic_dp_day,
+        description = getString(if (appNight) R.string.settings_switch_to_light_appearance
+            else R.string.settings_switch_to_dark_appearance),
+    ) {
+        AirPlayPersistence.saveAppAppearance(
+            this,
+            if (appNight) AppAppearance.LIGHT else AppAppearance.DARK,
+        )
+        // main B8：下次启动的 splash 主题跟随新外观（作者：TRAE AI）。
+        rememberLaunchAppearance()
+        requestAppearanceRender(focusAppearanceButton = true)
+    }.apply {
+        tag = APPEARANCE_BUTTON_TAG
+    }
+
+    // 标题栏圆形图标按钮（焦点环 + 涟漪，遥控器可用）（main #422，作者：TRAE AI）。
+    private fun iconButton(icon: Int, description: String, click: () -> Unit) = ImageButton(this).apply {
+        setImageResource(icon)
+        // API17 适配：imageTintList/stateListAnimator/RippleDrawable/foreground 是 API 21+/23+，全部走 UiCompat（作者：TRAE AI）。
+        UiCompat.setImageTint(this, ACCENT)
+        contentDescription = description
+        scaleType = ImageView.ScaleType.CENTER
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        minimumWidth = dp(48)
+        minimumHeight = dp(48)
+        UiCompat.clearStateListAnimator(this)
+        background = UiCompat.ripple(RIPPLE, rounded(BUTTON, BORDER), null)
+        UiCompat.setForeground(this, focusRing())
+        setOnClickListener { click() }
+    }
+
     private fun standardHeader(compact: Boolean): LinearLayout = row().apply {
         gravity = Gravity.CENTER_VERTICAL
         addView(ImageView(this@DiPlayActivity).apply {
             setImageResource(R.drawable.ic_carplay)
             contentDescription = getString(R.string.carplay)
-        }, LinearLayout.LayoutParams(if (compact) dp(24) else dp(36), if (compact) dp(24) else dp(36)))
+        }, LinearLayout.LayoutParams(if (compact) dp(30) else dp(36), if (compact) dp(30) else dp(36)))
         addView(label(getString(R.string.diplay), if (compact) 18 else 26, TEXT, true).apply {
             setPadding(if (compact) dp(8) else dp(12), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, if (compact) dp(36) else dp(56), 1f))
+        // 标题栏右侧加入外观切换按钮（main #422，作者：TRAE AI）。
+        addView(appearanceButton(), LinearLayout.LayoutParams(dp(if (compact) 44 else 52), dp(if (compact) 44 else 52)).apply {
+            marginEnd = dp(if (compact) 8 else 12)
+        })
         if (page != "home" || !compact) {
             addView(button(if (page == "home") getString(R.string.car_home) else getString(R.string.back), false) {
                 if (page == "home") startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
@@ -552,8 +882,24 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun navigateBack() {
+        // main B3：返回键先关闭打开的搜索，与系统搜索栏行为一致（作者：TRAE AI）。
+        if (page == "settings" && settingsSearchQuery.isNotEmpty()) {
+            closeSettingsSearch()
+            return
+        }
         val returnCategory = connectionSettingsReturnCategory
         when {
+            // main #422：about 是独立页面，返回设置页 Overview（作者：TRAE AI）。
+            page == "about" -> {
+                page = "settings"
+                settingsCategory = SettingsCategory.OVERVIEW
+            }
+            // main B4：向导第一步之后逐步回退；第一步则关闭向导（作者：TRAE AI）。
+            page == "setup" && setupStep > SetupGuide.STEP_CAR -> setupStep--
+            page == "setup" -> {
+                closeSetupGuide()
+                return
+            }
             page == "connection" && returnCategory != null -> {
                 page = "settings"
                 settingsCategory = returnCategory
@@ -576,15 +922,220 @@ class DiPlayActivity : ComponentActivity() {
         render()
     }
 
+    // ===== main B4：连接向导（SetupGuide）页面组（作者：TRAE AI）=====
+
+    private fun openSetupGuide(fromSettings: Boolean) {
+        setupFromSettings = fromSettings
+        setupStep = SetupGuide.STEP_CAR
+        page = "setup"
+        render()
+    }
+
+    private fun closeSetupGuide(connectNow: Boolean = false) {
+        SetupGuide.markSeen(this)
+        page = if (setupFromSettings) "settings" else "home"
+        setupFromSettings = false
+        setupStep = SetupGuide.STEP_CAR
+        render()
+        if (connectNow) connect(AirPlayPersistence.loadWirelessEnabled(this))
+    }
+
+    private fun dilinkLabel(generation: DiLinkGeneration) = getString(when (generation) {
+        DiLinkGeneration.DILINK_3 -> R.string.dilink_3
+        DiLinkGeneration.DILINK_4 -> R.string.dilink_4
+        DiLinkGeneration.DILINK_5 -> R.string.dilink_5
+        DiLinkGeneration.UNKNOWN -> R.string.dilink_not_sure
+    })
+
+    private fun setupGuide(content: LinearLayout) {
+        val step = setupStep.coerceIn(SetupGuide.STEP_CAR, SetupGuide.STEP_DONE)
+        // API17 适配：TextView.setLetterSpacing 是 API 21+，走 UiCompat（作者：TRAE AI）。
+        content.addView(label(getString(R.string.setup_step_of, step + 1, SetupGuide.STEP_COUNT), 13, ACCENT, true)
+            .apply { UiCompat.setLetterSpacing(this, .12f) })
+        // 顶部步骤进度条：已完成与当前步高亮。
+        val progress = row().apply { setPadding(0, dp(10), 0, dp(20)) }
+        repeat(SetupGuide.STEP_COUNT) { index ->
+            progress.addView(View(this).apply {
+                background = GradientDrawable().apply {
+                    setColor(if (index <= step) ACCENT else BUTTON); cornerRadius = dp(3).toFloat()
+                }
+            }, LinearLayout.LayoutParams(0, dp(6), 1f).apply { if (index > 0) marginStart = dp(8) })
+        }
+        content.addView(progress)
+        when (step) {
+            SetupGuide.STEP_CAR -> setupCarStep(content)
+            SetupGuide.STEP_CONNECTION -> setupConnectionStep(content)
+            SetupGuide.STEP_IPHONE -> setupIphoneStep(content)
+            SetupGuide.STEP_FEATURES -> setupFeaturesStep(content)
+            else -> setupDoneStep(content)
+        }
+        if (step == SetupGuide.STEP_DONE) return
+        val footer = row().apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, 0) }
+        footer.addView(button(getString(R.string.setup_skip), false) { closeSetupGuide() },
+            LinearLayout.LayoutParams(0, dp(60), 1f))
+        footer.addView(space(16), LinearLayout.LayoutParams(dp(16), 1))
+        footer.addView(button(getString(R.string.setup_next), true) { setupStep = step + 1; render() },
+            LinearLayout.LayoutParams(0, dp(60), 1f))
+        content.addView(footer)
+    }
+
+    private fun setupTitle(content: LinearLayout, title: Int, description: String) {
+        content.addView(label(getString(title), 34, TEXT, true))
+        content.addView(label(description, 17, MUTED).apply { setPadding(0, dp(8), 0, dp(24)) })
+    }
+
+    private fun setupCarStep(content: LinearLayout) {
+        val detection = DiLinkGeneration.detect()
+        val selected = DiLinkGeneration.confirmed(this) ?: detection.generation
+        setupTitle(content, R.string.setup_car_title, when (detection.source) {
+            DiLinkGeneration.Source.SYSTEM_VERSION -> getString(R.string.setup_car_detected, dilinkLabel(detection.generation))
+            DiLinkGeneration.Source.LIKELY -> getString(R.string.setup_car_likely, dilinkLabel(detection.generation))
+            DiLinkGeneration.Source.NONE -> getString(R.string.setup_car_unknown)
+        })
+        val card = card()
+        card.addView(label(getString(R.string.setup_car_choose), 22, TEXT, true))
+        val wide = resources.configuration.screenWidthDp >= 850
+        val choices = if (wide) row() else column()
+        DiLinkGeneration.entries.forEachIndexed { index, generation ->
+            val chosen = generation == selected
+            choices.addView(button("${if (chosen) "✓  " else ""}${dilinkLabel(generation)}", chosen) {
+                DiLinkGeneration.save(this, generation)
+                render()
+            }, if (wide) LinearLayout.LayoutParams(0, dp(60), 1f).apply {
+                topMargin = dp(12); if (index > 0) marginStart = dp(12)
+            } else matchButton(12, 60))
+        }
+        card.addView(choices)
+        detection.evidence?.let {
+            card.addView(label(getString(R.string.setup_car_evidence, it), 13, MUTED).apply { setPadding(0, dp(16), 0, 0) })
+        }
+        content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
+    }
+
+    private fun setupConnectionStep(content: LinearLayout) {
+        setupTitle(content, R.string.setup_connection_title, getString(R.string.setup_connection_description))
+        val card = card()
+        wirelessLinkControls(card)
+        content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
+    }
+
+    private fun setupIphoneStep(content: LinearLayout) {
+        setupTitle(content, R.string.setup_iphone_title, getString(R.string.keep_bluetooth_and_wi_fi_on_your_iphone_pair_with_the_car))
+        val card = card()
+        val chosen = DiPlayPreferences.phoneAddress(this) != null
+        card.addView(label(if (chosen) DiPlayPreferences.phoneName(this) else getString(R.string.setup_iphone_none), 22,
+            if (chosen) READY else TEXT, true))
+        card.addView(button("${getString(R.string.choose_iphone_prefix)}${DiPlayPreferences.phoneName(this)}", !chosen) {
+            choosePhone()
+        }, matchButton(16, 60))
+        card.addView(button(getString(R.string.review_app_permissions), false) {
+            openSystem(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }, matchButton(12, 60))
+        content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
+    }
+
+    private fun setupFeaturesStep(content: LinearLayout) {
+        val generation = DiLinkGeneration.current(this)
+        setupTitle(content, R.string.setup_features_title, getString(R.string.setup_features_description,
+            dilinkLabel(generation)))
+        // DiLink 3 车开了 DiLink 4 ADB 仪表路线会挡住仪表地图，给出关掉的快捷操作。
+        if (SetupGuide.hasConflictingClusterRoute(generation, AirPlayPersistence.loadAdbClusterEnabled(this))) {
+            val warning = card()
+            warning.addView(label(getString(R.string.setup_cluster_route_conflict), 16, WARNING))
+            warning.addView(button(getString(R.string.setup_cluster_route_turn_off), true) {
+                AirPlayPersistence.saveAdbClusterEnabled(this, false)
+                ClusterActivityOutput.stopForSettings()
+                markReconnectNeeded()
+                render()
+            }, matchButton(12, 56))
+            content.addView(warning, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
+        }
+        val card = card()
+        SetupGuide.features(generation).forEach { entry ->
+            val before = card.childCount
+            when (entry.feature) {
+                SetupGuide.Feature.AUTO_CONNECT -> toggle(card, getString(R.string.connect_when_diplay_opens),
+                    getString(R.string.default_connection_description), DiPlayPreferences.autoConnect(this)) {
+                    DiPlayPreferences.saveAutoConnect(this, it)
+                }
+                SetupGuide.Feature.LOCATION -> toggle(card, getString(R.string.report_location_to_iphone),
+                    getString(R.string.sends_precise_android_location_as_carplay_gps_data_when_th),
+                    AirPlayPersistence.loadLocationReportingEnabled(this), save = ::onLocationReportingChanged)
+                SetupGuide.Feature.CLUSTER_MAP -> reconnectingToggle(card,
+                    getString(R.string.carplay_map_on_instrument_cluster_experimental),
+                    getString(R.string.shows_the_iphone_s_cluster_map_on_the_instrument_cluster_c),
+                    AirPlayPersistence.loadClusterMapEnabled(this)) {
+                    AirPlayPersistence.saveClusterMapEnabled(this, it)
+                    render()
+                }
+                SetupGuide.Feature.DILINK4_ADB_CLUSTER -> reconnectingToggle(card,
+                    getString(R.string.adb_cluster_activity_mode), getString(R.string.adb_cluster_activity_description),
+                    AirPlayPersistence.loadAdbClusterEnabled(this)) {
+                    AirPlayPersistence.saveAdbClusterEnabled(this, it)
+                    ClusterActivityOutput.stopForSettings()
+                    render()
+                }
+                SetupGuide.Feature.BYD_NAVIGATION -> if (BydOutputSettings.available(this)) {
+                    toggle(card, getString(R.string.navigation_on_hud_and_instrument_cluster),
+                        getString(R.string.show_phone_navigation_arrows_distance_and_street_names_on),
+                        BydOutputSettings.enabled(this)) { BydOutputSettings.setEnabled(this, it) }
+                }
+                SetupGuide.Feature.CALLS_ON_DASHBOARD -> toggle(card, getString(R.string.carplay_calls_on_dashboard),
+                    getString(R.string.carplay_calls_on_dashboard_description),
+                    BydOutputSettings.carPlayCalls(this), enabled = !adbSwitchChangePending) { applyCarPlayCalls(it) }
+                SetupGuide.Feature.CALL_KEYS -> toggle(card, getString(R.string.carplay_call_controls_experimental),
+                    getString(R.string.carplay_call_controls_experimental_description),
+                    BydOutputSettings.carPlayCallControls(this)) { applyCallKeys(it) }
+            }
+            if (card.childCount > before) card.addView(setupBadges(entry))
+        }
+        content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
+    }
+
+    // 每个功能行下的徽章：实测（绿）/实验性（黄）+ 需要 ADB。
+    private fun setupBadges(entry: SetupGuide.Entry): LinearLayout = row().apply {
+        setPadding(0, dp(2), 0, dp(14))
+        fun badge(text: String, color: Int) = label(text, 12, color, true).apply {
+            background = GradientDrawable().apply {
+                setColor(Color.TRANSPARENT); cornerRadius = dp(10).toFloat(); setStroke(dp(1), color)
+            }
+            setPadding(dp(10), dp(3), dp(10), dp(3))
+        }
+        val tested = entry.status == SetupGuide.Status.TESTED
+        addView(badge(getString(if (tested) R.string.setup_badge_tested else R.string.setup_badge_experimental),
+            if (tested) READY else WARNING), LinearLayout.LayoutParams(-2, -2))
+        if (entry.needsAdb) addView(badge(getString(R.string.setup_badge_adb), ACCENT),
+            LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
+    }
+
+    private fun setupDoneStep(content: LinearLayout) {
+        setupTitle(content, R.string.setup_done_title, getString(R.string.setup_done_description))
+        val card = card()
+        card.addView(button(getString(R.string.connect_phone), true) { closeSetupGuide(connectNow = true) }, matchButton(0, 60))
+        card.addView(button(getString(R.string.settings), false) {
+            SetupGuide.markSeen(this)
+            setupFromSettings = false
+            setupStep = SetupGuide.STEP_CAR
+            page = "settings"
+            render()
+        }, matchButton(12, 60))
+        card.addView(button(getString(R.string.done), false) { closeSetupGuide() }, matchButton(12, 60))
+        content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
+    }
+
     private fun settingsHeader(compact: Boolean): LinearLayout = row().apply {
         gravity = Gravity.CENTER_VERTICAL
         addView(button(getString(R.string.back), false, ::navigateBack),
             LinearLayout.LayoutParams(if (compact) dp(78) else dp(112), if (compact) dp(44) else dp(52)))
+        // main B3：标题不再拉伸占满，搜索框常驻页首占满剩余宽度（作者：TRAE AI）。
         addView(label(getString(R.string.settings), if (compact) 20 else 26, TEXT, true).apply {
             setPadding(dp(12), 0, dp(12), 0)
-        }, LinearLayout.LayoutParams(0, if (compact) dp(44) else dp(52), 1f))
-        addView(button(getString(R.string.settings_search), false) { showSettingsSearch() },
-            LinearLayout.LayoutParams(if (compact) dp(92) else dp(140), if (compact) dp(44) else dp(52)))
+        }, LinearLayout.LayoutParams(-2, if (compact) dp(44) else dp(52)))
+        addView(settingsSearchField(compact), LinearLayout.LayoutParams(0, if (compact) dp(44) else dp(52), 1f).apply {
+            marginEnd = dp(if (compact) 8 else 12)
+        })
+        // 标题栏右侧加入外观切换按钮（main #422，作者：TRAE AI）。
+        addView(appearanceButton(), LinearLayout.LayoutParams(dp(if (compact) 44 else 52), dp(if (compact) 44 else 52)))
     }
 
     private fun home(content: LinearLayout) {
@@ -767,8 +1318,7 @@ class DiPlayActivity : ComponentActivity() {
             addView(label(title, 16, if (selected) ACCENT else TEXT, true),
                 LinearLayout.LayoutParams(0, -1, 1f))
             setOnClickListener {
-                settingsCategory = category
-                render()
+                openSettingsCategory(category)
             }
         }
     }
@@ -779,9 +1329,11 @@ class DiPlayActivity : ComponentActivity() {
         SettingsCategory.DISPLAY -> R.drawable.ic_dp_display
         SettingsCategory.AUDIO -> R.drawable.ic_dp_audio
         SettingsCategory.NAVIGATION -> R.drawable.ic_dp_navigation
-        SettingsCategory.VEHICLE -> R.drawable.ic_dp_vehicle
+        SettingsCategory.VEHICLE -> R.drawable.ic_dp_car
         SettingsCategory.DIAGNOSTICS -> R.drawable.ic_dp_diagnostics
         SettingsCategory.ADVANCED -> R.drawable.ic_dp_advanced
+        SettingsCategory.LANGUAGE -> R.drawable.ic_dp_language
+        SettingsCategory.ABOUT -> R.drawable.ic_dp_about
     }
 
     private fun settingsCategoryTitle(category: SettingsCategory): String = getString(when (category) {
@@ -793,6 +1345,8 @@ class DiPlayActivity : ComponentActivity() {
         SettingsCategory.VEHICLE -> R.string.settings_vehicle
         SettingsCategory.DIAGNOSTICS -> R.string.diagnostics
         SettingsCategory.ADVANCED -> R.string.settings_advanced
+        SettingsCategory.LANGUAGE -> R.string.language_section_title
+        SettingsCategory.ABOUT -> R.string.about
     })
 
     private fun settingsCategoryContent(content: LinearLayout) {
@@ -805,6 +1359,11 @@ class DiPlayActivity : ComponentActivity() {
             SettingsCategory.VEHICLE -> vehicleSettings(content)
             SettingsCategory.DIAGNOSTICS -> diagnosticsSettings(content)
             SettingsCategory.ADVANCED -> advancedSettings(content)
+            SettingsCategory.LANGUAGE -> {
+                settingsPageTitle(content, getString(R.string.language_section_title), getString(R.string.settings_language_summary))
+                renderSections(content, SettingsInformationArchitecture.sectionsByCategory.getValue(SettingsCategory.LANGUAGE))
+            }
+            SettingsCategory.ABOUT -> about(content)
         }
     }
 
@@ -816,7 +1375,13 @@ class DiPlayActivity : ComponentActivity() {
         readinessCard = readiness
         renderedReadiness = null
         refreshReadiness()
-        content.addView(readiness, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(20) })
+        content.addView(readiness, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
+        // main B4：Overview 页的连接向导入口（作者：TRAE AI）。
+        content.addView(button(getString(R.string.setup_guide), false) { openSetupGuide(fromSettings = true) },
+            LinearLayout.LayoutParams(-1, dp(56)).apply { bottomMargin = dp(6) })
+        content.addView(label(getString(R.string.setup_guide_description), 14, MUTED).apply {
+            setPadding(0, 0, 0, dp(20))
+        })
 
         val destinations = listOf(
             SettingsCategory.CONNECTION to R.string.settings_connection_summary,
@@ -824,7 +1389,12 @@ class DiPlayActivity : ComponentActivity() {
             SettingsCategory.AUDIO to R.string.settings_audio_summary,
             SettingsCategory.NAVIGATION to R.string.settings_navigation_summary,
             SettingsCategory.VEHICLE to R.string.settings_vehicle_summary,
+            SettingsCategory.LANGUAGE to R.string.settings_language_summary,
+            SettingsCategory.ABOUT to R.string.about_diplay,
+            SettingsCategory.DIAGNOSTICS to R.string.settings_diagnostics_summary,
+            SettingsCategory.ADVANCED to R.string.settings_advanced_subtitle,
         )
+        val categoryGap = dp(SETTINGS_BLOCK_GAP_DP)
         val twoColumns = isExpandedSettingsLayout && resources.configuration.let {
             SettingsLayoutPolicy.overviewHasTwoColumns(it.screenWidthDp, it.fontScale)
         }
@@ -834,7 +1404,7 @@ class DiPlayActivity : ComponentActivity() {
             setup.addView(settingsSectionHeading(R.string.settings_your_setup))
             destinations.forEach { item ->
                 setup.addView(settingsSummaryCard(item.first, getString(item.second)),
-                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = categoryGap })
             }
             columns.addView(setup, LinearLayout.LayoutParams(0, -2, 1f))
             columns.addView(space(14), LinearLayout.LayoutParams(dp(14), 1))
@@ -842,20 +1412,17 @@ class DiPlayActivity : ComponentActivity() {
             quick.addView(settingsSectionHeading(R.string.settings_quick_settings))
             quick.addView(quickSettingsCard())
             columns.addView(quick, LinearLayout.LayoutParams(0, -2, 1f))
-            content.addView(columns, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
+            content.addView(columns, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
         } else {
             content.addView(settingsSectionHeading(R.string.settings_your_setup))
             destinations.forEach { item ->
                 content.addView(settingsSummaryCard(item.first, getString(item.second)),
-                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = categoryGap })
             }
             content.addView(settingsSectionHeading(R.string.settings_quick_settings).apply { setPadding(0, dp(10), 0, dp(8)) })
-            content.addView(quickSettingsCard(), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(18) })
+            content.addView(quickSettingsCard(), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
         }
 
-        content.addView(settingsUtilitiesCard(), LinearLayout.LayoutParams(-1, -2).apply {
-            bottomMargin = dp(SETTINGS_BLOCK_GAP_DP)
-        })
         renderSections(content, SettingsInformationArchitecture.sectionsByCategory.getValue(SettingsCategory.OVERVIEW))
     }
 
@@ -909,60 +1476,6 @@ class DiPlayActivity : ComponentActivity() {
         }
     }
 
-    private fun settingsUtilitiesCard(): LinearLayout = card().apply {
-        setPadding(0, 0, 0, 0)
-        addView(settingsUtilityRow(
-            SettingsCategory.DIAGNOSTICS,
-            R.drawable.ic_dp_diagnostics,
-            getString(R.string.settings_diagnostics_summary),
-        ), LinearLayout.LayoutParams(-1, dp(72)))
-        addView(View(this@DiPlayActivity).apply { setBackgroundColor(BORDER) },
-            LinearLayout.LayoutParams(-1, dp(1)).apply {
-                marginStart = dp(16)
-                marginEnd = dp(16)
-            })
-        addView(settingsUtilityRow(
-            SettingsCategory.ADVANCED,
-            R.drawable.ic_dp_advanced,
-            getString(R.string.settings_advanced_subtitle),
-            warning = true,
-        ), LinearLayout.LayoutParams(-1, dp(72)))
-    }
-
-    private fun settingsUtilityRow(
-        category: SettingsCategory,
-        icon: Int,
-        description: String,
-        warning: Boolean = false,
-    ): LinearLayout = row().apply {
-        val tint = if (warning) WARNING else ACCENT
-        gravity = Gravity.CENTER_VERTICAL
-        isClickable = true
-        isFocusable = true
-        contentDescription = getString(R.string.settings_open_category, settingsCategoryTitle(category))
-        UiCompat.setForeground(this, android.graphics.drawable.LayerDrawable(arrayOf(
-            UiCompat.ripple(RIPPLE, null, null), focusRing(12))))
-        setPadding(dp(16), 0, dp(16), 0)
-        addView(ImageView(this@DiPlayActivity).apply {
-            setImageResource(icon)
-            UiCompat.setImageTint(this, tint)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(14) })
-        addView(column().apply {
-            addView(label(settingsCategoryTitle(category), 17, if (warning) WARNING else TEXT, true))
-            addView(label(description, 13, MUTED).apply { setPadding(0, dp(2), 0, 0) })
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(ImageView(this@DiPlayActivity).apply {
-            setImageResource(R.drawable.ic_dp_chevron)
-            UiCompat.setImageTint(this, ACCENT)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginStart = dp(12) })
-        setOnClickListener {
-            settingsCategory = category
-            render()
-        }
-    }
-
     private fun quickSettingsCard(): LinearLayout = card().also(::buildQuickSettings).also(::normalizeSpacing)
 
     private fun buildQuickSettings(card: LinearLayout): Unit = card.run {
@@ -985,6 +1498,13 @@ class DiPlayActivity : ComponentActivity() {
         setPadding(0, 0, 0, dp(10))
     }
 
+    // 分类页统一入口：ABOUT 是独立页面而不是分类卡片（main #422，作者：TRAE AI）。
+    private fun openSettingsCategory(category: SettingsCategory) {
+        if (category == SettingsCategory.ABOUT) page = "about"
+        else settingsCategory = category
+        render()
+    }
+
     private fun settingsSummaryCard(category: SettingsCategory, summary: String): LinearLayout = card().apply {
         setPadding(dp(16), dp(10), dp(16), dp(10))
         isClickable = true
@@ -994,7 +1514,7 @@ class DiPlayActivity : ComponentActivity() {
         contentDescription = getString(R.string.settings_open_category, settingsCategoryTitle(category))
         addView(label(settingsCategoryTitle(category), 17, TEXT, true))
         addView(label(summary, 13, MUTED).apply { setPadding(0, dp(3), 0, 0) })
-        setOnClickListener { settingsCategory = category; render() }
+        setOnClickListener { openSettingsCategory(category) }
     }
 
     private fun settingsPageTitle(content: LinearLayout, title: String, subtitle: String) {
@@ -1098,8 +1618,10 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun openSearchResult(result: SettingsSearchResult) {
-        settingsCategory = result.category
-        render()
+        // main B3：命中后先收起键盘与搜索状态，再进入目标分类（作者：TRAE AI）。
+        setSearchKeyboard(settingsSearchBox, false)
+        clearSettingsSearchState()
+        openSettingsCategory(result.category)
         val scroll = rootScroll ?: return
         val match = descendants(scroll).filterIsInstance<TextView>().firstOrNull {
             it.text.toString() == result.title || it.text.startsWith(result.title + VALUE_SEPARATOR)
@@ -1121,49 +1643,171 @@ class DiPlayActivity : ComponentActivity() {
         if (view is ViewGroup) for (i in 0 until view.childCount) yieldAll(descendants(view.getChildAt(i)))
     }
 
-    private fun showSettingsSearch() {
-        val index = buildSettingsSearchIndex()
-        val input = EditText(this).apply {
-            setSingleLine()
-            hint = getString(R.string.settings_search_hint)
-            // Landscape head units would otherwise cover the results with a full-screen editor.
-            imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or
-                android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+    /**
+     * main B3：设置页头部常驻搜索框，输入时下拉结果（作者：TRAE AI）。
+     * 索引在首个按键时构建；构建会触发整页重渲染，由替换后的新输入框接管查询、焦点与键盘。
+     */
+    private fun settingsSearchField(compact: Boolean): EditText = EditText(this).apply {
+        settingsSearchBox = this
+        setSingleLine()
+        hint = getString(R.string.settings_search_hint)
+        contentDescription = getString(R.string.settings_search)
+        textSize = if (compact) 16f else 18f
+        setTextColor(TEXT)
+        setHintTextColor(MUTED)
+        background = rounded(BUTTON, BORDER)
+        // API17 适配：View.setForeground 是 API 23+，走 UiCompat（作者：TRAE AI）。
+        UiCompat.setForeground(this, focusRing())
+        setPadding(dp(16), 0, dp(16), 0)
+        compoundDrawablePadding = dp(10)
+        setCompoundDrawablesRelativeWithIntrinsicBounds(
+            // API17 适配：Context.getDrawable 是 API 21+，低版本走 ContextCompat；setTint 是 API 21+，走 UiCompat（作者：TRAE AI）。
+            androidx.core.content.ContextCompat.getDrawable(this@DiPlayActivity, R.drawable.ic_dp_search)?.mutate()
+                ?.let { UiCompat.tint(it, MUTED) }, null, null, null)
+        inputType = android.text.InputType.TYPE_CLASS_TEXT
+        // 横屏车机不然会用全屏编辑器盖住结果列表。
+        imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+            android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+        // 触摸焦点等待点击：打开设置页时不主动聚焦搜索框、不弹键盘。
+        isFocusableInTouchMode = settingsSearchRestoreFocus
+        setText(settingsSearchQuery)
+        setSelection(text.length)
+        setOnClickListener {
+            if (!isFocusableInTouchMode) {
+                isFocusableInTouchMode = true
+                requestFocus()
+                setSearchKeyboard(this, true)
+            }
+            showSettingsSearchResults()
         }
-        val results = mutableListOf<SettingsSearchResult>()
-        val adapter = android.widget.ArrayAdapter<String>(this, android.R.layout.simple_list_item_1)
-        val list = android.widget.ListView(this).apply { this.adapter = adapter }
-        val empty = label(getString(R.string.settings_search_empty), 15, MUTED).apply {
-            setPadding(dp(8), dp(12), dp(8), dp(12)); visibility = View.GONE
+        setOnFocusChangeListener { _, focused -> if (focused) showSettingsSearchResults() }
+        setOnEditorActionListener { _, actionId, event ->
+            val search = actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH ||
+                event?.keyCode == KeyEvent.KEYCODE_ENTER
+            if (!search) return@setOnEditorActionListener false
+            if (event == null || event.action == KeyEvent.ACTION_DOWN) settingsSearchResults().firstOrNull()?.let(::openSearchResult)
+            true
         }
-        fun update() {
-            results.clear(); results += searchSettings(index, input.text.toString())
-            adapter.clear()
-            adapter.addAll(results.map { "${it.title} — ${settingsCategoryTitle(it.category)}" })
-            empty.visibility = if (results.isEmpty() && input.text.isNotBlank()) View.VISIBLE else View.GONE
-        }
-        input.addTextChangedListener(object : android.text.TextWatcher {
-            override fun afterTextChanged(s: android.text.Editable?) = update()
+        addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) = onSettingsSearchChanged(this@apply)
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
         })
-        val body = column().apply {
-            setPadding(dp(20), dp(8), dp(20), 0)
-            addView(input)
-            addView(empty)
-            // Short screens keep the results above the keyboard.
-            addView(list, LinearLayout.LayoutParams(-1, dp(if (resources.configuration.screenHeightDp < 600) 160 else 320)))
+        if (settingsSearchRestoreFocus) {
+            settingsSearchRestoreFocus = false
+            post {
+                if (settingsSearchBox !== this) return@post
+                requestFocus()
+                setSearchKeyboard(this, true)
+                showSettingsSearchResults()
+            }
         }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(getString(R.string.settings_search))
-            .setView(body)
-            .setNegativeButton(getString(R.string.cancel), null)
-            .show()
-        list.setOnItemClickListener { _, _, position, _ ->
-            dialog.dismiss()
-            openSearchResult(results[position])
+    }
+
+    private fun onSettingsSearchChanged(box: EditText) {
+        if (box !== settingsSearchBox) return
+        settingsSearchQuery = box.text.toString()
+        if (settingsSearchQuery.isEmpty()) {
+            // 下次搜索时重建索引，让索引跟随期间变更过的设置项。
+            settingsSearchIndex = null
+            settingsSearchPopup?.dismiss()
+            return
         }
-        input.requestFocus()
+        if (settingsSearchIndex != null) {
+            showSettingsSearchResults()
+            return
+        }
+        if (settingsSearchIndexing) return
+        settingsSearchIndexing = true
+        // 不能在文本监听器里直接建索引：建索引会替换当前输入框。
+        handler.post {
+            settingsSearchIndexing = false
+            if (page != "settings" || settingsSearchQuery.isEmpty() || settingsSearchIndex != null) return@post
+            settingsSearchRestoreFocus = true
+            settingsSearchIndex = buildSettingsSearchIndex()
+        }
+    }
+
+    private fun settingsSearchResults(): List<SettingsSearchResult> =
+        settingsSearchIndex?.let { searchSettings(it, settingsSearchQuery) }.orEmpty()
+
+    private fun showSettingsSearchResults() {
+        val box = settingsSearchBox ?: return
+        if (settingsSearchIndex == null || settingsSearchQuery.isBlank() || !box.isAttachedToWindow) {
+            settingsSearchPopup?.dismiss()
+            return
+        }
+        val results = settingsSearchResults()
+        val list = column().apply { setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        if (results.isEmpty()) {
+            list.addView(label(getString(R.string.settings_search_empty), 15, MUTED).apply {
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+            })
+        }
+        results.forEach { list.addView(settingsSearchRow(it)) }
+        val width = box.width.coerceAtLeast(dp(320))
+        // 矮屏上让结果列表保持在键盘上方。
+        val maxHeight = dp(if (resources.configuration.screenHeightDp < 600) 180 else 360)
+        val existing = settingsSearchPopup?.takeIf { it.isShowing }
+        val scroll = (existing?.contentView as? ScrollView) ?: ScrollView(this)
+        scroll.removeAllViews()
+        scroll.addView(list)
+        scroll.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST))
+        val height = scroll.measuredHeight.coerceIn(1, maxHeight)
+        if (existing != null) {
+            existing.update(box, 0, dp(6), width, height)
+            return
+        }
+        settingsSearchPopup = PopupWindow(scroll, width, height, false).apply {
+            setBackgroundDrawable(rounded(SURFACE, BORDER))
+            // API17 适配：PopupWindow.setElevation 是 API 21+，走 UiCompat（作者：TRAE AI）。
+            UiCompat.setPopupElevation(this, dp(8).toFloat())
+            // 点击其他位置关闭列表但保留查询；点回搜索框重新打开。
+            isOutsideTouchable = true
+            inputMethodMode = PopupWindow.INPUT_METHOD_NEEDED
+            // API17 适配：showAsDropDown(view,x,y,gravity) 是 API 19+，低版本用调用方换算的 x 做 END 对齐（作者：TRAE AI）。
+            UiCompat.showAsDropDown(this, box, 0, dp(6), Gravity.END, box.width - width)
+        }
+    }
+
+    private fun settingsSearchRow(result: SettingsSearchResult): View = column().apply {
+        val category = settingsCategoryTitle(result.category)
+        isClickable = true
+        isFocusable = true
+        contentDescription = "${result.title}, $category"
+        // API17 适配：RippleDrawable 是 API 21+、foreground 是 API 23+，走 UiCompat（作者：TRAE AI）。
+        UiCompat.setForeground(this, android.graphics.drawable.LayerDrawable(arrayOf(
+            UiCompat.ripple(RIPPLE, null, null), focusRing(12))))
+        minimumHeight = dp(56)
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(12), dp(8), dp(12), dp(8))
+        addView(label(result.title, 17, TEXT, true))
+        addView(label(category, 13, MUTED))
+        setOnClickListener { openSearchResult(result) }
+    }
+
+    private fun closeSettingsSearch() {
+        val box = settingsSearchBox
+        setSearchKeyboard(box, false)
+        clearSettingsSearchState()
+        box?.setText("")
+        box?.clearFocus()
+        box?.isFocusableInTouchMode = false
+    }
+
+    private fun clearSettingsSearchState() {
+        settingsSearchQuery = ""
+        settingsSearchIndex = null
+        settingsSearchRestoreFocus = false
+        settingsSearchPopup?.dismiss()
+    }
+
+    private fun setSearchKeyboard(view: View?, show: Boolean) {
+        view ?: return
+        val keyboard = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        if (show) keyboard.showSoftInput(view, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        else keyboard.hideSoftInputFromWindow(view.windowToken, 0)
     }
 
     private fun advancedSettings(content: LinearLayout) {
@@ -1174,7 +1818,7 @@ class DiPlayActivity : ComponentActivity() {
                 setPadding(0, dp(6), 0, 0)
             })
         }
-        content.addView(caution, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(18) })
+        content.addView(caution, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
         renderSections(content, SettingsInformationArchitecture.sectionsByCategory.getValue(SettingsCategory.ADVANCED))
         advancedVehicleDataSettings(content)
     }
@@ -1209,9 +1853,10 @@ class DiPlayActivity : ComponentActivity() {
     private fun allSettingsSections(content: LinearLayout) {
         filteredSection(content, SettingsSection.CARPLAY_CONTROLS,
             getString(R.string.carplay_controls), R.drawable.ic_dp_controls) { card ->
-            val gestureFingers = listOf(2, 3, 4)
+            // main #487：新增 Off（0）选项，禁用下滑打开设置的手势（作者：TRAE AI）。
+            val gestureFingers = listOf(0, 2, 3, 4)
             choice(card, getString(R.string.settings_gesture_fingers_label),
-                gestureFingers.map { getString(R.string.settings_gesture_fingers_option, it) },
+                gestureFingers.map { if (it == 0) getString(R.string.settings_gesture_disabled) else getString(R.string.settings_gesture_fingers_option, it) },
                 gestureFingers.indexOf(AirPlayPersistence.loadSettingsGestureFingers(this)).coerceAtLeast(0),
                 reconnects = false) {
                 AirPlayPersistence.saveSettingsGestureFingers(this, gestureFingers[it])
@@ -1238,10 +1883,23 @@ class DiPlayActivity : ComponentActivity() {
             card.addView(button(getString(R.string.choose_save_location), false) { chooseReportDestination() }, matchButton(10, 60))
             val destination = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) getString(R.string.reports_save_to_downloads_diplay) else getString(R.string.choose_where_to_save_your_report)
             card.addView(label(destination + getString(R.string.nothing_is_sent_automatically_protocol_payloads_and_creden), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
+            // main #496：FPS 计数器，仅保存设置，回到投屏画面时生效，无需重连。
+            toggle(card, getString(R.string.settings_fps_counter), getString(R.string.settings_fps_counter_description),
+                AirPlayPersistence.loadFpsCounter(this)) { AirPlayPersistence.saveFpsCounter(this, it) }
         }
         filteredSection(content, SettingsSection.AUTOMATIC_CONNECTION,
             getString(R.string.automatic_connection), R.drawable.ic_dp_automation) { card ->
             toggle(card, getString(R.string.connect_when_diplay_opens), getString(R.string.default_connection_description), DiPlayPreferences.autoConnect(this)) { DiPlayPreferences.saveAutoConnect(this, it) }
+            // main #439：已选 iPhone 蓝牙重连时自动唤醒并连接（API 17-30 无需运行时权限）。
+            toggle(card, getString(R.string.connect_when_iphone_bluetooth_connects),
+                getString(R.string.connect_when_iphone_bluetooth_connects_description),
+                DiPlayPreferences.connectOnPhoneBluetooth(this)) { enabled ->
+                DiPlayPreferences.saveConnectOnPhoneBluetooth(this, enabled)
+                if (enabled && Build.VERSION.SDK_INT >= 31 &&
+                    !PermissionCompat.hasPermission(this, Manifest.permission.BLUETOOTH_CONNECT)) {
+                    bluetoothAutoConnectPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                } else if (enabled && DiPlayPreferences.phoneAddress(this) == null) choosePhone()
+            }
             val connectionModes = DefaultConnectionMode.entries
             choice(card, getString(R.string.default_connection_mode), listOf(
                 getString(R.string.default_connection_last_used),
@@ -1286,11 +1944,32 @@ class DiPlayActivity : ComponentActivity() {
                     setPadding(0, dp(4), 0, dp(8))
                 })
             }
+            // 开机自启 ADB 修复入口（#441）：一次性豁免后台限制，让 BOOT_COMPLETED 广播可达。
+            card.addView(button(getString(R.string.boot_start_repair), false) { repairBootStart() }, matchButton(6, 56))
+            card.addView(label(getString(R.string.boot_start_repair_desc), 14, MUTED).apply { setPadding(0, dp(8), 0, dp(6)) })
             card.addView(button("${getString(R.string.choose_iphone_prefix)}${DiPlayPreferences.phoneName(this)}", false) { choosePhone() }, matchButton(12, 60))
         }
         if (settingsSectionFilter?.contains(SettingsSection.BYD_ADB) != false) bydAdbSettings(content)
         filteredSection(content, SettingsSection.DISPLAY_AND_PERFORMANCE,
             getString(R.string.display_and_performance), R.drawable.ic_dp_display) { card ->
+            // main B8：应用外观三态（深/浅/跟随 CarPlay 夜间模式）（作者：TRAE AI）。
+            val appearances = AppAppearance.entries
+            choice(
+                card,
+                getString(R.string.settings_app_appearance),
+                listOf(
+                    getString(R.string.settings_app_appearance_dark),
+                    getString(R.string.settings_app_appearance_light),
+                    getString(R.string.settings_app_appearance_auto),
+                ),
+                appearances.indexOf(AirPlayPersistence.loadAppAppearance(this)),
+                reconnects = false,
+            ) { index ->
+                AirPlayPersistence.saveAppAppearance(this, appearances[index])
+                rememberLaunchAppearance()
+                handler.post { checkForAppearanceChange() }
+            }
+            card.addView(label(getString(R.string.settings_app_appearance_description), 14, MUTED))
             val nightModes = CarPlayNightMode.entries
             val nightMode = AirPlayPersistence.loadCarPlayNightMode(this)
             val ambientControls = column().apply {
@@ -1310,8 +1989,13 @@ class DiPlayActivity : ComponentActivity() {
                 ambientControls.visibility = if (nightModes[index] == CarPlayNightMode.AMBIENT) View.VISIBLE else View.GONE
                 scheduleControls.visibility = if (nightModes[index] == CarPlayNightMode.SCHEDULE) View.VISIBLE else View.GONE
             }
-            card.addView(label(getString(R.string.carplay_night_hint), 14, MUTED))
-            card.addView(label(getString(R.string.carplay_night_time_note), 14, MUTED).apply {
+            // main 9919585e：两句提示合并为一行；中文两句间不加空格（作者：TRAE AI）。
+            // API17 适配：Configuration.locales 是 API 24+，低版本走 locale（作者：TRAE AI）。
+            val locale = if (Build.VERSION.SDK_INT >= 24) resources.configuration.locales[0]
+                else @Suppress("DEPRECATION") resources.configuration.locale
+            val sentenceSeparator = if (locale.language == "zh") "" else " "
+            card.addView(label(getString(R.string.carplay_night_hint) + sentenceSeparator +
+                getString(R.string.carplay_night_time_note), 14, MUTED).apply {
                 setPadding(0, 0, 0, dp(18))
             })
             ambientControls.addView(label(getString(R.string.carplay_night_ambient_hint), 14, MUTED).apply {
@@ -1357,6 +2041,12 @@ class DiPlayActivity : ComponentActivity() {
                 InterfaceSize.showPicker(this)
             }, matchButton(12, 60))
             card.addView(label(getString(R.string.settings_interface_size_hint), 14, MUTED))
+            // main B6：横屏强制完整布局开关（仅自然紧凑布局时展示，作者：TRAE AI）。
+            if (!isNaturallyExpandedSettingsLayout) toggle(card, getString(R.string.settings_force_full_settings),
+                getString(R.string.settings_force_full_settings_hint), SettingsLayoutPreferences.forceFull(this)) {
+                SettingsLayoutPreferences.saveForceFull(this, it)
+                render()
+            }
         }
         filteredSection(content, SettingsSection.EXPERIMENTAL_DISPLAY,
             getString(R.string.settings_experimental_display), R.drawable.ic_dp_display) { card ->
@@ -1395,6 +2085,20 @@ class DiPlayActivity : ComponentActivity() {
                 AirPlayPersistence.saveSmoothVideo(this, it)
                 reconnectIfRunning()
             }
+            // main #496：直接视频输出（实验性），立即重连并重建视频视图。
+            toggle(card, getString(R.string.settings_direct_video_output),
+                getString(R.string.settings_direct_video_output_description),
+                AirPlayPersistence.loadDirectVideoOutput(this)) {
+                AirPlayPersistence.saveDirectVideoOutput(this, it)
+                reconnectIfRunning()
+            }
+            // main #496：低延迟解码（实验性），下次连接时生效。
+            toggle(card, getString(R.string.settings_low_latency_decoder),
+                getString(R.string.settings_low_latency_decoder_description),
+                AirPlayPersistence.loadLowLatencyDecoder(this)) {
+                AirPlayPersistence.saveLowLatencyDecoder(this, it)
+                markReconnectNeeded()
+            }
             toggle(card, getString(R.string.call_echo_cancellation), getString(R.string.call_echo_cancellation_description),
                 AirPlayPersistence.loadCallEchoCancellation(this)) {
                 AirPlayPersistence.saveCallEchoCancellation(this, it)
@@ -1419,6 +2123,19 @@ class DiPlayActivity : ComponentActivity() {
                 AirPlayPersistence.saveMainBufferedAudio(this, it)
                 reconnectIfRunning()
             }
+            // main #432：CarPlay 音频走车机蓝牙（实验性，默认关）。
+            toggle(card, getString(R.string.settings_car_bluetooth_audio), getString(R.string.settings_car_bluetooth_audio_description),
+                AirPlayPersistence.loadCarBluetoothAudio(this)) {
+                AirPlayPersistence.saveCarBluetoothAudio(this, it)
+                reconnectIfRunning()
+            }
+        }
+        // main #345：BYD 氛围灯音乐跟随入口（作者：TRAE AI）
+        filteredSection(content, SettingsSection.AMBIENT_LIGHTING,
+            getString(R.string.settings_ambient_title)) { card ->
+            card.addView(button(ambientConfigurationLabel(AmbientMusicSettings.load(this)), false) {
+                showAmbientConfiguration()
+            }, matchButton(0, 60))
         }
         filteredSection(content, SettingsSection.CAR_BUTTON,
             getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card) }
@@ -1431,6 +2148,11 @@ class DiPlayActivity : ComponentActivity() {
                 bufferPresets.indexOf(AirPlayPersistence.loadMediaBufferMillis(this)).coerceAtLeast(0)) {
                 AirPlayPersistence.saveMediaBufferMillis(this, bufferPresets[it])
             }
+        }
+        // main #344：导航播报方向盘音量入口（作者：TRAE AI）
+        filteredSection(content, SettingsSection.NAVIGATION_WHEEL,
+            getString(R.string.settings_navigation_wheel_volume), R.drawable.ic_dp_audio) { card ->
+            navigationWheelControls(card)
         }
         filteredSection(content, SettingsSection.LOCATION,
             getString(R.string.location), R.drawable.ic_dp_navigation) { card ->
@@ -1448,12 +2170,21 @@ class DiPlayActivity : ComponentActivity() {
                 ClusterActivityOutput.stopForSettings()
                 render()
             }
+            // main #348：Platform-21 独立仪表任务路由；依赖 API 21，低版本隐藏入口（作者：TRAE AI）
+            if (android.os.Build.VERSION.SDK_INT >= 21) {
+                reconnectingToggle(card, getString(R.string.platform21_cluster_mode),
+                    getString(R.string.platform21_cluster_description), AirPlayPersistence.loadLegacyClusterEnabled(this)) {
+                    AirPlayPersistence.saveLegacyClusterEnabled(this, it)
+                    ClusterActivityOutput.stopForSettings()
+                    render()
+                }
+            }
             val adbCluster = AdbClusterRouter.enabled(this)
             if (adbCluster) {
                 card.addView(button(getString(R.string.adb_cluster_authorize), false) { authorizeClusterRouting() }, matchButton(10, 56))
-                card.addView(button(getString(R.string.adb_cluster_open), false) { ClusterActivityOutput.retry() }, matchButton(10, 56))
+                card.addView(button(getString(R.string.adb_cluster_open), false) { ClusterActivityOutput.retry(force = true) }, matchButton(10, 56))
             }
-            if (adbCluster && com.shilapi.xcertplay.hud.BydOemClusterNavi.applicable(this)) {
+            if (adbCluster && !AirPlayPersistence.loadLegacyClusterEnabled(this) && com.shilapi.xcertplay.hud.BydOemClusterNavi.applicable(this)) {
                 val holds = com.shilapi.xcertplay.hud.BydOemClusterHold.entries
                 card.addView(label(getString(R.string.oem_cluster_map_description), 14, MUTED))
                 choice(card, getString(R.string.oem_cluster_map), holds.map { it.localizedLabel(this) },
@@ -1612,19 +2343,25 @@ class DiPlayActivity : ComponentActivity() {
                             }
                         }
                         if (!diLink4 || AirPlayPersistence.loadClusterSafeAreaRect(this) == null) {
-                            val across = CarPlayClusterDisplay.horizontalSteps.toList()
-                            choice(card, getString(if (turnCard) R.string.turn_card_horizontal else R.string.car_marker_horizontal), across.map { markerStepLabel(it, getString(R.string.marker_left), getString(R.string.marker_right)) },
-                                across.indexOf(AirPlayPersistence.loadClusterMarkerHorizontalStep(this)).coerceAtLeast(0)) {
-                                AirPlayPersistence.saveClusterMarkerHorizontalStep(this, across[it])
-                            }
-                            val upDown = CarPlayClusterDisplay.verticalSteps.toList()
-                            choice(card, getString(if (turnCard) R.string.turn_card_vertical else R.string.car_marker_vertical), upDown.map { markerStepLabel(it, getString(R.string.marker_up), getString(R.string.marker_down)) },
-                                upDown.indexOf(AirPlayPersistence.loadClusterMarkerVerticalStep(this)).coerceAtLeast(0)) {
-                                AirPlayPersistence.saveClusterMarkerVerticalStep(this, upDown[it])
-                            }
+                            // main #494：marker 位置改为 1% 步进滑块；旧 10% 档位值自动迁移到以
+                            // 滑块中心（50/45）为基准的 1% 网格上（作者：TRAE AI）。
+                            card.addView(overlaySliderRow(
+                                getString(if (turnCard) R.string.turn_card_horizontal else R.string.car_marker_horizontal),
+                                CarPlayClusterDisplay.markerXPercents,
+                                AirPlayPersistence.loadClusterMarkerXPercent(this),
+                            ) { it -> overlayOffsetLabel(it, getString(R.string.marker_left), getString(R.string.marker_right), 50) }
+                                .also { it.onSave = { v -> AirPlayPersistence.saveClusterMarkerXPercent(this, v) } }
+                                .also { it.onCommit = { markReconnectNeeded() } })
+                            card.addView(overlaySliderRow(
+                                getString(if (turnCard) R.string.turn_card_vertical else R.string.car_marker_vertical),
+                                CarPlayClusterDisplay.markerYPercents,
+                                AirPlayPersistence.loadClusterMarkerYPercent(this),
+                            ) { it -> overlayOffsetLabel(it, getString(R.string.marker_up), getString(R.string.marker_down), 45) }
+                                .also { it.onSave = { v -> AirPlayPersistence.saveClusterMarkerYPercent(this, v) } }
+                                .also { it.onCommit = { markReconnectNeeded() } })
                             card.addView(button(getString(if (turnCard) R.string.reset_turn_card_to_centre else R.string.reset_car_marker_to_centre), false) {
-                                AirPlayPersistence.saveClusterMarkerHorizontalStep(this, 0)
-                                AirPlayPersistence.saveClusterMarkerVerticalStep(this, 0)
+                                AirPlayPersistence.saveClusterMarkerXPercent(this, 50)
+                                AirPlayPersistence.saveClusterMarkerYPercent(this, 45)
                                 render()
                                 markReconnectNeeded()
                             }, matchButton(10, 56))
@@ -1659,10 +2396,7 @@ class DiPlayActivity : ComponentActivity() {
             card.addView(button(getString(R.string.bluetooth_settings), false) { openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }, matchButton(10, 60))
             card.addView(button(getString(R.string.wireless_connection_help), false) { wirelessHelp() }, matchButton(10, 60))
         }
-        filteredSection(content, SettingsSection.ABOUT,
-            getString(R.string.about), R.drawable.ic_dp_about) { card ->
-            card.addView(button(getString(R.string.about_diplay), false) { page = "about"; render() }, matchButton(0, 60))
-        }
+        // main #422：LANGUAGE 卡片挂到独立分类页，经 renderSections 过滤渲染（作者：TRAE AI）。
         languageSettings(content)
     }
 
@@ -1671,11 +2405,159 @@ class DiPlayActivity : ComponentActivity() {
         content.addView(label(getString(R.string.carplay_at_home_in_your_car), 20, MUTED).apply { setPadding(0, dp(8), 0, dp(24)) })
         section(content, "${getString(R.string.about_public_preview_prefix)}${version()}") { card ->
             card.addView(label(getString(R.string.an_independent_carplay_receiver_for_android_head_units_wir), 17, TEXT))
+            // main B5：about 页应用内更新行（作者：TRAE AI）。
+            card.addView(updateRow())
         }
         section(content, getString(R.string.made_possible_by_open_source)) { card ->
             card.addView(label(getString(R.string.receiver_based_on_xcertplay_licensed_under_gpl_3_0_diplay), 16, MUTED))
         }
     }
+
+    // ===== main B5：应用内更新（检查/下载/校验/安装）（作者：TRAE AI）=====
+
+    private enum class UpdateStage { IDLE, CHECKING, AVAILABLE, DOWNLOADING, VERIFYING, READY, FAILED }
+
+    private fun updateRow(): View {
+        val container = column().apply { setPadding(0, dp(12), 0, 0) }
+        updateMessage?.let { container.addView(label(it, 14, MUTED)) }
+        when (updateStage) {
+            UpdateStage.IDLE, UpdateStage.FAILED ->
+                container.addView(button(getString(R.string.update_check), false) { checkForUpdates() },
+                    matchButton(if (updateMessage == null) 0 else 10, 60))
+            UpdateStage.CHECKING -> container.addView(label(getString(R.string.update_checking), 14, MUTED))
+            UpdateStage.AVAILABLE -> container.addView(
+                button(getString(R.string.update_download, updateRelease?.tagName.orEmpty()), true) { downloadUpdate() },
+                matchButton(10, 60))
+            UpdateStage.DOWNLOADING -> container.addView(label(getString(R.string.update_downloading, updateProgress ?: 0), 14, MUTED))
+            UpdateStage.VERIFYING -> container.addView(label(getString(R.string.update_verifying), 14, MUTED))
+            UpdateStage.READY -> container.addView(
+                button(getString(R.string.update_install, updateRelease?.tagName.orEmpty()), true) { installUpdate() },
+                matchButton(10, 60))
+        }
+        return container
+    }
+
+    private fun checkForUpdates() {
+        updateStage = UpdateStage.CHECKING
+        updateMessage = null
+        val generation = ++updateGeneration
+        render()
+        Thread({
+            val outcome = runCatching { latestRelease() }
+            runOnUiThread {
+                if (generation != updateGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                outcome.fold(
+                    { release ->
+                        if (release == null) {
+                            updateMessage = getString(R.string.update_up_to_date)
+                            updateStage = UpdateStage.IDLE
+                        } else {
+                            updateRelease = release
+                            updateStage = UpdateStage.AVAILABLE
+                        }
+                        render()
+                    },
+                    { failure ->
+                        Log.w("DiPlay-Update", "update check failed", failure)
+                        updateMessage = failure.message ?: getString(R.string.update_failed)
+                        updateStage = UpdateStage.FAILED
+                        render()
+                    },
+                )
+            }
+        }, "diplay-update-check").start()
+    }
+
+    private fun latestRelease(): UpdateRelease? {
+        val json = UpdateClient.fetchText(
+            UpdateClient.RELEASES_URL,
+            "application/vnd.github+json",
+            userAgent(),
+        )
+        val release = UpdateCatalog.parse(json) ?: return null
+        return release.takeIf { UpdateVersion.isNewer(it.tagName, version()) }
+    }
+
+    private fun downloadUpdate() {
+        val release = updateRelease ?: return
+        updateStage = UpdateStage.DOWNLOADING
+        updateProgress = null
+        updateMessage = null
+        val generation = ++updateGeneration
+        render()
+        Thread({
+            // 每次尝试独占自己的文件目录，跨 Activity 重建亦然。
+            val directory = File(cacheDir, "update/${java.util.UUID.randomUUID()}")
+            val outcome = runCatching {
+                val checksumsFile = File(directory, UpdateCatalog.CHECKSUMS_FILE)
+                UpdateClient.download(release.checksumsUrl, checksumsFile) { _, _ -> }
+                val apkFile = File(directory, release.apkName)
+                UpdateClient.download(release.apkUrl, apkFile) { written, total ->
+                    val percent = total?.takeIf { it > 0 }?.let { (written * 100 / it).toInt() } ?: return@download
+                    if (percent != updateProgress) {
+                        updateProgress = percent
+                        refreshUpdateUi(generation)
+                    }
+                }
+                updateStage = UpdateStage.VERIFYING
+                refreshUpdateUi(generation)
+                val expected = UpdateChecksums.parse(checksumsFile.readText())
+                val actual = UpdateChecksums.sha256Hex(apkFile)
+                if (!UpdateChecksums.matches(expected, release.apkName, actual)) {
+                    throw IOException("Checksum mismatch for ${release.apkName}")
+                }
+                apkFile
+            }.onFailure { directory.deleteRecursively() }
+            runOnUiThread {
+                if (generation != updateGeneration || isFinishing || isDestroyed) {
+                    directory.deleteRecursively()
+                    return@runOnUiThread
+                }
+                outcome.fold(
+                    { file ->
+                        updateFile = file
+                        updateStage = UpdateStage.READY
+                        render()
+                    },
+                    { failure ->
+                        Log.w("DiPlay-Update", "update download failed", failure)
+                        updateMessage = failure.message ?: getString(R.string.update_failed)
+                        updateStage = UpdateStage.FAILED
+                        render()
+                    },
+                )
+            }
+        }, "diplay-update-download").start()
+    }
+
+    private fun installUpdate() {
+        val file = updateFile ?: return
+        // Oreo 之前由安装器处理全局未知来源设置。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()) {
+            installApk(file)
+        } else {
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+        }
+    }
+
+    private fun installApk(file: File) {
+        val uri = FileProvider.getUriForFile(this, "$packageName.update-apks", file)
+        startActivity(
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            },
+        )
+    }
+
+    private fun refreshUpdateUi(generation: Int) {
+        runOnUiThread {
+            if (generation != updateGeneration || isFinishing || isDestroyed || page != "about") return@runOnUiThread
+            render()
+        }
+    }
+
+    private fun userAgent() = "DiPlay/${version()}"
 
     // An opted-in connection prepares the hotspot in the controller instead of stopping at this reminder.
     private fun carHotspotOff(): Boolean =
@@ -1855,6 +2737,31 @@ class DiPlayActivity : ComponentActivity() {
             .setNegativeButton(getString(R.string.cancel), null).show()
     }
 
+    // 开机自启 ADB 修复（#441）：后台线程执行阻塞的 ADB shell，结果回到主线程弹窗展示。
+    private fun repairBootStart() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.boot_start_repair))
+            .setMessage(getString(R.string.boot_start_repair_running))
+            .setNegativeButton(getString(R.string.common_cancel), null)
+            .show()
+        Thread({
+            val result = runCatching {
+                com.shilapi.xcertplay.hud.BydBootStartRepair.apply(applicationContext, packageName)
+            }.getOrNull()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                dialog.dismiss()
+                val text = result?.lines?.joinToString("\n")?.let { getString(R.string.boot_start_repair_result, it) }
+                    ?: getString(R.string.adb_check_failed)
+                AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.boot_start_repair))
+                    .setMessage(text)
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show()
+            }
+        }, "diplay-boot-repair").start()
+    }
+
     // BYD maps the AOSP tether action to its own hotspot screen; other firmware falls back to Wi-Fi settings.
     // BYD shows that screen as a dialog and closes it unless its own settings or the car home screen is on top,
     // so the home screen goes first.
@@ -1923,7 +2830,7 @@ class DiPlayActivity : ComponentActivity() {
                     pendingCarHotspotSetup = true
                     render()
                 } else if (candidate == WirelessHotspotMode.EXISTING_WIFI) {
-                    askHotspotCredentials(existingWifi = true) { ssid, password ->
+                    askHotspotCredentials(existingWifi = true) { ssid, password, _ ->
                         AirPlayPersistence.saveExistingWifiCredentials(this, ssid, password)
                         pendingCarHotspotSetup = false
                         applyWirelessLink(candidate)
@@ -1940,8 +2847,8 @@ class DiPlayActivity : ComponentActivity() {
             parent.addView(label(getString(R.string.s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele), 16, MUTED).apply { setPadding(0, dp(8), 0, dp(12)) })
             parent.addView(button(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() }, matchButton(0, 60))
             parent.addView(button(if (pendingCarHotspotSetup) getString(R.string.save_hotspot_details_and_use_this_mode) else "${getString(R.string.edit_saved_hotspot_prefix)}${storedSsid()}", false) {
-                askHotspotCredentials { ssid, password ->
-                    saveHotspotCredentials(ssid, password)
+                askHotspotCredentials { ssid, password, security ->
+                    saveHotspotCredentials(ssid, password, security)
                     pendingCarHotspotSetup = false
                     applyWirelessLink(WirelessHotspotMode.MANUAL)
                 }
@@ -1956,7 +2863,7 @@ class DiPlayActivity : ComponentActivity() {
             parent.addView(label(getString(R.string.existing_wifi_instructions), 16, MUTED))
             parent.addView(button(getString(R.string.open_car_wi_fi_settings), false) { openCarClientWifiSettings() }, matchButton(12, 60))
             parent.addView(button(getString(R.string.existing_wifi_details), false) {
-                askHotspotCredentials(existingWifi = true) { ssid, password ->
+                askHotspotCredentials(existingWifi = true) { ssid, password, _ ->
                     AirPlayPersistence.saveExistingWifiCredentials(this, ssid, password)
                     toast(getString(R.string.saved_for_your_next_connection))
                 }
@@ -1970,6 +2877,10 @@ class DiPlayActivity : ComponentActivity() {
 
     private fun wifiDirectChannelLabel(channel: Int): String = if (channel == WifiP2pChannels.AUTO) {
         getString(R.string.auto)
+    } else if (channel == WifiP2pChannels.AUTO_5_GHZ || channel == WifiP2pChannels.AUTO_2_4_GHZ) {
+        // main #432：Auto 限定频段的选择项。
+        getString(R.string.settings_wifi_direct_auto_band,
+            getString(if (channel == WifiP2pChannels.AUTO_5_GHZ) R.string.s_5_ghz else R.string.s_2_4_ghz))
     } else {
         getString(R.string.wifi_direct_channel_choice, channel,
             getString(if (channel < 36) R.string.s_2_4_ghz else R.string.s_5_ghz))
@@ -1981,7 +2892,7 @@ class DiPlayActivity : ComponentActivity() {
         }
         val control = button(summary(AirPlayPersistence.loadWifiP2pPreferredChannel(this)), false) {}
         control.setOnClickListener {
-            val choices = listOf(WifiP2pChannels.AUTO) + WifiP2pChannels.channels
+            val choices = listOf(WifiP2pChannels.AUTO) + WifiP2pChannels.bandChoices + WifiP2pChannels.channels
             val current = AirPlayPersistence.loadWifiP2pPreferredChannel(this)
             var selection = current
             AlertDialog.Builder(this).setTitle(R.string.wifi_direct_channel_title)
@@ -1999,7 +2910,11 @@ class DiPlayActivity : ComponentActivity() {
         }
         parent.addView(control, matchButton(12, 60))
         parent.addView(label(getString(R.string.wifi_direct_channel_description), 15, MUTED).apply {
-            setPadding(0, dp(6), 0, dp(12))
+            setPadding(0, dp(6), 0, dp(6))
+        })
+        // main #432：说明频段选择只约束 Auto，手动信道仍按所选信道固定。
+        parent.addView(label(getString(R.string.settings_wifi_direct_band_note), 15, MUTED).apply {
+            setPadding(0, 0, 0, dp(12))
         })
     }
 
@@ -2081,16 +2996,17 @@ class DiPlayActivity : ComponentActivity() {
     private fun hotspotError(ssid: String, password: String) =
         com.shilapi.xcertplay.orchestration.ManualHotspotValidation.error(ssid, password)?.let { getString(it.messageResource()) }
 
-    private fun saveHotspotCredentials(ssid: String, password: String) {
+    // main 4aee3f80：安全模式由用户在对话框中显式选择并持久化（车机热点可能是 WPA3），保存后提示重连。
+    private fun saveHotspotCredentials(ssid: String, password: String, security: ManualHotspotSecurity) {
         AirPlayPersistence.saveManualHotspotSsid(this, ssid)
         AirPlayPersistence.saveManualHotspotPassphrase(this, password)
-        AirPlayPersistence.saveManualHotspotSecurity(this,
-            com.shilapi.xcertplay.orchestration.ManualHotspotValidation.securityFor(password))
+        AirPlayPersistence.saveManualHotspotSecurity(this, security)
         AirPlayPersistence.saveManualHotspotBand(this, com.shilapi.xcertplay.orchestration.ManualHotspotBand.AUTO)
         AirPlayPersistence.saveManualHotspotChannel(this, 0)
+        markReconnectNeeded()
     }
 
-    private fun askHotspotCredentials(existingWifi: Boolean = false, done: (String, String) -> Unit) {
+    private fun askHotspotCredentials(existingWifi: Boolean = false, done: (String, String, ManualHotspotSecurity) -> Unit) {
         val fields = column().apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }
         fields.addView(label(getString(if (existingWifi) R.string.existing_wifi_instructions else R.string.copy_these_from_the_car_s_hotspot_settings_use_5_ghz_if_av), 16, MUTED))
         val ssid = EditText(this).apply {
@@ -2126,6 +3042,39 @@ class DiPlayActivity : ComponentActivity() {
                 password.setSelection(password.text.length)
             }
         })
+        // main 4aee3f80：车机热点可能是 WPA3，安全模式需用户显式选择而非从密码推断。
+        val securityModes = listOf(ManualHotspotSecurity.WPA2, ManualHotspotSecurity.WPA3_TRANSITION, ManualHotspotSecurity.WPA3)
+        val securityTitles = listOf(getString(R.string.wpa2), getString(R.string.wpa3_transition), getString(R.string.wpa3))
+        var protectedSecurity = AirPlayPersistence.loadManualHotspotSecurity(this)
+            .takeIf { it in securityModes } ?: ManualHotspotSecurity.WPA2
+        if (!existingWifi) {
+            lateinit var securityControl: Button
+            fun updateSecurityControl() {
+                val hasPassword = password.text.isNotEmpty()
+                val title = if (hasPassword) securityTitles[securityModes.indexOf(protectedSecurity)] else getString(R.string.open)
+                securityControl.text = "${getString(R.string.security)} · $title"
+                securityControl.isEnabled = hasPassword
+            }
+            securityControl = button("", false) {
+                var pendingSecurity = protectedSecurity
+                AlertDialog.Builder(this).setTitle(getString(R.string.security))
+                    .setSingleChoiceItems(securityTitles.toTypedArray(), securityModes.indexOf(protectedSecurity)) { _, index ->
+                        pendingSecurity = securityModes[index]
+                    }
+                    .setPositiveButton(getString(R.string.save)) { _, _ ->
+                        protectedSecurity = pendingSecurity
+                        updateSecurityControl()
+                    }.setNegativeButton(getString(R.string.cancel), null).show()
+            }
+            updateSecurityControl()
+            password.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(s: android.text.Editable?) = updateSecurityControl()
+            })
+            fields.addView(securityControl, matchButton(12, 60))
+            fields.addView(label(getString(R.string.saved_for_your_next_connection), 15, MUTED))
+        }
         val error = label("", 14, WARNING)
         UiCompat.setAccessibilityLiveRegion(error, View.ACCESSIBILITY_LIVE_REGION_POLITE)
         fields.addView(error)
@@ -2141,7 +3090,11 @@ class DiPlayActivity : ComponentActivity() {
                 val secret = password.text.toString()
                 val problem = hotspotError(name, secret)
                 if (problem != null) error.text = problem
-                else { hideKeyboard(); dialog.dismiss(); done(name, secret) }
+                else {
+                    // 密码为空视为开放网络；否则使用用户显式选择的安全模式。
+                    val security = if (secret.isEmpty()) ManualHotspotSecurity.OPEN else protectedSecurity
+                    hideKeyboard(); dialog.dismiss(); done(name, secret, security)
+                }
             }
         }
         dialog.show()
@@ -2166,6 +3119,8 @@ class DiPlayActivity : ComponentActivity() {
         private val describe: (Int) -> String,
     ) : LinearLayout(context) {
         var onSave: (Int) -> Unit = {}
+        // main #494：手指离开滑块时触发一次，用于需要重连的保存（作者：TRAE AI）。
+        var onCommit: () -> Unit = {}
         val slider: SeekBar
 
         init {
@@ -2178,7 +3133,8 @@ class DiPlayActivity : ComponentActivity() {
             slider = SeekBar(context).apply {
                 max = steps.lastIndex
                 progress = steps.indexOf(current).coerceIn(steps.indices)
-                minHeight = dp(44)
+                // main d729cd89：ProgressBar.setMinHeight 需要 API 29；低版本改用 View.minimumHeight 保证触控目标高度。
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) minHeight = dp(44) else minimumHeight = dp(44)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                         val value = steps[progress.coerceIn(steps.indices)]
@@ -2186,7 +3142,7 @@ class DiPlayActivity : ComponentActivity() {
                         if (fromUser) onSave(value)
                     }
                     override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-                    override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+                    override fun onStopTrackingTouch(seekBar: SeekBar?) { onCommit() }
                 })
             }
             addView(slider, LinearLayout.LayoutParams(-1, dp(44)))
@@ -2362,6 +3318,32 @@ class DiPlayActivity : ComponentActivity() {
             .setView(ScrollView(this).apply { addView(body) })
             .setPositiveButton(getString(R.string.close)) { _, _ -> render() }
             .show()
+    }
+
+    /** main #344：可选的导航播报音量路由，复用既有方向盘无障碍服务与授权（作者：TRAE AI） */
+    private fun navigationWheelControls(card: LinearLayout) {
+        toggle(card, getString(R.string.settings_navigation_wheel_volume), getString(R.string.settings_navigation_wheel_volume_description),
+            NavigationWheelSettings.enabled(this)) {
+            NavigationWheelSettings.setEnabled(this, it)
+            render()
+        }
+        if (!NavigationWheelSettings.enabled(this) || WheelKeyService.connected()) return
+        card.addView(label(getString(R.string.settings_navigation_wheel_service_required), 14, WARNING))
+        card.addView(button(getString(R.string.wheel_keys_open_settings), false) {
+            runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                .onFailure { toast(getString(R.string.wheel_keys_no_settings)) }
+        }, matchButton(10, 56))
+        card.addView(button(getString(R.string.wheel_keys_enable_adb), false) {
+            Thread({
+                val access = WheelKeyService.enableOverAdb(this)
+                runOnUiThread {
+                    if (access != com.shilapi.xcertplay.adb.LocalAdb.Access.READY) {
+                        toast(getString(R.string.wheel_keys_adb_failed, access.name))
+                    }
+                    render()
+                }
+            }, "diplay-navigation-wheel-enable").start()
+        }, matchButton(10, 56))
     }
 
     /** Steering-wheel keys for the dashboard map zoom and the CarPlay joystick: the switches, the key service and the keys. */
@@ -2574,23 +3556,35 @@ class DiPlayActivity : ComponentActivity() {
         toggle(card, getString(R.string.carplay_call_controls_experimental),
             getString(R.string.carplay_call_controls_experimental_description),
             BydOutputSettings.carPlayCallControls(this)) {
-            BydOutputSettings.setCarPlayCallControls(this, it)
-            if (it && !WheelKeyService.connected()) {
-                Thread({
-                    val access = WheelKeyService.enableOverAdb(this)
-                    if (access != com.shilapi.xcertplay.adb.LocalAdb.Access.READY) {
-                        runOnUiThread { toast(getString(R.string.wheel_keys_adb_failed, access.name)) }
-                    }
-                }, "diplay-call-keys-enable").start()
-            }
+            // main B4：开关逻辑提取为 applyCallKeys，供连接向导复用（作者：TRAE AI）。
+            applyCallKeys(it)
         }
         toggle(card, getString(R.string.carplay_calls_on_dashboard),
             getString(R.string.carplay_calls_on_dashboard_description),
             BydOutputSettings.carPlayCalls(this), enabled = !adbSwitchChangePending) {
-            BydOutputSettings.setCarPlayCalls(this, it)
-            if (it) checkAdbState(mayAsk = true)
-            BydNavigationOutputs.carPlayCallsChanged(it)
+            // main B4：开关逻辑提取为 applyCarPlayCalls，供连接向导复用（作者：TRAE AI）。
+            applyCarPlayCalls(it)
         }
+    }
+
+    // main B4：通话按键开关——开启时经 ADB 拉起无障碍服务（作者：TRAE AI）。
+    private fun applyCallKeys(enabled: Boolean) {
+        BydOutputSettings.setCarPlayCallControls(this, enabled)
+        if (enabled && !WheelKeyService.connected()) {
+            Thread({
+                val access = WheelKeyService.enableOverAdb(this)
+                if (access != com.shilapi.xcertplay.adb.LocalAdb.Access.READY) {
+                    runOnUiThread { toast(getString(R.string.wheel_keys_adb_failed, access.name)) }
+                }
+            }, "diplay-call-keys-enable").start()
+        }
+    }
+
+    // main B4：仪表盘通话开关——开启时请求 ADB 状态并通知导航输出（作者：TRAE AI）。
+    private fun applyCarPlayCalls(enabled: Boolean) {
+        BydOutputSettings.setCarPlayCalls(this, enabled)
+        if (enabled) checkAdbState(mayAsk = true)
+        BydNavigationOutputs.carPlayCallsChanged(enabled)
     }
 
     private fun advancedVehicleData(card: LinearLayout) {
@@ -2836,6 +3830,21 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun showVehicleDataSettings(card: LinearLayout, capabilities: BydVehicleCapabilities?) {
+        // main #307：CarPlay 期间延迟暂停车机蓝牙（实验性、需 ADB、默认关闭）。
+        toggle(card, getString(R.string.bt_suspend_during_carplay), getString(R.string.bt_suspend_during_carplay_description),
+            AirPlayPersistence.loadBtSuspendDuringCarplay(this), enabled = !adbSwitchChangePending) {
+            AirPlayPersistence.saveBtSuspendDuringCarplay(this, it)
+            markReconnectNeeded()
+            if (it) checkAdbState(mayAsk = true)
+        }
+        if (AirPlayPersistence.loadBtSuspendDuringCarplay(this)) {
+            val delays = listOf(5, 10, 15, 30)
+            choice(card, getString(R.string.bt_suspend_delay), delays.map { getString(R.string.bt_suspend_delay_option, it) },
+                delays.indexOf(AirPlayPersistence.loadBtSuspendDelaySeconds(this)).coerceAtLeast(0), reconnects = false) {
+                AirPlayPersistence.saveBtSuspendDelaySeconds(this, delays[it])
+                markReconnectNeeded()
+            }
+        }
         if (capabilities == null || capabilities.batterySupported) {
             toggle(card, getString(R.string.car_battery_for_the_iphone),
                 getString(R.string.car_battery_for_the_iphone_description),
@@ -3272,8 +4281,8 @@ class DiPlayActivity : ComponentActivity() {
     private fun clusterSafeAreaControls(card: LinearLayout) {
         val rect = AirPlayPersistence.loadClusterSafeAreaRect(this)
             ?: DiLink4ClusterDisplay.defaultSafeAreaRect(
-                AirPlayPersistence.loadClusterMarkerHorizontalStep(this),
-                AirPlayPersistence.loadClusterMarkerVerticalStep(this))
+                markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+                markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this))
         card.addView(label(getString(R.string.safe_area_mapping_summary,
             rect.width, rect.height, rect.left, rect.top, 1920, 720), 14, MUTED))
         card.addView(actionButton(getString(R.string.cluster_safe_area_edit), false) {
@@ -3292,8 +4301,8 @@ class DiPlayActivity : ComponentActivity() {
         val previewOwner = Any()
         val initial = AirPlayPersistence.loadClusterSafeAreaRect(this)
             ?: DiLink4ClusterDisplay.defaultSafeAreaRect(
-                AirPlayPersistence.loadClusterMarkerHorizontalStep(this),
-                AirPlayPersistence.loadClusterMarkerVerticalStep(this))
+                markerXPercent = AirPlayPersistence.loadClusterMarkerXPercent(this),
+                markerYPercent = AirPlayPersistence.loadClusterMarkerYPercent(this))
         val editor = SafeAreaEditorView(this).apply {
             setBackgroundColor(Color.rgb(35, 39, 45))
             setRect(initial, 1920, 720)
@@ -3548,7 +4557,7 @@ class DiPlayActivity : ComponentActivity() {
         val control = button(summary(), false) {}
         control.setOnClickListener {
             val fields = column().apply { setPadding(dp(24), dp(8), dp(24), dp(8)) }
-            fields.addView(label(getString(R.string.ambient_light_threshold_value), 16, MUTED))
+            // main bc1c6001：对话框标题已含字段含义，去掉冗余的"切换门槛 (lux)"行（作者：TRAE AI）。
             val input = EditText(this).apply {
                 setSingleLine()
                 inputType = android.text.InputType.TYPE_CLASS_NUMBER
@@ -3910,6 +4919,8 @@ class DiPlayActivity : ComponentActivity() {
                     appendLine("CarPlay size: ${com.shilapi.xcertplay.airplay.CarPlaySize.fromWidthMillimeters(AirPlayPersistence.loadWidthPhysicalMm(appContext)).label}")
                     appendLine("Saved resolution preference (may differ from active session): ${AirPlayPersistence.loadDisplayScalePercent(appContext)}%")
                     appendLine("Session: ${if (CarPlayBackgroundSession.active) "active" else if (CarPlayBackgroundSession.hasSession()) "connecting" else "stopped"}")
+                    // main #439：蓝牙唤醒诊断行（不含蓝牙地址）。
+                    appendLine(PhoneWakeDiagnostics.report(appContext))
                     appendLine("Head-unit board: ${Build.BOARD}; hardware: ${Build.HARDWARE}; build: ${Build.DISPLAY}")
                     appendLine()
                     appendLine("--- Current cluster display diagnostics (even when disabled) ---")
@@ -4143,7 +5154,7 @@ class DiPlayActivity : ComponentActivity() {
         card.addView(heading)
         build(card)
         if (page == "settings") normalizeSpacing(card)
-        parent.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(18) })
+        parent.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
     }
     private fun audioFocusControls(parent: LinearLayout) {
         val enabled = AirPlayPersistence.loadAudioFocusEnabled(this)
@@ -4157,6 +5168,8 @@ class DiPlayActivity : ComponentActivity() {
         toggle(dependent, getString(R.string.audio_focus_auto_yield), getString(R.string.audio_focus_auto_yield_desc),
             AirPlayPersistence.loadAudioFocusAutoYield(this)) {
             AirPlayPersistence.saveAudioFocusAutoYield(this, it)
+            // main #482：自动让出焦点的变更需要重连才生效，显示"立即重连"条。
+            markReconnectNeeded()
         }
         parent.addView(dependent)
     }
@@ -4231,13 +5244,107 @@ class DiPlayActivity : ComponentActivity() {
     }
     private fun card() = column().apply { background = rounded(SURFACE, BORDER); setPadding(dp(24), dp(24), dp(24), dp(24)) }
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(-1, -2) }
+
+    // main #345：氛围灯配置摘要行文案（作者：TRAE AI）
+    private fun ambientConfigurationLabel(value: AmbientMusicSettings.Values): String {
+        val mode = if (!value.music) getString(R.string.settings_ambient_static) else when (value.colorMode) {
+            AmbientColorMode.ENERGY -> getString(R.string.settings_ambient_energy)
+            AmbientColorMode.BEAT -> getString(R.string.settings_ambient_beat)
+            AmbientColorMode.TEMPO -> getString(R.string.settings_ambient_tempo)
+            AmbientColorMode.BASS -> getString(R.string.settings_ambient_bass)
+            AmbientColorMode.SMART -> getString(R.string.settings_ambient_smart)
+        }
+        val speed = when (value.speed) { AmbientColorSpeed.SLOW -> getString(R.string.settings_ambient_slow); AmbientColorSpeed.STANDARD -> getString(R.string.settings_ambient_standard); AmbientColorSpeed.FAST -> getString(R.string.settings_ambient_fast) }
+        return getString(R.string.settings_ambient_configuration) + " · " + getString(R.string.settings_ambient_summary, getString(if (value.enabled) R.string.settings_ambient_enabled else R.string.settings_ambient_disabled), mode, speed, value.selectedColors.size, value.brightness)
+    }
+
+    // main #345：氛围灯配置对话框；保存前做只读支持性检查（作者：TRAE AI）
+    private fun showAmbientConfiguration() {
+        var draft = AmbientMusicSettings.load(this)
+        val body = column().apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }
+        body.addView(label(getString(R.string.settings_ambient_parked_notice), 14, MUTED))
+        toggle(body, getString(R.string.settings_ambient_enable), getString(R.string.settings_ambient_enable_description), draft.enabled) {
+            draft = draft.copy(enabled = it)
+        }
+        toggle(body, getString(R.string.settings_ambient_music), getString(R.string.settings_ambient_music_description), draft.music) {
+            draft = draft.copy(music = it)
+        }
+        choice(body, getString(R.string.settings_ambient_color_mode), listOf(getString(R.string.settings_ambient_energy), getString(R.string.settings_ambient_beat), getString(R.string.settings_ambient_tempo), getString(R.string.settings_ambient_bass), getString(R.string.settings_ambient_smart)), draft.colorMode.ordinal, reconnects = false) {
+            draft = draft.copy(colorMode = AmbientColorMode.entries[it])
+        }
+        choice(body, getString(R.string.settings_ambient_speed), listOf(getString(R.string.settings_ambient_slow), getString(R.string.settings_ambient_standard), getString(R.string.settings_ambient_fast)), draft.speed.ordinal, reconnects = false) {
+            draft = draft.copy(speed = AmbientColorSpeed.entries[it])
+        }
+        val paletteButton = button(getString(R.string.settings_ambient_palette_summary, draft.selectedColors.size), false) {}
+        paletteButton.setOnClickListener {
+            val checked = BooleanArray(31) { it + 1 in draft.selectedColors }
+            val paletteDialog = AlertDialog.Builder(this).setTitle(getString(R.string.settings_ambient_palette))
+                .setMultiChoiceItems((1..31).map { it.toString() }.toTypedArray(), checked) { _, index, selected -> checked[index] = selected }
+                .setNeutralButton(getString(R.string.settings_ambient_select_all), null)
+                .setPositiveButton(getString(R.string.save), null)
+                .setNegativeButton(getString(R.string.cancel), null).create()
+            paletteDialog.setOnShowListener {
+                paletteDialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                    checked.fill(true)
+                    for (index in checked.indices) paletteDialog.listView.setItemChecked(index, true)
+                }
+                paletteDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                    val selected = checked.indices.filter { checked[it] }.map { it + 1 }
+                    if (selected.isEmpty()) toast(getString(R.string.settings_ambient_select_one))
+                    else {
+                        draft = draft.copy(selectedColors = selected, color = selected.first())
+                        paletteButton.text = getString(R.string.settings_ambient_palette_summary, selected.size)
+                        paletteDialog.dismiss()
+                    }
+                }
+            }
+            paletteDialog.show()
+        }
+        body.addView(paletteButton, matchButton(0, 60)); body.addView(space(12))
+        choice(body, getString(R.string.settings_ambient_brightness), (0..6).map { if (it == 0) getString(R.string.settings_ambient_minimum) else it.toString() }, draft.brightness, reconnects = false) {
+            draft = draft.copy(brightness = it)
+        }
+        choice(body, getString(R.string.settings_ambient_area), listOf(getString(R.string.settings_ambient_front), getString(R.string.settings_ambient_rear), getString(R.string.settings_ambient_all)), draft.area - 1, reconnects = false) {
+            draft = draft.copy(area = it + 1)
+        }
+        val dialog = AlertDialog.Builder(this).setTitle(getString(R.string.settings_ambient_configuration))
+            .setView(ScrollView(this).apply { addView(body) })
+            .setPositiveButton(getString(R.string.save), null)
+            .setNegativeButton(getString(R.string.cancel), null).create()
+        dialog.setOnShowListener {
+            val save = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            save.setOnClickListener {
+                val selected = draft.copy(colorCycle = draft.music)
+                fun commit() {
+                    AmbientMusicSettings.save(this, selected)
+                    dialog.dismiss()
+                    render()
+                }
+                if (!selected.enabled) commit()
+                else {
+                    save.isEnabled = false
+                    save.text = getString(R.string.settings_ambient_checking)
+                    ambientSupportCheck(applicationContext).whenComplete { supported, _ ->
+                        runOnUiThread {
+                            if (!dialog.isShowing || isFinishing || isDestroyed) return@runOnUiThread
+                            save.isEnabled = true
+                            save.text = getString(R.string.save)
+                            if (supported == true) commit()
+                            else toast(getString(R.string.settings_ambient_unavailable))
+                        }
+                    }
+                }
+            }
+        }
+        dialog.show()
+    }
     private fun row() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; layoutParams = LinearLayout.LayoutParams(-1, -2) }
     private fun label(value: String, size: Int, color: Int, bold: Boolean = false) = TextView(this).apply {
         text = value; textSize = size.toFloat(); setTextColor(color); gravity = Gravity.CENTER_VERTICAL
         typeface = if (bold) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.create("sans-serif", Typeface.NORMAL)
         setLineSpacing(dp(3).toFloat(), 1f)
     }
-    private fun button(title: String, primary: Boolean, click: () -> Unit) = SettingButton(this).apply {
+    private fun button(title: String, primary: Boolean, click: () -> Unit) = SettingButton(this, MUTED, ACCENT).apply {
         isAllCaps = false; textSize = 18f; setTextColor(if (primary) BG else TEXT)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         background = UiCompat.ripple(RIPPLE, rounded(if (primary) ACCENT else BUTTON, if (primary) ACCENT else BORDER), null)
@@ -4258,7 +5365,12 @@ class DiPlayActivity : ComponentActivity() {
      * start-aligned, muted value, chevron. Any other text stays a centred action button.
      * The plain text is unchanged, so callers and tests keep matching "Title · Value".
      */
-    private class SettingButton(context: android.content.Context) : Button(context) {
+    // 主/次要色由构造器传入：嵌套类无法访问宿主实例的动态取色属性（作者：TRAE AI）。
+    private class SettingButton(
+        context: android.content.Context,
+        private val muted: Int,
+        private val accent: Int,
+    ) : Button(context) {
         var action = false
 
         override fun setText(text: CharSequence?, type: BufferType?) {
@@ -4270,13 +5382,13 @@ class DiPlayActivity : ComponentActivity() {
                 return
             }
             val styled = android.text.SpannableString(text).apply {
-                setSpan(android.text.style.ForegroundColorSpan(MUTED), split, text.length,
+                setSpan(android.text.style.ForegroundColorSpan(muted), split, text.length,
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
             super.setText(styled, BufferType.SPANNABLE)
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
             setCompoundDrawablesRelativeWithIntrinsicBounds(null, null,
-                androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_dp_chevron)?.mutate()?.let { UiCompat.tint(it, ACCENT) }, null)
+                androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_dp_chevron)?.mutate()?.let { UiCompat.tint(it, accent) }, null)
         }
     }
     // Remote and D-pad users need to see where they are; touch mode never shows it.
@@ -4351,6 +5463,22 @@ class DiPlayActivity : ComponentActivity() {
     }
     // Rounded, not truncated: below 160 dpi dp(1) became 0 and every border vanished.
     private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
+
+    // ===== 调色板取色（main #422，作者：TRAE AI）=====
+    // 原固定深色常量改为动态委托：113 处调用点无需改动，重渲染后自动跟随日夜外观。
+    private val BG get() = palette.background
+    private val SURFACE get() = palette.surface
+    private val BUTTON get() = palette.button
+    private val BORDER get() = palette.outline
+    private val ACCENT get() = palette.accent
+    private val RAIL_SELECTED get() = palette.railSelected
+    private val RAIL_SELECTED_BORDER get() = palette.railSelectedOutline
+    private val TEXT get() = palette.primaryText
+    private val MUTED get() = palette.secondaryText
+    private val WARNING get() = palette.warning
+    private val READY get() = palette.success
+    private val RIPPLE get() = palette.ripple
+
     companion object {
         internal fun isLauncherIntent(intent: Intent): Boolean =
             intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER) &&
@@ -4359,19 +5487,9 @@ class DiPlayActivity : ComponentActivity() {
         private const val BYD_VEHICLE_TAG = "DiPlay-BYD13"
         private const val VEHICLE_VALIDATION_RETRY_MILLIS = 500L
         private const val ADB_KEY_SAVE_WAIT_MILLIS = 500L
-        private val BG = Color.rgb(12, 17, 27)
-        private val SURFACE = Color.rgb(21, 30, 44)
-        // One step lighter than a card, so a button reads as a button even where its 1 px border is faint.
-        private val BUTTON = Color.rgb(31, 43, 61)
-        private val BORDER = Color.rgb(42, 56, 75)
-        private val ACCENT = com.shilapi.xcertplay.settings.SettingsTheme.CARD.accent
-        private val RAIL_SELECTED = Color.rgb(24, 54, 92)
-        private val RAIL_SELECTED_BORDER = Color.rgb(42, 82, 130)
-        private val TEXT = com.shilapi.xcertplay.settings.SettingsTheme.CARD.textPrimary
-        private val MUTED = com.shilapi.xcertplay.settings.SettingsTheme.CARD.textSecondary
-        private val WARNING = Color.rgb(255, 196, 128)
-        private val READY = Color.rgb(127, 205, 154)
-        private const val RIPPLE = 0x336F9FD9
+        // 外观兜底轮询间隔与外观按钮焦点标签（main #422）。
+        private const val APPEARANCE_POLL_MILLIS = 2_000L
+        private const val APPEARANCE_BUTTON_TAG = "app_appearance_button"
         private const val VALUE_SEPARATOR = " · "
         private const val SEARCH_HIGHLIGHT_MILLIS = 900L
         private const val SPACER = "spacer"

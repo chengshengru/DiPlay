@@ -64,12 +64,20 @@ object AirPlayPersistence {
     private const val KEY_CARPLAY_NIGHT_START = "carplay_night_start_minute"
     private const val KEY_CARPLAY_NIGHT_END = "carplay_night_end_minute"
     private const val KEY_AMBIENT_LUX_THRESHOLD = "ambient_lux_threshold"
+    private const val KEY_APP_APPEARANCE = "app_appearance"
     private const val KEY_FPS = "display_fps"
     private const val KEY_MEDIA_BUFFER_MS = "media_buffer_ms"
     private const val KEY_MAIN_BUFFERED_AUDIO = "main_buffered_audio"
+    // main #432：CarPlay 音频走车机蓝牙（实验性，默认关）。
+    private const val KEY_CAR_BLUETOOTH_AUDIO = "car_bluetooth_audio"
     private const val KEY_CALL_ECHO_CANCELLATION = "call_echo_cancellation"
     private const val KEY_CALL_VOICE_FILTER = "call_voice_filter"
     private const val KEY_SMOOTH_VIDEO = "smooth_video"
+    // main #496：直接视频输出与低延迟解码（实验性设置）。
+    private const val KEY_DIRECT_VIDEO_OUTPUT = "direct_video_output"
+    private const val KEY_LOW_LATENCY_DECODER = "low_latency_decoder"
+    // main #496：FPS 计数器（诊断设置）。
+    private const val KEY_FPS_COUNTER = "fps_counter"
     private const val KEY_CLUSTER_MAP = "cluster_map_enabled"
     private const val KEY_ADB_CLUSTER_ACTIVITY = "adb_cluster_activity_enabled"
     private const val KEY_CENTER_MAP_OVERLAY = "center_map_overlay"
@@ -79,6 +87,9 @@ object AirPlayPersistence {
     private const val KEY_CLUSTER_CONTENT = "cluster_content"
     private const val KEY_CLUSTER_MARKER_X = "cluster_marker_horizontal_step"
     private const val KEY_CLUSTER_MARKER_Y = "cluster_marker_vertical_step"
+    // main #494：1% 网格新键；旧键保留用于一次性迁移（作者：TRAE AI）。
+    private const val KEY_CLUSTER_MARKER_X_PERCENT = "cluster_marker_x_percent"
+    private const val KEY_CLUSTER_MARKER_Y_PERCENT = "cluster_marker_y_percent"
     private const val KEY_CLUSTER_TURN_CARD_OVERLAY_POSITION = "cluster_turn_card_overlay_position"
     private const val KEY_CLUSTER_TURN_CARD_OVERLAY_SIZE = "cluster_turn_card_overlay_size"
     private const val KEY_CLUSTER_TURN_CARD_OVERLAY_X = "cluster_turn_card_overlay_x_percent"
@@ -95,6 +106,9 @@ object AirPlayPersistence {
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
     private const val KEY_ADAPT_PIP_RESOLUTION = "adapt_pip_resolution"
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
+    // main #307：CarPlay 期间暂停车机蓝牙的开关与宽限期。
+    private const val KEY_BT_SUSPEND_DURING_CARPLAY = "bt_suspend_during_carplay"
+    private const val KEY_BT_SUSPEND_DELAY = "bt_suspend_delay_seconds"
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
     private const val KEY_MFI_TARGET = "mfi_target"
     private const val KEY_MFI_I2C_PATH = "mfi_i2c_path"
@@ -420,8 +434,26 @@ object AirPlayPersistence {
 
     fun saveAutoStartOnBoot(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putBoolean(KEY_AUTO_START_ON_BOOT, enabled)
-            .apply()
+            .putBoolean(KEY_AUTO_START_ON_BOOT, enabled).apply()
+    }
+
+    // main #307：CarPlay 期间暂停车机蓝牙。默认关闭；宽限期 5–30 秒，默认 10 秒。
+    fun loadBtSuspendDuringCarplay(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_BT_SUSPEND_DURING_CARPLAY, false)
+
+    fun saveBtSuspendDuringCarplay(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_BT_SUSPEND_DURING_CARPLAY, enabled).apply()
+    }
+
+    fun loadBtSuspendDelaySeconds(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_BT_SUSPEND_DELAY, 10).let { if (it in listOf(5, 10, 15, 30)) it else 10 }
+
+    fun saveBtSuspendDelaySeconds(context: Context, seconds: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_BT_SUSPEND_DELAY, if (seconds in listOf(5, 10, 15, 30)) seconds else 10).apply()
     }
 
     fun loadLocationReportingEnabled(context: Context): Boolean =
@@ -489,6 +521,16 @@ object AirPlayPersistence {
             .putString(KEY_CARPLAY_NIGHT_MODE, mode.key).apply()
     }
 
+    // 应用外观偏好（B0 外观基建，对应 main #422/#346）
+    fun loadAppAppearance(context: Context): AppAppearance = AppAppearance.fromKey(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_APP_APPEARANCE, null),
+    )
+
+    fun saveAppAppearance(context: Context, appearance: AppAppearance) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_APP_APPEARANCE, appearance.key).apply()
+    }
+
     fun loadCarPlayNightSchedule(context: Context): CarPlayNightSchedule {
         val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val defaults = CarPlayNightSchedule()
@@ -521,6 +563,14 @@ object AirPlayPersistence {
     fun loadMainBufferedAudio(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MAIN_BUFFERED_AUDIO, false)
 
+    /** 不向 iPhone 提供 CarPlay 音频，让音频留在 iPhone 与车机的蓝牙链路上；下次连接时生效（main #432）。 */
+    fun loadCarBluetoothAudio(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CAR_BLUETOOTH_AUDIO, false)
+
+    fun saveCarBluetoothAudio(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CAR_BLUETOOTH_AUDIO, enabled).apply()
+    }
+
     fun saveMainBufferedAudio(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_MAIN_BUFFERED_AUDIO, enabled).apply()
     }
@@ -530,6 +580,30 @@ object AirPlayPersistence {
 
     fun saveSmoothVideo(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_SMOOTH_VIDEO, enabled).apply()
+    }
+
+    // main #496：直接视频输出（实验性）：主屏绕过应用绘制直交合成器。
+    fun loadDirectVideoOutput(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_DIRECT_VIDEO_OUTPUT, false)
+
+    fun saveDirectVideoOutput(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DIRECT_VIDEO_OUTPUT, enabled).apply()
+    }
+
+    // main #496：低延迟解码（实验性）：高通厂商参数 + 专用输出线程。
+    fun loadLowLatencyDecoder(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_LOW_LATENCY_DECODER, false)
+
+    fun saveLowLatencyDecoder(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_LOW_LATENCY_DECODER, enabled).apply()
+    }
+
+    // main #496：FPS 计数器（诊断设置），投屏回到前台时生效，无需重连。
+    fun loadFpsCounter(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_FPS_COUNTER, false)
+
+    fun saveFpsCounter(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_FPS_COUNTER, enabled).apply()
     }
 
     fun saveMediaBufferMillis(context: Context, millis: Int) {
@@ -615,7 +689,20 @@ object AirPlayPersistence {
     fun saveAdbClusterEnabled(context: Context, enabled: Boolean) {
         val edit = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_ADB_CLUSTER_ACTIVITY, enabled)
+            // main #348：两条独立仪表路由互斥（作者：TRAE AI）
+            .putBoolean("platform21_cluster_enabled", false)
         if (enabled) edit.putBoolean(KEY_CLUSTER_MAP, true)
+        edit.apply()
+    }
+
+    // main #348：Platform-21 独立仪表任务路由，仅仪表地图开启时生效（作者：TRAE AI）
+    fun loadLegacyClusterEnabled(context: Context): Boolean = loadClusterMapEnabled(context) &&
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("platform21_cluster_enabled", false)
+
+    fun saveLegacyClusterEnabled(context: Context, enabled: Boolean) {
+        val edit = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("platform21_cluster_enabled", enabled)
+        if (enabled) edit.putBoolean(KEY_CLUSTER_MAP, true).putBoolean(KEY_ADB_CLUSTER_ACTIVITY, false)
         edit.apply()
     }
 
@@ -668,7 +755,8 @@ object AirPlayPersistence {
     fun loadClusterContent(context: Context): CarPlayClusterDisplay.Content =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_CLUSTER_CONTENT, null)
             ?.let { name -> CarPlayClusterDisplay.Content.entries.firstOrNull { it.name == name } }
-            ?: if (AdbClusterRouter.enabled(context)) CarPlayClusterDisplay.Content.INSTRUMENTS else CarPlayClusterDisplay.Content.MAP
+            // main #348：Platform-21 路由默认内容为地图（作者：TRAE AI）
+            ?: if (AdbClusterRouter.enabled(context) && !loadLegacyClusterEnabled(context)) CarPlayClusterDisplay.Content.INSTRUMENTS else CarPlayClusterDisplay.Content.MAP
 
     fun saveClusterContent(context: Context, content: CarPlayClusterDisplay.Content) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_CLUSTER_CONTENT, content.name).apply()
@@ -678,11 +766,11 @@ object AirPlayPersistence {
     /** Fingers for the swipe-down that opens settings; some head units reserve three. */
     fun loadSettingsGestureFingers(context: Context): Int =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getInt(KEY_SETTINGS_GESTURE_FINGERS, 3).coerceIn(2, 4)
+            .getInt(KEY_SETTINGS_GESTURE_FINGERS, 3).let { if (it == 0) 0 else it.coerceIn(2, 4) }
 
     fun saveSettingsGestureFingers(context: Context, fingers: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putInt(KEY_SETTINGS_GESTURE_FINGERS, fingers.coerceIn(2, 4)).apply()
+            .putInt(KEY_SETTINGS_GESTURE_FINGERS, if (fingers == 0) 0 else fingers.coerceIn(2, 4)).apply()
     }
 
     fun loadCenterMapFollowsDashboard(context: Context): Boolean =
@@ -796,6 +884,44 @@ object AirPlayPersistence {
     fun saveClusterMarkerVerticalStep(context: Context, step: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_CLUSTER_MARKER_Y, step.coerceIn(CarPlayClusterDisplay.verticalSteps)).apply()
+    }
+
+    // main #494：全屏 marker 与小窗一样使用 1% 网格。旧 10% 档位值按滑块显示的中心（50/45）迁移，
+    // 未动过的 marker 读出即默认值（作者：TRAE AI）。
+    fun loadClusterMarkerXPercent(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.contains(KEY_CLUSTER_MARKER_X_PERCENT)) {
+            return ClusterTurnCardOverlay.snap(prefs.getInt(KEY_CLUSTER_MARKER_X_PERCENT, 50), CarPlayClusterDisplay.markerXPercents)
+        }
+        val step = prefs.getInt(KEY_CLUSTER_MARKER_X, 0)
+        return ClusterTurnCardOverlay.snap(
+            50 + step * CarPlayClusterDisplay.MARKER_STEP_PERCENT,
+            CarPlayClusterDisplay.markerXPercents,
+        )
+    }
+
+    fun saveClusterMarkerXPercent(context: Context, percent: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_CLUSTER_MARKER_X_PERCENT,
+                ClusterTurnCardOverlay.snap(percent, CarPlayClusterDisplay.markerXPercents)).apply()
+    }
+
+    fun loadClusterMarkerYPercent(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.contains(KEY_CLUSTER_MARKER_Y_PERCENT)) {
+            return ClusterTurnCardOverlay.snap(prefs.getInt(KEY_CLUSTER_MARKER_Y_PERCENT, 45), CarPlayClusterDisplay.markerYPercents)
+        }
+        val step = prefs.getInt(KEY_CLUSTER_MARKER_Y, 0)
+        return ClusterTurnCardOverlay.snap(
+            45 + step * CarPlayClusterDisplay.MARKER_STEP_PERCENT,
+            CarPlayClusterDisplay.markerYPercents,
+        )
+    }
+
+    fun saveClusterMarkerYPercent(context: Context, percent: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_CLUSTER_MARKER_Y_PERCENT,
+                ClusterTurnCardOverlay.snap(percent, CarPlayClusterDisplay.markerYPercents)).apply()
     }
 
     // Cluster mapping has its own key; never reuse the main display mapping at the same resolution.

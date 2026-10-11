@@ -52,12 +52,9 @@ object PermissionCompat {
         requestCode: Int
     ) {
         if (ApiLevel.isBelow(ApiLevel.M)) {
-            // API 17-22：直接认为已授予，触发回调
-            activity.onRequestPermissionsResult(
-                requestCode,
-                permissions,
-                IntArray(permissions.size) { PackageManager.PERMISSION_GRANTED }
-            )
+            // API 17-22：权限在安装时已全部授予，无需请求；
+            // Activity.onRequestPermissionsResult 是 API 23 方法，低版本既不存在该方法、
+            // 宿主也不会收到系统回调，直接调用会抛 NoSuchMethodError，因此什么都不做。
         } else {
             // API 23+：请求运行时权限
             ActivityCompat.requestPermissions(activity, permissions, requestCode)

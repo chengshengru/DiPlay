@@ -435,7 +435,9 @@ class WifiP2pGroupManagerTest {
             listener.onGroupInfoAvailable(group)
         }
 
-        @Implementation override fun requestConnectionInfo(channel: WifiP2pManager.Channel, listener: WifiP2pManager.ConnectionInfoListener) {
+        // 分支既有修复：Robolectric 4.9 的 ShadowWifiP2pManager 没有 requestConnectionInfo /
+        // 三参 createGroup，去掉 override 关键字（Robolectric 按框架方法签名直接绑定 shadow）。
+        @Implementation protected fun requestConnectionInfo(channel: WifiP2pManager.Channel, listener: WifiP2pManager.ConnectionInfoListener) {
             listener.onConnectionInfoAvailable(WifiP2pInfo().apply {
                 groupFormed = true
                 isGroupOwner = true
@@ -443,7 +445,7 @@ class WifiP2pGroupManagerTest {
             })
         }
 
-        @Implementation override fun createGroup(channel: WifiP2pManager.Channel, config: WifiP2pConfig?, listener: WifiP2pManager.ActionListener) {
+        @Implementation protected fun createGroup(channel: WifiP2pManager.Channel, config: WifiP2pConfig?, listener: WifiP2pManager.ActionListener) {
             requests += config
             if (noCreateReply) return
             if ((rejectCustom && config != null) || (fixed24Only && config?.groupOwnerBand !in allowed24)) {
@@ -462,10 +464,13 @@ class WifiP2pGroupManagerTest {
         }
 
         fun makeGroup(config: WifiP2pConfig?) = WifiP2pGroup().apply {
-            shadowOf(this).setIsGroupOwner(true)
-            shadowOf(this).setNetworkName(config?.networkName ?: "DIRECT-system-test")
-            shadowOf(this).setPassphrase(if (missingCredentials) null else config?.passphrase ?: "test-generated-key")
-            shadowOf(this).setInterface("p2p-test-missing")
+            // 分支既有修复：Robolectric 4.10 的 ShadowWifiP2pGroup 没有 setIsGroupOwner，且
+            // setNetworkName/setPassphrase 存在 Reflector 派发错误（实际写到 interface 字段），
+            // 统一改为直接写框架字段。
+            ReflectionHelpers.setField(this, "mIsGroupOwner", true)
+            ReflectionHelpers.setField(this, "mNetworkName", config?.networkName ?: "DIRECT-system-test")
+            ReflectionHelpers.setField(this, "mPassphrase", if (missingCredentials) null else config?.passphrase ?: "test-generated-key")
+            ReflectionHelpers.setField(this, "mInterface", "p2p-test-missing")
             ReflectionHelpers.setField(this, "mFrequency", reportedFrequency ?: config?.groupOwnerBand ?: 2437)
         }
     }

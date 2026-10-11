@@ -27,6 +27,8 @@ internal class BufferedAudioStream(
     private val sink: MediaSink,
     private val log: (String) -> Unit = {},
     private val nanoTime: () -> Long = System::nanoTime,
+    // main #484：初始填充达到下限后按节拍暂停接收，避免与实时音频/视频抢 TCP。
+    private val pause: (Long) -> Unit = { Thread.sleep(it) },
     private val expectedPeer: InetAddress = InetAddress.getLoopbackAddress(),
 ) : Closeable {
     internal class Frame(val sequence: Int, val timestamp: Long, val rtp: ByteArray)
@@ -48,6 +50,11 @@ internal class BufferedAudioStream(
     // Includes queued and not-yet-audible fed frames, bounded by both bytes and frame count.
     private var queuedBytes = 0L
     private val maxBufferedFrames = (format.sampleRate * MAX_BUFFER_MILLIS / (SAMPLES_PER_FRAME * 1000)).toInt()
+    // main #484：开始按节拍限速前需排入的音乐时长，以及此后每帧消耗的墙钟时间。
+    private val pacedFillFloorFrames =
+        (format.sampleRate * PACED_FILL_FLOOR_MILLIS / (SAMPLES_PER_FRAME * 1000)).toInt()
+    private val pacedFrameMillis =
+        (SAMPLES_PER_FRAME * 1000L / (format.sampleRate.toLong() * FILL_RATE_MULTIPLE)).coerceAtLeast(1L)
 
     // Playback state, guarded by [lock].
     private var rate = 0
@@ -103,6 +110,7 @@ internal class BufferedAudioStream(
                     windowStart = now
                 }
                 if (frame.rtp.size <= RTP_HEADER) continue
+                var pacing = false
                 synchronized(lock) {
                     while (!closed.get() &&
                         flushUntil?.let { before(frame.timestamp, it) } != true &&
@@ -116,7 +124,13 @@ internal class BufferedAudioStream(
                     queue.addLast(frame)
                     queuedBytes += frame.rtp.size
                     lock.notifyAll()
+                    // main #484：超过下限后把 intake 保持在约 4 倍实时速度。按 TCP 全速
+                    // 读完两分钟缓冲是兆比特级突发，会饿死共享链路的实时音频和视频。
+                    // 播放锚定在首帧后 START_LATENCY_MILLIS，限速不延迟音乐；队列被
+                    // 播放或 FLUSHBUFFERED 清空到下限以下时自动恢复全速填充。
+                    pacing = queue.size + fed.size >= pacedFillFloorFrames
                 }
+                if (pacing) pause(pacedFrameMillis)
             }
         } catch (error: Exception) {
             if (!closed.get()) log("Buffered audio: connection ended (${error.javaClass.simpleName})")
@@ -318,6 +332,10 @@ internal class BufferedAudioStream(
         /** Advertised and locally enforced; a full buffer applies TCP backpressure. */
         const val AUDIO_BUFFER_BYTES = 8 * 1024 * 1024
         private const val MAX_BUFFER_MILLIS = 120_000L
+        /** main #484：限速前需排入的音乐时长，覆盖曲目开始后的短暂间隙。 */
+        private const val PACED_FILL_FLOOR_MILLIS = 15_000L
+        /** main #484：超过下限后 intake 的上限，以实时速度的倍数计。 */
+        private const val FILL_RATE_MULTIPLE = 4L
         internal const val LEAD_MILLIS = 1_000L
         /** About when the first fed sample is heard: the media renderer's start level and the decoder. */
         internal const val START_LATENCY_MILLIS = 400L

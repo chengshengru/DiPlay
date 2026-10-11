@@ -12,6 +12,7 @@ import android.view.ViewOutlineProvider
 import android.view.Window
 import android.widget.CompoundButton
 import android.widget.ImageView
+import android.widget.PopupWindow
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
@@ -55,6 +56,20 @@ internal object UiCompat {
         if (Build.VERSION.SDK_INT >= 21) image.imageTintList = ColorStateList.valueOf(color)
     }
 
+    /** PopupWindow.setElevation is API 21+. */
+    fun setPopupElevation(popup: PopupWindow, elevation: Float) {
+        if (Build.VERSION.SDK_INT >= 21) popup.elevation = elevation
+    }
+
+    /**
+     * PopupWindow.showAsDropDown(view, x, y, gravity) is API 19+. Below that, drop with the x the
+     * caller computed for the alignment the gravity would have produced.
+     */
+    fun showAsDropDown(popup: PopupWindow, anchor: View, x: Int, y: Int, gravity: Int, fallbackX: Int) {
+        if (Build.VERSION.SDK_INT >= 19) popup.showAsDropDown(anchor, x, y, gravity)
+        else popup.showAsDropDown(anchor, fallbackX, y)
+    }
+
     /** TextView.setLetterSpacing is API 21+. */
     fun setLetterSpacing(text: TextView, spacing: Float) {
         if (Build.VERSION.SDK_INT >= 21) text.letterSpacing = spacing
@@ -69,6 +84,10 @@ internal object UiCompat {
     fun setAccessibilityLiveRegion(view: View, mode: Int) {
         if (Build.VERSION.SDK_INT >= 19) view.accessibilityLiveRegion = mode
     }
+
+    /** View.isAttachedToWindow is API 19+. Below that a non-null window token means attached. */
+    fun isAttachedToWindow(view: View): Boolean =
+        if (Build.VERSION.SDK_INT >= 19) view.isAttachedToWindow else view.windowToken != null
 
     /** Window.setStatusBarColor/setNavigationBarColor are API 21+. */
     fun setSystemBarColors(window: Window, color: Int) {
@@ -105,6 +124,19 @@ internal object UiCompat {
             seekBar.progressTintList = ColorStateList.valueOf(accent)
             seekBar.thumbTintList = ColorStateList.valueOf(accent)
         }
+    }
+
+    /** SeekBar.secondaryProgressTintList/progressBackgroundTintList are API 21+. */
+    fun setSeekBarSecondaryTints(seekBar: SeekBar, secondary: ColorStateList, background: ColorStateList) {
+        if (Build.VERSION.SDK_INT >= 21) {
+            seekBar.secondaryProgressTintList = secondary
+            seekBar.progressBackgroundTintList = background
+        }
+    }
+
+    /** TextView.setFontFeatureSettings is API 21+. */
+    fun setFontFeatureSettings(text: TextView, settings: String) {
+        if (Build.VERSION.SDK_INT >= 21) text.fontFeatureSettings = settings
     }
 
     /** Drawable.setTint is API 21+. Below that tint through a colour filter, which is API 1. */

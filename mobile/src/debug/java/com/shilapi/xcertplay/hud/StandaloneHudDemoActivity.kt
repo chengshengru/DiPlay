@@ -80,6 +80,11 @@ class StandaloneHudDemoActivity : Activity() {
         }
     }
 
+    /**
+     * 校验目标 stock receiver。仅在被检查的 Android 13 固件（FINGERPRINT 检查）上运行，
+     * 内部使用 API 28+ 的签名/版本接口，静态 lint 无法识别该前提，故屏蔽 NewApi。
+     */
+    @android.annotation.SuppressLint("NewApi")
     private fun validateTarget() {
         check(packageName == "com.shihab.diplay.hudtest" && Process.myUid() >= 10000)
         check(Build.FINGERPRINT == "BYD-AUTO/IVI/IVI:13/TP1A.220624.014/eng.build20260722.221155:user/release-keys") {

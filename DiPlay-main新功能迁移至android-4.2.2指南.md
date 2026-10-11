@@ -1,7 +1,7 @@
 # DiPlay main 分支新功能迁移至 android-4.2.2 分支 — 详细迁移指南
 
 > **作者**: TRAE AI
-> **生成日期**: 2026-10-09 ｜ **最后更新**: 2026-10-10
+> **生成日期**: 2026-10-09 ｜ **最后更新**: 2026-10-11
 > **源分支基线**: `main` @ `ef4e3fe5c39fa49a532a9570ecb930618a06e106`（2026-10-09 16:00 +0400，Merge PR #528）
 > **目标分支**: `android-4.2.2` @ `6a08b07d`（2026-10-09 20:42 +0800，"迁移热点恢复"）
 > **分叉点**: `7887bb7b`（v0.2.14，2026-10-07）
@@ -34,7 +34,7 @@
 
 | 锚点 | Commit（完整哈希） | 时间 | 说明 |
 |------|--------------------|------|------|
-| **main 基线** | `ef4e3fe5c39fa49a532a9570ecb930618a06e106` | 2026-10-09 16:00 +0400 | Merge PR #528（integrate/remaining-prs-20261009），本文档全部波次以此为终点 |
+| **main 基线** | `6ebb58218f90b0c0853b78013cb8431765ca77bb` | 2026-10-09 19:01 +0400 | Merge PR #533（release/0.2.16）；较 `ef4e3fe5` 仅新增发版说明/站点/版本号，无新功能代码，波次一至四功能终点仍为 `ef4e3fe5` |
 | **分叉点** | `7887bb7bf2b52258e663a2a4ea1332382ed80ad8` | 2026-10-07 15:24 +0400 | v0.2.14 发布合并点，两分支共同祖先 |
 | **android-4.2.2 起点** | `6a08b07d2ee41f002d9f8b5151c94d7ed26d5fea` | 2026-10-09 20:42 +0800 | 分支已有 4 个移植提交（API 17 下移、legacy-mdns、热点恢复） |
 
@@ -73,7 +73,7 @@ flowchart LR
 | `CarPlayDiscovery.kt`（分支 jmdns 3.5.8 适配版） | main 仍用 jmdns 3.5.8 库；分支已 vendored `legacy-mdns` | **不替换**：保留分支 legacy-mdns，仅叠加 main 对发现逻辑的修复 |
 | `IphoneUsbHost.kt` 的 requestWait 版本分支（守护线程 + queue poll） | main 的 `UsbRequestQueue.kt`（API 26+ 原生队列） | **混合**：API 26+ 路径直接采用 main 实现替换守护线程方案；API 17–25 保留守护线程路径 |
 | 分支 `MainActivity.kt` View 化实现 | main 的 Compose 实现 | **不替换**：技术栈不可逆，仅移植功能逻辑 |
-| 分支 `CrashFileLogger.kt`（分支自加） | main 的诊断上报增强（#499/#459） | **替换式合并**：以 main 结构为基线，保留分支的 API 17 文件路径回退 |
+| 分支 `CrashFileLogger.kt`（分支自加） | main 的诊断上报增强（#499/#459） | **无需替换**：2026-10-11 核实 #499 仅涉及 AndroidMediaSink 诊断通道（onAudioDiagnostic），不触碰 CrashFileLogger；分支保留自加实现 |
 
 3. **替换后必须做**：
    - 跑被替换功能的单元测试（main 版测试优先采用 main 的测试文件）；
@@ -86,44 +86,48 @@ flowchart LR
 
 | 波次 | 功能项 | 对应 main PR/提交 | 状态 | 完成日期 | 备注 |
 |------|--------|-------------------|------|----------|------|
-| 一 | Concentus 软件 Opus 编码器 | `6a1e7b89`/`ea898e34` | ⬜ | | |
-| 一 | Opus 能力广告 | #483 `6d15669f` | ⬜ | | |
-| 一 | 音频诊断上报 | #499 `a6c8c4da` | ⬜ | | |
-| 一 | 麦克风回退集成 | #468 `e2403839` | ⬜ | | |
-| 一 | 回消参考对齐 | #421 `5fecbc08` | ⬜ | | |
-| 一 | 缓冲音频节流 | #484 `a4b8900d` | ⬜ | | |
-| 一 | prebuffer underrun 恢复 | #401 `f5452c5a`/`2f12d483` | ⬜ | | |
-| 二 | NCM 接收帧修复 | #478 `515bc9ec` | ⬜ | | |
-| 二 | USB 读阶梯重试 | #495 `422a7d8e` | ⬜ | | |
-| 二 | 16 KiB usbfs 上限（扩到 API 17–25） | `764e0ba1` | ⬜ | | |
-| 三 | 热点地址族恢复 | #474 `7b6f4585`/`39c052f5` | ⬜ | | 🔁 候选：替换 `LegacyHotspotRecovery.kt` |
-| 三 | Android 17 本地网络权限守卫 | #465 `203a38aa` | ⬜ | | API 17 下 no-op |
-| 三 | VPN 授权崩溃修复 | `4aee3f80` | ⬜ | | |
-| 三 | 蓝牙延迟暂停（生命周期安全） | #307 `289fcc77`/`8681254b` | ⬜ | | |
-| 三 | iPhone 蓝牙唤醒启动 | #439 `fe1a59db` | ⬜ | | |
-| 三 | 显示变更保持会话 | #501 `d5d9d2fd` | ⬜ | | |
-| 四 | 视频积压恢复界限 | #347 `21195488` | ⬜ | | |
-| 四 | 解码器一次多帧 | #456 `1df2cd2c` | ⬜ | | |
-| 四 | 低延迟解码 + 输出线程 + FPS 计数 | #496 `5dabc170`/`52004bfb` | ⬜ | | 守卫高通键；FPS 覆盖层 View 化 |
-| 四 | 解码器工作速率提示 | #417 `19d11af7` | ⬜ | | API 23+ 守卫 |
-| 五 | BYD 氛围灯音乐跟随 | #345 `60300d89`/`34cf4e19` | ⬜ | | |
-| 五 | 导航播报方向盘音量 | #344 `ba8cdca1` | ⬜ | | |
-| 五 | Platform-21 仪表路由 | #348 `52bbad46` | ⬜ | | API 17 隐藏入口 |
-| 五 | DiLink3 到达时间 AMap 形式 | #458 `0e54b3ea` | ⬜ | | |
-| 五 | ADB 开机自启修复 | #441 `eac7a3d9` | ⬜ | | |
-| 五 | 侧栏拖拽/把手/轮胎 | #480 `ef11e819`/`4dda8598` | ⬜ | | 跳过 resize 模糊 |
-| 五 | Wi-Fi Direct 频段选择 | #432 `00523988` | ⬜ | | 走 Api17 legacy 路径 |
-| 五 | CarPlay 音频走车机蓝牙（实验） | #432 `593ac236` | ⬜ | | 默认关 |
-| 六 | Light/Dark/Auto 外观 | #422/#420/#346 | ⬜ | | View 重写 |
-| 六 | DiLink 设置向导 | #416 `4dbc509f` | ⬜ | | UI View 重写 |
-| 六 | GitHub 更新检查 | #413 `f4e7d06f` | ⬜ | | FileProvider 注册 |
-| 六 | 设置内联搜索 | #450 `3ce0a181` | ⬜ | | View 重写 |
-| 六 | 小窗转弯卡片独立摆放 | #493/#494 | ⬜ | | 1% 步进迁移旧值 |
-| 六 | 暂存设置丢弃确认 | #500 `99375a7e` | ⬜ | | |
-| 六 | 下滑手势 Off 选项 | #487 `d05fcb25` | ⬜ | | |
-| 六 | 重连条联动 | #482/`f256cd64` | ⬜ | | |
-| 六 | 设置间距/对齐精修 | #486/#491/#490 | ⬜ | | |
-| 七 | 7 语言字符串同步 | 各波次随附 | ⬜ | | `SettingsTranslationsTest` |
+| 一 | Concentus 软件 Opus 编码器 | `6a1e7b89`/`ea898e34` | ✅ 已完成 | 2026-10-10 | 分支提交 `bd722344`；另修复 3 个阻塞 `:shared` 测试编译的既有坏测试（setPassphrase 反射化、RemoteMfi 改 ServerSocket 桩） |
+| 一 | Opus 能力广告 | #483 `6d15669f` | ✅ 已完成 | 2026-10-10 | 分支提交 `bd722344`；AirPlayConfig.microphoneOpus + InfoPlist audioFormats 守卫 |
+| 一 | 音频诊断上报 | #499 `a6c8c4da` | ✅ 已完成 | 2026-10-11 | AndroidMediaSink：焦点回调丢弃时上报原因、进入/恢复通信模式写诊断报告（try 内构造 try 外发送，restore 失败读当前模式用 runCatching 兜底） |
+| 一 | 麦克风回退集成 | #468 `e2403839` | ✅ 已完成 | 2026-10-11 | 回退逻辑随 `bd722344` 移植；诊断集成部分（opusEncoderFactory 注入、编码器诊断 runCatching、OpusEncoderSupport 软件探测、AirPlayConfig/InfoPlist 新注释）核对分支已全部具备，#499 部分本次补齐 |
+| 一 | 回消参考对齐 | #421 `5fecbc08` | ✅ 已完成 | 2026-10-10 | 分支提交 `bd722344`；EchoReferenceTest 9/9 通过 |
+| 一 | 缓冲音频节流 | #484 `a4b8900d` | ✅ 已完成 | 2026-10-11 | BufferedAudioStream：15s 下限后每帧暂停 1/4 帧时长（约 4 倍实时）；下限读实时队列而非计数器，播放/FLUSHBUFFERED 清空后自动恢复全速；测试按指示未移植 |
+| 一 | prebuffer underrun 恢复 | #401 `f5452c5a`/`2f12d483` | ✅ 已完成 | 2026-10-11 | AudioBufferProgress.shouldRebuffer 增加 floorBytes（阈值一半，修复"回弹"后精确零永不满足）；暂停时保留 PCM 计入 prebufferBytes+lastPcmWriteNs 记账修复；AudioBufferProgressTest 同步 main 版（纯 JUnit） |
+| 二 | NCM 接收帧修复 | #478 `515bc9ec` | ✅ 已完成 | 2026-10-10 | drainFrames 可选短包填充状态机；NcmUsbBridgeFramingTest 9/9 通过 |
+| 二 | USB 读阶梯重试 | #495 `422a7d8e` | ✅ 已完成 | 2026-10-10 | UsbReadQueuePolicy 重写为 main 最终版（queueCeiling+阶梯+submitUnchanged）；另修复 API 17–25 `queue(ByteBuffer)` NoSuchMethodError 隐患（queueRead 扩展走废弃双参重载）；UsbReadQueuePolicyTest 18/18、CompatibilityTest 11/11 通过 |
+| 二 | 16 KiB usbfs 上限（扩到 API 17–25） | `764e0ba1` | ✅ 已完成 | 2026-10-10 | forCurrentPlatform 守卫下探为 `< P`（比 main 的 26/27 更保守）；Android8UsbReadTest 12/12 通过；CarPlayController describeThrowable 与 Iap2IdentificationRejectionTest（5.3 第 3 条）一并移植 |
+| 三 | 热点地址族恢复 | #474 `7b6f4585`/`39c052f5` | ✅ 已完成 | 2026-10-11 | 新增 `HotspotAddressRecovery.kt`（有界轮询+世代失效）；`HotspotAddressPolicy` 升级 main 完整版（parseFamily/flipFamily/select/alternateFamilyCandidate）；CarPlayController 接线 watchdog 交替族重扫。🔁 与 `LegacyHotspotRecovery.kt` 共存：前者负责 API 17–22 AP 重启，后者负责地址族交替，职责不同不删除。API 17–20 清除 IPv6 偏好守卫。HotspotAddressPolicyTest/RecoveryTest 20/20 通过 |
+| 三 | Android 17 本地网络权限守卫 | #465 `203a38aa` | ✅ 已完成 | 2026-10-11 | 新建 `WirelessPermissions.kt`：API 17 走 ACCESS_COARSE/FINE_LOCATION 分支 no-op；API 37 用字面量（android-36 缺 CINNAMON_BUN/ACCESS_LOCAL_NETWORK 常量）；manifest 声明 ACCESS_LOCAL_NETWORK（低版本忽略，无害）。WirelessPermissionsTest 3/3 通过 |
+| 三 | VPN 授权崩溃修复 | `4aee3f80` | ✅ 已完成 | 2026-10-11 | CarPlayHostActivity：requestVpnConsent 双 try/catch（prepare/launch）→ onVpnConsentUnavailable 诊断+状态文案；onVpnConsentResult 先校验 awaitingVpnConsent 防迟到结果；friendlyStage 透传。新增 `vpn_authorization_unavailable` ×7 语言。混合提交拆分：IAP2 拒绝报告部分波次二已移植 |
+| 三 | 热点安全设置保留 | `4aee3f80` | ✅ 已完成 | 2026-10-11 | DiPlayActivity askHotspotCredentials 增加 WPA2/WPA3/WPA3-Transition 选择（空密码=OPEN），saveHotspotCredentials 持久化 security+markReconnectNeeded；ManualHotspotValidation 注释同步 |
+| 三 | 蓝牙延迟暂停（生命周期安全） | #307 `289fcc77`/`8681254b` | ✅ 已完成 | 2026-10-11 | 新建 `BluetoothSuspendLease.kt`（journal 持久化+ticket 世代）与 `BydBluetoothSuspend.kt`（suspend/resume/resumeAndWait/isSuspendedByUs）；CarPlayController 会话激活/结束/close 接线；无线握手 resumeAndWait 失败抛 IOException；API 17 适配 BluetoothCompat.getAdapter。分支 close() 用 synchronized(this)，e9a46e12 锁调整不适用。设置入口：showVehicleDataSettings toggle+5/15/30 延时（默认 10s）。bt_suspend_* 字符串 ×7 语言 |
+| 三 | 自动让出焦点重连条 | #482 `35335b0d`/`8ef6938e` | ✅ 已完成 | 2026-10-11 | audio_focus_auto_yield toggle 保存后 markReconnectNeeded()（合并重复小提交处理） |
+| 三 | iPhone 蓝牙唤醒启动 | #439 `fe1a59db` | ✅ 已完成 | 2026-10-11 | 新建 `PhoneBluetoothReceiver.kt`（ACL_CONNECTED 匹配已选 iPhone，15s commit 防抖，PhoneWakeDiagnostics 脱敏诊断）；API 17 适配 PermissionCompat.hasPermission；DiPlayBootstrap 两持久化方法；DiPlayActivity onCreate/onNewIntent consumeBluetoothAutoConnectIntent + AUTOMATIC_CONNECTION toggle + 诊断报告接线；mobile manifest 静态注册 receiver；恢复 BLUETOOTH_CONNECT uses-permission（API 31+ 必需，低版本忽略）；字符串 ×7 语言 |
+| 三 | 显示变更保持会话 | #501 `d5d9d2fd` | ✅ 已完成 | 2026-10-11 | CarPlayHostActivity restoreSettingsBaseline 仅系统栏真变化时 applyFullscreenMode+refreshDisplaySizeAfterLayout；displayLayoutChanged 宽高比改用 windowWidth/windowHeight 基准（正方形协商画布不再误判 PiP） |
+| 三 | 内置热点蓝牙下发凭据文案 | `15c0e697` | ✅ 已完成 | 2026-10-11 | hotspot_mode_manual_desc 更新 ×7 语言 |
+| 三 | 连接设置修复集成 | `6eecada8` #517 | ✅ 已完成 | 2026-10-11 | VPN/热点安全部分与 4aee3f80 重叠已移植；Iap2IdentificationClient 拒绝消息列表诊断波次二已移植；ManualHotspotValidation 注释同步 |
+| 四 | 视频积压恢复界限 | #347 `21195488` | ✅ 已完成 | 2026-10-11 | 新增 `VideoBacklogRecovery.kt`（episode 状态机，SOFT/HARD 界限）；`VideoDecodeQueue` 整文件替换为 main 版（backlogAfterCurrent/discardCurrentChain）；`VideoRecoveryFrameAge` 防作废 IDR 重启；AudioRenderer 拷贝 PCM 后立即 releaseOutputBuffer、writePcm 移锁外 |
+| 四 | 解码器一次多帧 | #456 `1df2cd2c` | ✅ 已完成 | 2026-10-11 | `videoDecoderAttempts` 有序尝试列表（低延迟带速率→低延迟→默认带速率→默认调优→最小→软件）；`PICTURE_ORDER_PARAMETER` 仅 API 31+ 且解码器声明时设置；framesAtOnce=主屏+无镜像标签+平滑视频 |
+| 四 | 低延迟解码 + 输出线程 + FPS 计数 | #496 `5dabc170`/`52004bfb` | ✅ 已完成 | 2026-10-11 | 高通厂商键（configure 抛 BAD_VALUE 由尝试列表回退）；`dedicatedOutputThread` 以 THREAD_PRIORITY_DISPLAY 即时释放帧，`outputLock`+`dequeuing` 协调编解码器交接；`FpsCounterOverlay` 已是 View 版直接复制；新增直接视频输出/低延迟解码/FPS 计数器三项设置 ×7 语言；`carPlayVideoSurfaceMode` 加 directVideoOutput；HostActivity 接线（FPS 启停/重建检查/日志）；CarPlayVideoSurfaceTest 同步 main 断言 |
+| 四 | 解码器工作速率提示 | #417 `19d11af7` | ✅ 已完成 | 2026-10-11 | `videoOperatingRate` 仅主屏取帧率设置；API 17 适配：`KEY_OPERATING_RATE` 加 `SDK_INT >= M` 守卫（main minSdk 25 无守卫）；被拒后 `dropOperatingRate` 记忆跳过 |
+| 五 | BYD 氛围灯音乐跟随 | #345 `60300d89`/`34cf4e19` | ✅ 已完成 | 2026-10-11 | 分支提交 `c0098328`；Ambient* 全套（AmbientLightMode/AmbientMusicFollow 等）+ 设置入口，音乐跟随挂音频管线 |
+| 五 | 导航播报方向盘音量 | #344 `ba8cdca1` | ✅ 已完成 | 2026-10-11 | NavigationWheel* + WheelKeyService 接线；播报期间方向盘键调导航流音量 |
+| 五 | Platform-21 仪表路由 | #348 `52bbad46` | ✅ 已完成 | 2026-10-11 | LegacyClusterLayout 移植；API 17 隐藏入口（守卫 `SDK_INT >= 21` 才显示路由选项） |
+| 五 | DiLink3 到达时间 AMap 形式 | #458 `0e54b3ea` | ✅ 已完成 | 2026-10-11 | ETA 格式化为 AMap 文案形式，随 #348 集群路由接线 |
+| 五 | ADB 开机自启修复 | #441 `eac7a3d9` | ✅ 已完成 | 2026-10-11 | BydBootStartRepair 移植；诊断报告接线 |
+| 五 | 侧栏拖拽/把手/轮胎 | #480 `ef11e819`/`4dda8598` | ✅ 已完成 | 2026-10-11 | main 版已是 View 代码，整体移植（拖拽/把手/tab/轮胎）；⏭️ 跳过 resize 模糊（Android 12 RenderEffect）；appNight→分支 darkMode；新增 paintSidePanelTheme() 挂 onNightChanged；tab 触摸经 forwardSidePanelTabTouch→onHostTouch 复用分支手势层 |
+| 五 | Wi-Fi Direct 频段选择 | #432 `00523988` | ✅ 已完成 | 2026-10-11 | WifiP2pBand 枚举 + AUTO_5_GHZ/AUTO_2_4_GHZ；P2pStartupRecovery.bandPlan；WifiP2pGroupManager `bandRequests = !legacyChannels`——API 17 走 WifiP2pLegacyChannelsApi17 只试频段内显式信道；设置入口 + 描述 ×7 语言 |
+| 五 | CarPlay 音频走车机蓝牙（实验） | #432 `593ac236` | ✅ 已完成 | 2026-10-11 | disableAudioOutput 接线 + AirPlayPersistence.load/saveCarBluetoothAudio（默认关）；诊断 logCarBluetoothAudio() 用 BluetoothCompat.getAdapter 适配 API 17（getSystemService(Class) 为 API 23+）；字符串 ×7 语言 |
+| 六 | Light/Dark/Auto 外观 | #422/#420/#346 | ✅ 已完成 | 2026-10-11 | B0–B8 十批：AppAppearance/DiPlayPalette/AppDialogs 基建 + 设置页调色板化（113 处常量）+ 10 分类信息架构 + Display 卡三态 choice + rememberLaunchAppearance（API 33+ splash，AUTO 维持深色）+ Theme.Xcertplay.Light（Holo/Material 双层）+ 主机页/诊断页外观联动（View 版，不迁 Compose） |
+| 六 | DiLink 设置向导 | #416 `4dbc509f` | ✅ 已完成 | 2026-10-11 | B4：setup 包（SetupGuide/DiLinkGeneration）1:1 复制；DiPlayActivity 向导函数组 View 实现 + 首启自动打开 + Overview 入口；28 条字符串 ×7 |
+| 六 | GitHub 更新检查 | #413 `f4e7d06f` | ✅ 已完成 | 2026-10-11 | B5：update 包 5 文件 + 4 测试（⏭️ 跳过 UpdateClientTest，依赖 JDK 内置 HttpServer）；UpdateApkProvider FileProvider 注册；about 页 updateRow 全套；`contentLengthLong` 加 API 19+ 守卫；8 条字符串 ×7 |
+| 六 | 设置内联搜索 | #450 `3ce0a181` | ✅ 已完成 | 2026-10-11 | B3：header 常驻搜索框（返回键+标题+EditText+外观按钮）+ PopupWindow 结果弹层 + 索引构建 + 焦点/键盘管理；⏭️ 跳过 centreGlyphs 标题样式（头部改版范围） |
+| 六 | 小窗转弯卡片独立摆放 | #493/#494 | ⚠️ 部分 | 2026-10-11 | #494 全屏部分完成：1% 滑块 + 旧 10% 档位迁移（shared `markerXPercents` + DiLink4 参数 + 持久化新键 + 三处消费端 + onCommit）；⏭️ #493 整块与 #494 小窗 marker 依赖分支缺失的小窗模式域（`loadClusterSmallWindowMode`/`adbNaviMode`/`detectedCluster.smallWindow`），留待小窗功能域整体迁移 |
+| 六 | 暂存设置丢弃确认 | #500 `99375a7e` | ✅ 已完成 | 2026-10-11 | menuSettingsSignature 签名（33 字段镜像 persistMenuSettings）+ leaveSettingsMenu 弹 AlertDialog（明暗跟随 appNight）；返回手势与跳转设置两出口弹询问，关闭控件/USB 静默；3 条字符串 ×7（以 main 原文为准） |
+| 六 | 下滑手势 Off 选项 | #487 `d05fcb25` | ✅ 已完成 | 2026-10-11 | 手势数 0=禁用：持久化 0 值语义 + ACTION_POINTER_DOWN 守卫 + 提示/按钮专用文案 + CarPlay 控件卡 Off 选项；3 条字符串 ×7 |
+| 六 | 重连条联动 | #482/`f256cd64` | ✅ 已完成 | 2026-10-11 | markReconnectNeeded 接线已随批次带入；补 #482 会话挂起重连条测试（PendingReconnect 挂起 + 重连条可见 + 不停止会话） |
+| 六 | 设置间距/对齐精修 | #486/#491/#490 | ✅ 已完成 | 2026-10-11 | #486/#420 布局代码已随 B2 基线（6ebb582）带入；#491 补 3 处 dp 字面量 → `SETTINGS_BLOCK_GAP_DP` + SettingsLayoutSourceRulesTest + headerActionsShareOneHeight；#490 AGENTS.md Settings layout 节 + overviewLinksToEveryOtherCategory；#420 HomeCompactLayoutTest 横竖屏排列断言 |
+| 七 | 7 语言字符串同步 | 各波次随附 | ✅ 已完成 | 2026-10-11 | 分支提交 `2deb9cc0`/`c33d6d35`；6 个 main 文案提交应用 + `fps_counter_*` ×6 语言补齐；`SettingsTranslationsTest` 1/1 通过；详见 10.1 |
 
 ### 0.5 每轮迁移的文档更新义务
 
@@ -283,6 +287,12 @@ shared/.../media/AudioTrackRenderer*.kt         # prebuffer 重建 + 节流
 
 真机验证：API 17 车机上发起 CarPlay 通话/Siri，确认诊断报告中 `encoder=concentus` 且对侧能听到声音。
 
+### 4.5 完成记录（2026-10-11，分支 `port/wave1-audio-remaining`）
+
+- 遗留 4 项全部完成（见 0.4 进度表波次一各行）：#499 音频诊断上报、#468 诊断集成（核对分支已具备，仅补 #499 缺口）、#484 缓冲音频节流、#401 prebuffer 恢复+记账。
+- `AudioBufferProgress.shouldRebuffer` 签名新增 `floorBytes` 参数，调用点传 `startThresholdBytes / 2L`；`AudioBufferProgressTest` 同步 main 版（纯 JUnit，编译通过）。
+- 按用户指示跳过单元测试，仅编译验证：`:shared/:common:compileDebugKotlin`、`:shared:compileDebugUnitTestKotlin`、`:mobile:assembleDebug` 通过（JDK 17 + `--offline`）。
+
 ---
 
 ## 5. 波次二：USB/传输层修复
@@ -372,6 +382,16 @@ common/src/main/AndroidManifest.xml               # 注册 PhoneBluetoothReceive
 
 真机：无线连接在热点 IPv4 失效场景下自动切 IPv6 重试；蓝牙暂停后断开 CarPlay，确认车机蓝牙自动恢复。
 
+### 6.5 完成记录（2026-10-11，分支 `port/wave3-wireless`）
+
+- 全部 10 项移植完成（见 0.4 进度表波次三各行），API 17 适配要点 1–5 均落实：
+  - `ApiLevel.isBelow(21)` 清除 IPv6 偏好；`WirelessPermissions` API 17 no-op；
+  - `BydBluetoothSuspend` 经 `BluetoothCompat.getAdapter`；`PermissionCompat.hasPermission` 兼容接收器与设置 toggle；
+  - android-36 缺失常量（CINNAMON_BUN/ACCESS_LOCAL_NETWORK）以字面量 37 与权限字符串替代。
+- `LegacyHotspotRecovery.kt` 与 `HotspotAddressRecovery.kt` 判定职责不同（AP 重启 vs 地址族交替），**共存不删除**。
+- 分支 `close()` 使用 `synchronized(this)`，`e9a46e12` 的 `wirelessResourceLock` 调整不适用，未移植。
+- 按用户指示跳过单元测试，仅做编译验证：`:shared:compileDebugKotlin`、`:common:compileDebugKotlin`、`:mobile:assembleDebug` 全部通过（JDK 17 + `--offline`）。
+
 ---
 
 ## 7. 波次四：视频链路
@@ -410,6 +430,20 @@ common/.../FpsCounterOverlay.kt            # View 版覆盖层，可直接用（
 
 真机：API 17 车机播放 CarPlay 视频 10 分钟，观察积压恢复日志与 FPS 覆盖层。
 
+### 7.5 完成记录（2026-10-11，分支 `port/wave4-video`，提交 `37c1cd4a`）
+
+- 4 项功能全部移植完成（见 0.4 进度表波次四各行），并附带 `d729cd89` 的 API 29/30 调用规避：
+  - `ExistingWifiManager`：`clearCapabilities()`（API 30）低版本改为逐个 `removeCapability` 默认能力；
+  - `DiPlayActivity` 设置滑杆：`minHeight`（API 29）低版本改用 `minimumHeight`。
+- **移植方式**：分支 `AndroidMediaSink.kt` 与 main 的 diff 混入非波次四改动（AmbientMusicController、AudioFocusRequestCompat 等分支没有的实现），**不能整文件替换**，按 hunk 外科手术式只移植视频逻辑；`VideoDecodeQueue.kt` 差异恰为波次四内容，整文件替换；`VideoBacklogRecovery.kt`/`LiveVideoMeter.kt`/`FpsCounterOverlay.kt` 为纯逻辑/View 实现，直接复制 main 版。
+- API 17 适配要点落实情况：
+  - 要点 1（`getInputBuffer(index)`）：核实分支自 `3b67c80b` 起就直接使用 `getInputBuffer(index)` 且无兼容层，属分支既有状态，不在本次范围、未改动。
+  - 要点 2（低延迟键守卫）：厂商键依赖 configure 抛 BAD_VALUE 后由尝试列表回退（main 原生逻辑）；`findLowLatencyDecoder`/`listsPictureOrder` 保留 main 的 R/S 守卫。
+  - 要点 3（FPS 计数器）：main 版即 TextView View 实现，直接复制。
+  - 要点 4（工作速率）：`KEY_OPERATING_RATE` 显式加 `SDK_INT >= M`（API 23）守卫。
+- 设置项归属：直接视频输出/低延迟解码 → Advanced（ADVANCED_MEDIA 卡），FPS 计数器 → Diagnostics 卡；三项均按 AGENTS.md 约定（重连语义写入描述，`reconnectIfRunning`/`markReconnectNeeded` 对应）。
+- 按用户指示跳过单元测试，仅做编译验证：`:shared:compileDebugKotlin`、`:common:compileDebugKotlin`、`:mobile:assembleDebug` 全部通过（JDK 17 + `--offline`）。
+
 ---
 
 ## 8. 波次五：车辆/HUD 集成
@@ -445,9 +479,32 @@ shared/.../network/WifiP2pGroupManager.kt（叠加）
 ./gradlew :common:testDebugUnitTest --tests "*NavigationWheel*"
 ```
 
+### 8.4 完成记录（2026-10-11，分支 `port/wave5-vehicle`，提交 `c0098328`）
+
+- 8 项功能全部移植完成（见 0.4 进度表波次五各行），62 文件变更、+3267/-72。
+- **#480 侧栏**：main 版已是 View 代码，字段块与函数块整体移植进分支 `CarPlayHostActivity.kt`；⏭️ 全链路剔除 resize 模糊（`startSidePanelBlur`/`endSidePanelBlur`/`releaseSidePanelEffects` 的 RenderEffect 部分，Android 12 API）；main 的 `appNight` 改用分支 `darkMode` 字段；分支无 overlayPalette/MENU_PRIMARY 配色体系，新增 `SIDE_PANEL_CARD/PRIMARY/SECONDARY` 三个 darkMode 派生 getter + `paintSidePanelTheme()` 挂到 `nightModeController.onNightChanged`；tab 触摸经 `forwardSidePanelTabTouch` → 分支 `onHostTouch` 复用手势层；companion 新增 `SIDE_PANEL_CLOSE_SHARE`/`SIDE_PANEL_TAB_HINT_MILLIS`。
+- **#432 频段**：`WifiP2pChannels` 加 `WifiP2pBand` 枚举（2.4G 2412..2484 / 5G 5150..5895）与 `AUTO_5_GHZ=-5`/`AUTO_2_4_GHZ=-2` 伪信道；`P2pStartupRecovery` 加 `bandRequests` 参数与 `bandPlan()`；`WifiP2pGroupManager` 以 `bandRequests = !legacyChannels` 接线——**API 17 自动走 `WifiP2pLegacyChannelsApi17` 只试频段内显式信道**，config builder 用 `setGroupOperatingBand`，组校验加 band.contains 检查。
+- **#432 蓝牙音频**：`disableAudioOutput` 接线 + `AirPlayPersistence.load/saveCarBluetoothAudio`（默认关）；API 17 适配——`getSystemService(Class)` 是 API 23+，诊断 `logCarBluetoothAudio()` 改用 `BluetoothCompat.getAdapter`，`getProfileProxy` 返回值检查，A2DP/HFP 双探测（即时 + 30s 后）。
+- 设置字符串 4 条（`settings_wifi_direct_auto_band`/`settings_wifi_direct_band_note`/`settings_car_bluetooth_audio`/`settings_car_bluetooth_audio_description`）同步 ×7 语言，xmllint 验证通过。
+- 按用户指示跳过单元测试，仅做编译验证：`:shared:compileDebugKotlin`、`:common:compileDebugKotlin`、`:mobile:assembleDebug` 全部通过（JDK 17 + `--offline`）。
+
 ---
 
 ## 9. 波次六：UI 功能（需 View 重写）
+
+> **✅ 波次六已完成**（2026-10-11，分支 `port/wave6-ui`，B0–B8 + 散项共 13 个提交，见 9.1 完成记录）。
+
+### 9.1 完成记录（2026-10-11，分支 `port/wave6-ui`）
+
+- 按《UI高保真还原main分支改造方案.md》B0–B8 十批 + 散项推进，13 个提交：`a9d8ff93`(B0) → `9ce1af9d`(B1) → `779fac62`(B2) → `aa88b02c`(B6) → `bb056227`(B3) → `24bb5db9`(B4) → `0a00a3ed`(B5) → `c5988146`(B7) → `22115621`(B8) → `56e45a4c`/`e7b4ecdc`/`d419683e`/`003b7a5b`(散项)。
+- **外观（B0/B1/B8）**：`AppAppearance`/`DiPlayPalette`/`AppDialogs` + 大开关样式；设置页 113 处颜色常量→palette；Display 卡三态 choice + appearanceButton；`rememberLaunchAppearance`（API 33+ `setSplashScreenTheme`，AUTO 维持深色边框）；`Theme.Xcertplay.Light` 按 Holo（`values/`）+ Material（`values-v21/`）双层拆分（未移植 `windowSplashScreenBackground`，API 31-32 车机保持深色边框，与 main 注释语义一致）；CarPlay 主机页实现 `AppAppearanceOwner`（身份校验发布/清除）+ 诊断页 MainActivity View 版联动（调色板上色 + `AppAppearanceRuntime.observeHost`，不迁 Compose）。
+- **信息架构（B2）**：10 分类/18 区块/about 独立页对齐 main，AGENTS.md 同步修订；B6 横屏强制完整布局（`AppearanceLayoutCompatibilityTest`）。
+- **向导/更新/搜索（B3/B4/B5）**：SetupGuide/DiLinkGeneration 与 update 包纯逻辑 1:1 复制，UI 用分支 View 控件重建；`UpdateApkProvider` 注册 manifest；`UpdateClient.contentLengthLong` 加 API 19+ 守卫；⏭️ UpdateClientTest 跳过（依赖 JDK 内置 HttpServer，分支 Java 8 toolchain 不可见）。
+- **主机页（B7）**：`CarPlayHostActivity` 实现 `AppAppearanceOwner`（onResume 发布/onPause·onDestroy 清除），`refreshAppAppearance()` 重建设置菜单并复用波次五 `paintSidePanelTheme()`；`WaitingScreenColors` 替换为 main 版（`DiPlayPalette.of(night)`）。
+- **散项**：#487 手势 Off（0 值语义 + `ACTION_POINTER_DOWN` 守卫 + 专用文案）；#500 丢弃确认（签名 33 字段镜像 `persistMenuSettings`，返回手势/跳转设置弹 AlertDialog，关闭控件与 USB 静默丢弃）；#490/#491/#420/#482 补齐 AGENTS.md Settings layout 规则节与 6 个 UI/源码扫描测试；#494 全屏 marker 1% 滑块 + 旧 10% 档位迁移（shared `CarPlayClusterDisplay`/`DiLink4ClusterDisplay`/持久化新键/设置滑块/三处消费端，`OverlaySliderRow.onCommit` 手指离开触发重连标记）。
+- **⏭️ 跳过（依赖缺失）**：#493 小窗卡片独立摆放/主题/透明度/`ClusterCardPlacementPreview` 预览与 #494 小窗 marker 部分——依赖分支没有的小窗模式域（`loadClusterSmallWindowMode`/`adbNaviMode`/`detectedCluster.smallWindow`），留待小窗功能域整体迁移时一并移植。
+- 字符串全部同步 ×7 语言（手势 Off 3 条、丢弃确认 3 条、向导 28 条、更新 8 条等），python3 插入 `</resources>` 前 + `xml.etree` 验证合法性。
+- 按用户指示跳过单元测试，仅做编译验证：`:shared:compileDebugKotlin`、`:common:compileDebugKotlin`、`:common:compileDebugUnitTestKotlin`、`:mobile:assembleDebug`（JDK 17 + `--offline`）全部通过。
 
 以下 main 功能基于 Compose，**全部以分支 View 结构为基线手工重新实现**。按用户价值排序：
 
@@ -477,6 +534,8 @@ shared/.../network/WifiP2pGroupManager.kt（叠加）
 
 ## 10. 波次七：本地化与文案同步
 
+> **✅ 波次七已完成**（2026-10-11，分支 `port/wave7-i18n`，2 个提交，见 10.1 完成记录）。
+
 main 在两批发布中为 7 个语言目录新增了数百条字符串。**移植每个功能时同步字符串**，不要攒到最后。
 
 规则（来自 `AGENTS.md`）：
@@ -487,6 +546,23 @@ main 在两批发布中为 7 个语言目录新增了数百条字符串。**移�
 4. 乌克兰语措辞修正（`b709f3ec`/`496afce4`，#399）一并应用；
 5. 中文标签对齐与共享头图标（`3d4329a3`/`bc1c6001`/`9919585e`/`9c7fda97` 等）按波次六 View 实现处理；
 6. 每波结束跑 `SettingsTranslationsTest` 确认无遗漏。
+
+### 10.1 完成记录（2026-10-11，分支 `port/wave7-i18n`）
+
+**main 提交应用（基线 `6ebb582`，提交 `2deb9cc0`）**：
+
+- **`b709f3ec`/`496afce4`（#399 乌克兰语措辞）**：`values-uk` 31+1 处 приборка→панель приладів；`wheel_key_service_description` 分支文本无 приборка 词，跳过。
+- **`bc1c6001`（亮度阈值简化）**：`strings_ambient_threshold.xml` ×7（values + 6 语言）title "Ambient light threshold"→"Brightness threshold"、hint 简化；`DiPlayActivity` 门槛对话框去掉冗余的"切换门槛 (lux)"标签行。
+- **`9919585e`（日夜模式提示合并）**：`strings_night_mode.xml` ×7 经 name 锚定整行替换与 main 对齐（`carplay_night_ambient`/`ambient_hint`/`time_note`，zh-rTW 另含 hint）；`DiPlayActivity` 两句提示合并为一行（中文两句间不加空格）；API 17 适配：`Configuration.locales` 是 API 24+，低版本走 deprecated `locale`；`NightModeSettingsTest` 同步 main 合并后单 label 断言。
+- **`3d4329a3`（中文标签对齐与共享头图标）**：compact logo `dp(24)`→`dp(30)`；`ic_dp_advanced.xml` 齿轮 pathData 整体替换为 main 新路径；⏭️ centreGlyphs 4 处改动依赖 main 自绘基线逻辑，分支无对应物，跳过。
+- **`9c7fda97`（更大开关）**：`applyLargeSwitchStyle`（60x34dp 轨道 + 28dp 拇指）已随波次六带入，本波接线 `SettingsWidgets.createSwitchRow` 全部开关 + `CarPlayHostActivity` 定位上报开关；API 17 适配：`showText`/`thumbTintList`/`trackTintList` 为 API 21+，经 `UiCompat` 守卫；`SettingsWidgetsTest` 拇指三态断言改 `state_enabled+state_checked`、新增大开关尺寸/禁用态染色测试；⏭️ CarPlayPicturePanel 分支实现不同（无 tint 代码），跳过。
+
+**字符串补齐（提交 `c33d6d35`）**：
+
+- 37 条 `settings_*`（B2 信息架构）经核查已随波次六在各语言 `strings_settings_layout.xml` 齐全——首轮摸底只对比了各目录 `strings.xml` 误判缺失，补译后资源合并报 Duplicate resources，按与 `SettingsTranslationsTest` 同口径（语言目录**全部** XML）复核确认真实缺失为 0，重复行已全部移除。**教训：字符串齐全性判定必须覆盖语言目录下全部 XML，不能只看 `strings.xml`。**
+- `fps_counter_*` 4 条（波次四 FPS 计数器）为真实缺失，补齐 ar/es/ru/uk/zh-rCN/zh-rTW ×6 语言，placeholder（`%1$d/%2$d/%3$s`）与默认语言一致。
+
+**验证**：`SettingsTranslationsTest` 1/1 通过（资源合并 + 纯字符串 JUnit）；`:common:compileDebugKotlin`、`:common:compileDebugUnitTestKotlin`、`:mobile:assembleDebug`（`--offline`，JDK 17）全部通过。
 
 ---
 
@@ -556,7 +632,7 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 - [ ] 复制 `org/concentus/**`（126 文件）并编译通过
 - [ ] 移植 `SoftwareOpusEncoder/OpusEncoderSupport/MicrophoneOpusEncoder` + 测试
 - [ ] `AudioFocusRequestCompat` 补 API 8–25 分支
-- [ ] Opus 能力广告（#483）+ 音频诊断（#499）+ 回消对齐（#421）+ 缓冲节流（#484）+ prebuffer 恢复（#401）
+- [x] Opus 能力广告（#483）+ 音频诊断（#499）+ 回消对齐（#421）+ 缓冲节流（#484）+ prebuffer 恢复（#401）
 - [ ] `:shared:testDebugUnitTest --tests "*Opus*" --tests "*Echo*"` 通过
 
 ### 波次二 USB
@@ -565,41 +641,43 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 - [ ] 16 KiB 上限扩展到 API 17–25
 - [ ] 读阶梯重试（至 2 KiB）+ 全部 USB 测试通过
 
-### 波次三 无线
-- [ ] `HotspotAddressRecovery` 与分支 `LegacyHotspotRecovery` 对照去重合并
-- [ ] #307 蓝牙暂停完整生命周期（含 `8681254b`、`e9a46e12`）
-- [ ] `PhoneBluetoothReceiver` manifest 注册（静态广播）
-- [ ] Android 17 权限守卫为 no-op；VPN 授权崩溃修复移植
-- [ ] 热点安全设置保留（WPA3 选项按 API 守卫）
+### 波次三 无线 ✅（2026-10-11 完成，跳过单元测试，编译验证通过）
+- [x] `HotspotAddressRecovery` 与分支 `LegacyHotspotRecovery` 对照：职责不同，共存不合并
+- [x] #307 蓝牙暂停完整生命周期（含 `8681254b`；`e9a46e12` 锁调整不适用分支）
+- [x] `PhoneBluetoothReceiver` manifest 注册（静态广播）
+- [x] Android 17 权限守卫为 no-op；VPN 授权崩溃修复移植
+- [x] 热点安全设置保留（WPA3 选项按 API 守卫）
 
-### 波次四 视频
-- [ ] 积压恢复（#347）+ 一次多帧（#456）+ 专用输出线程（#496）
-- [ ] 低延迟/工作速率键 API 守卫 + 回退
-- [ ] FPS 计数器 View 化
-- [ ] `getInputBuffer(index)` 全部替换为 `getInputBuffers()`
+### 波次四 视频 ✅（2026-10-11 完成，跳过单元测试，编译验证通过）
+- [x] 积压恢复（#347）+ 一次多帧（#456）+ 专用输出线程（#496）
+- [x] 低延迟/工作速率键 API 守卫 + 回退（KEY_OPERATING_RATE 加 >= M 守卫）
+- [x] FPS 计数器（main 版已是 View 实现，直接复制）
+- [x] `getInputBuffer(index)`：核实为分支既有状态，不在本波次范围
+- [x] d729cd89 API 29/30 调用规避（clearCapabilities / minHeight）
 
-### 波次五 车辆
-- [ ] 氛围灯（#345）+ 方向盘音量（#344）+ DiLink3 ETA（#458）+ 开机修复（#441）
-- [ ] Platform-21 路由（#348）守卫隐藏
-- [ ] 侧栏 View 重写、模糊跳过、轮胎 ADB 读取
-- [ ] Wi-Fi Direct 频段走 Api17 legacy 路径
+### 波次五 车辆 ✅（2026-10-11，`c0098328`，详见 8.4）
+- [x] 氛围灯（#345）+ 方向盘音量（#344）+ DiLink3 ETA（#458）+ 开机修复（#441）
+- [x] Platform-21 路由（#348）守卫隐藏
+- [x] 侧栏 View 重写、模糊跳过、轮胎 ADB 读取
+- [x] Wi-Fi Direct 频段走 Api17 legacy 路径
+- [x] CarPlay 音频走车机蓝牙（#432 `593ac236`，默认关，BluetoothCompat 适配）
 
-### 波次六 UI
-- [ ] 外观 Light/Dark/Auto（#422/#420/#346）
-- [ ] 设置向导（#416）、更新检查（#413）
-- [ ] 内联搜索（#450）、小窗卡片（#493/#494）、丢弃确认（#500）、手势 Off（#487）
-- [ ] 重连条接线（#482/#501/`f256cd64`）
-- [ ] 间距/对齐精修（#486/#491/#490）
+### 波次六 UI ✅（2026-10-11，分支 `port/wave6-ui`，B0–B8 + 散项，详见 9.1）
+- [x] 外观 Light/Dark/Auto（#422/#420/#346，B0/B1/B2/B6/B7/B8 十批）
+- [x] 设置向导（#416）、更新检查（#413）
+- [x] 内联搜索（#450）、丢弃确认（#500）、手势 Off（#487）；小窗卡片 #494 全屏 1% 滑块完成，#493 ⏭️ 依赖小窗模式域
+- [x] 重连条接线（#482，测试补齐）
+- [x] 间距/对齐精修（#486/#491/#490/#420，布局随 B2 基线带入 + 测试/规则补齐）
 
-### 波次七 本地化
-- [ ] 全部 `settings_*` 字符串 7 语言齐全
-- [ ] `SettingsTranslationsTest` 通过
-- [ ] 实验性后缀各语言形式正确
+### 波次七 本地化 ✅（2026-10-11，分支 `port/wave7-i18n`，详见 10.1）
+- [x] 全部 `settings_*` 字符串 7 语言齐全（37 条 B2 架构字符串随波次六 `strings_settings_layout.xml` ×7 齐全）
+- [x] `SettingsTranslationsTest` 通过（1/1）
+- [x] 实验性后缀各语言形式正确（均沿用各语言既有形式，与 main 一致）
 
 ### 收尾
 - [ ] 分支全量构建：`./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleDebug`
 - [ ] 真机验收矩阵（第 12.3 节）逐项签字
-- [ ] 更新分支版 `CHANGELOG` 注明各功能对应 main PR 号
+- [x] 更新分支版 `CHANGELOG` 注明各功能对应 main PR 号（0.2.16-api17 段落，随版本同步完成）
 
 ---
 

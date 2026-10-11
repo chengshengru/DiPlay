@@ -34,7 +34,8 @@ class AdbClusterSelectionTest {
 
     @Test fun savedAdbSwitchCannotReplaceAnExistingDilink5Display() {
         AirPlayPersistence.saveAdbClusterEnabled(app, true)
-        val id = ShadowDisplayManager.addDisplay("w1920dp-h720dp-mdpi", 5)
+        // 分支既有修复：Robolectric 4.9 的 addDisplay 只有单参重载，display id 由 shadow 自动分配。
+        val id = ShadowDisplayManager.addDisplay("w1920dp-h720dp-mdpi")
         val manager = app.getSystemService(DisplayManager::class.java)
         shadowOf(manager.getDisplay(id)).apply {
             setName(DiLink51ClusterLayout.BASE)

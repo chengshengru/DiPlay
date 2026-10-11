@@ -22,7 +22,9 @@ class HotspotJoinPlatformTest {
     }
     @Test fun platformCopyAndFullParcelRoundtripPreserveEveryOtherStoredField() {
         val builder = SoftApConfiguration.Builder()
-            .setPassphrase("synthetic-password", SoftApConfiguration.SECURITY_TYPE_WPA2_PSK)
+        // setPassphrase 在 android-36 stub jar 中不可见（系统 API），走反射调用
+        builder.javaClass.getMethod("setPassphrase", String::class.java, Int::class.javaPrimitiveType)
+            .invoke(builder, "synthetic-password", SoftApConfiguration.SECURITY_TYPE_WPA2_PSK)
         builder.javaClass.getMethod("setSsid", String::class.java).invoke(builder, "synthetic-network")
         builder.javaClass.getMethod("setHiddenSsid", Boolean::class.javaPrimitiveType).invoke(builder, true)
         builder.javaClass.getMethod("setMaxNumberOfClients", Int::class.javaPrimitiveType).invoke(builder, 3)
@@ -48,7 +50,9 @@ class HotspotJoinPlatformTest {
     @Test fun hotspotCapabilityMustSupportTheStoredBandAndChannelRegardlessOfStationSupport() {
         fun config(channel: Int = 0): SoftApConfiguration {
             val builder = SoftApConfiguration.Builder()
-                .setPassphrase("synthetic-password", SoftApConfiguration.SECURITY_TYPE_WPA2_PSK)
+            // setPassphrase 在 android-36 stub jar 中不可见（系统 API），走反射调用
+            builder.javaClass.getMethod("setPassphrase", String::class.java, Int::class.javaPrimitiveType)
+                .invoke(builder, "synthetic-password", SoftApConfiguration.SECURITY_TYPE_WPA2_PSK)
             builder.javaClass.getMethod("setSsid", String::class.java).invoke(builder, "synthetic-network")
             if (channel == 0) builder.javaClass.getMethod("setBand", Int::class.javaPrimitiveType)
                 .invoke(builder, 2)

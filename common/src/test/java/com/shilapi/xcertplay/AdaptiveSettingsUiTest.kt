@@ -8,6 +8,7 @@ import android.os.Looper
 import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -386,6 +387,40 @@ class AdaptiveSettingsUiTest {
         }
     }
 
+    // main #482：自动让出焦点开关须标记活动会话待重连（作者：TRAE AI）。
+    @Test
+    @Config(sdk = [28, 33])
+    fun theAudioFocusAutoYieldSwitchMarksTheActiveSessionForReconnect() {
+        // The sink reads this flag once, when it is built, so the change lands on the next session.
+        AirPlayPersistence.saveAudioFocusEnabled(context, true)
+        assertTrue(AirPlayPersistence.loadAudioFocusAutoYield(context))
+        val screen = openSettings()
+        val session = mock(CarPlayController::class.java)
+        var stops = 0
+        CarPlayBackgroundSession.store(session, mock(AndroidMediaSink::class.java), 800, 480, Any(),
+            CarPlaySessionDisplay(800, 480, Surface.ROTATION_0, false, false, 800, 480)) { stops++ }
+        CarPlayBackgroundSession.active = true
+        try {
+            ReflectionHelpers.setField(screen, "settingsCategory", SettingsCategory.ADVANCED)
+            PendingReconnect.clear()
+            ReflectionHelpers.callInstanceMethod<Unit>(screen, "render")
+            val setting = descendants(screen.window.decorView).filterIsInstance<Switch>()
+                .single { it.contentDescription == screen.getString(R.string.audio_focus_auto_yield) }
+            assertTrue(setting.isChecked)
+            setting.performClick()
+
+            assertFalse(AirPlayPersistence.loadAudioFocusAutoYield(context))
+            assertTrue(PendingReconnect.isPending(session))
+            assertEquals(View.VISIBLE, ReflectionHelpers.getField<View>(screen, "reconnectBar").visibility)
+            assertSame(session, CarPlayBackgroundSession.snapshot()?.controller)
+            assertEquals(0, stops)
+            assertEquals(null, shadowOf(screen).nextStartedActivity)
+        } finally {
+            CarPlayBackgroundSession.clear()
+            PendingReconnect.clear()
+        }
+    }
+
     @Test
     @Config(sdk = [29], qualifiers = "en-w1000dp-h700dp")
     fun expandedRailStaysOutsideTheScrollingCategory() {
@@ -500,6 +535,36 @@ class AdaptiveSettingsUiTest {
             val workers = CopyOnWriteArrayList<Thread>()
             var entered = CountDownLatch(1)
         }
+    }
+
+    // main #490：Overview 必须链接到除自身外的每个分类（作者：TRAE AI）。
+    @Test fun overviewLinksToEveryOtherCategory() {
+        val screen = openSettings()
+        (SettingsCategory.entries - SettingsCategory.OVERVIEW).forEach { category ->
+            val title = ReflectionHelpers.callInstanceMethod<String>(screen, "settingsCategoryTitle",
+                ReflectionHelpers.ClassParameter(SettingsCategory::class.java, category))
+            assertTrue(category.name, descendants(screen.window.decorView).any {
+                it.contentDescription == screen.getString(R.string.settings_open_category, title)
+            })
+        }
+    }
+
+    // main #491：标题栏操作控件（返回/搜索框/外观按钮）共享同一高度（作者：TRAE AI）。
+    @Test fun headerActionsShareOneHeight() = assertHeaderActionsShareOneHeight()
+
+    @Test
+    @Config(sdk = [29], qualifiers = "en-w400dp-h700dp-port")
+    fun compactHeaderActionsShareOneHeight() = assertHeaderActionsShareOneHeight()
+
+    private fun assertHeaderActionsShareOneHeight() {
+        val screen = openSettings()
+        val appearance = descendants(screen.window.decorView).single { it.tag == "app_appearance_button" }
+        val actions = (appearance.parent as ViewGroup).let { header ->
+            (0 until header.childCount).map(header::getChildAt)
+                .filter { it is android.widget.Button || it is EditText || it === appearance }
+        }
+        assertTrue(actions.size >= 3)
+        assertEquals(1, actions.map { it.layoutParams.height }.toSet().size)
     }
 
     private fun openSettings(): DiPlayActivity = Robolectric.buildActivity(
