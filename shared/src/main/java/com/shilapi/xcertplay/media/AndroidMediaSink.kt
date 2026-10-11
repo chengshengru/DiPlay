@@ -213,6 +213,8 @@ class AndroidMediaSink(
      * 并由专用线程把已解码帧交给屏幕。
      */
     private val vendorLowLatencyDecoder: Boolean = false,
+    /** main #608：MTK ACodec 低延迟/无重排模式(opt-in),带每会话自动回退。 */
+    private val mtkDecoderTuningEnabled: Boolean = false,
 ) : MediaSink {
     // Each downlink publishes its own reference; a mic must match that stream and sample rate.
     private val callEchoReferences = ConcurrentHashMap<AudioStreamId, EchoReference>()
@@ -654,6 +656,9 @@ class AndroidMediaSink(
         vendorLowLatency = vendorLowLatencyDecoder,
         dedicatedOutputThread = vendorLowLatencyDecoder,
         framesAtOnce = type == MAIN_SCREEN_TYPE && statsLabel == null && videoPacingDelayMillis > 0,
+        // main #608：实验性 MTK 模式只作用于主屏 CarPlay 画面。镜像与集群有独立时序,
+        // 必须保持既定解码器配置。
+        mtkDecoderTuningEnabled = mtkDecoderTuningEnabled && type == MAIN_SCREEN_TYPE && statsLabel == null,
     ).also { if (startImmediately) it.start() }
 
     @Synchronized
@@ -748,26 +753,35 @@ internal class ParkingOutput(width: Int, height: Int) {
 internal fun videoOperatingRate(type: Int, statsLabel: String?, frameRate: Int): Int =
     if (type == MAIN_SCREEN_TYPE && statsLabel == null && frameRate > 0) frameRate else 0
 
-internal data class DecoderAttempt(val codecName: String?, val tuned: Boolean, val operatingRate: Int = 0)
+internal data class DecoderAttempt(
+    val codecName: String?,
+    val tuned: Boolean,
+    val operatingRate: Int = 0,
+    val mtkMode: MtkDecoderMode = MtkDecoderMode.NONE,
+)
 
 /**
  * main #456/#496：按顺序尝试的配置组合。部分厂商解码器（如 MediaTek c2.mtk.avc.decoder）
  * 会以 BAD_VALUE 拒绝调优参数，因此依次回退到最小格式再到软件解码器。[operatingRate]
  * 先单独尝试，拒绝它的解码器仍可拿到不带速率的调优格式。[lowLatencyDecoder] 的调优尝试
- * 排在默认解码器之前。
+ * 排在默认解码器之前。[maximumMtkMode] 是 main #608 的 MTK 逐步回退模式序列。
  */
 internal fun videoDecoderAttempts(
     operatingRate: Int,
     softwareDecoder: String?,
     lowLatencyDecoder: String? = null,
-): List<DecoderAttempt> = listOfNotNull(
-    lowLatencyDecoder?.let { DecoderAttempt(it, tuned = true, operatingRate = operatingRate).takeIf { operatingRate > 0 } },
-    lowLatencyDecoder?.let { DecoderAttempt(it, tuned = true) },
-    DecoderAttempt(codecName = null, tuned = true, operatingRate = operatingRate).takeIf { operatingRate > 0 },
-    DecoderAttempt(codecName = null, tuned = true),
-    DecoderAttempt(codecName = null, tuned = false),
-    softwareDecoder?.let { DecoderAttempt(it, tuned = false) },
-)
+    maximumMtkMode: MtkDecoderMode = MtkDecoderMode.NONE,
+): List<DecoderAttempt> = buildList {
+    if (operatingRate > 0) lowLatencyDecoder?.let { add(DecoderAttempt(it, tuned = true, operatingRate)) }
+    lowLatencyDecoder?.let { add(DecoderAttempt(it, tuned = true)) }
+    val mtkModes = maximumMtkMode.attempts()
+    if (operatingRate > 0) {
+        mtkModes.forEach { add(DecoderAttempt(null, tuned = true, operatingRate, it)) }
+    }
+    mtkModes.forEach { add(DecoderAttempt(null, tuned = true, mtkMode = it)) }
+    add(DecoderAttempt(codecName = null, tuned = false))
+    softwareDecoder?.let { add(DecoderAttempt(it, tuned = false)) }
+}
 
 /**
  * main #417：下次配置请求的工作速率：速率被拒绝后由后续尝试成功时不再请求（[used]），
@@ -834,6 +848,8 @@ private class VideoDecoder(
      * 并向声明 [PICTURE_ORDER_PARAMETER] 的解码器请求它，让每帧尽快离开解码器。
      */
     private val framesAtOnce: Boolean = false,
+    /** main #608：本流允许 MTK 解码器调优(仅主屏、非镜像)。 */
+    private val mtkDecoderTuningEnabled: Boolean = false,
 ) : Closeable {
     private val pacer = FramePacer()
     private val pacingDelay = if (pacingDelayNanos > 0) PacingDelay(pacingDelayNanos) else null
@@ -863,6 +879,12 @@ private class VideoDecoder(
     // main #417：仍在请求的工作速率（解码器拒绝后本流归零），以及当前 codec 实际配置的值。
     private var operatingRate = operatingRate
     private var configuredRate = 0
+    // main #608：MTK 实验模式的本流上限,以及当前 codec 实际配置的模式与 Codec2 低延迟标志。
+    private var maximumMtkMode = if (mtkDecoderTuningEnabled) {
+        MtkDecoderMode.LOW_LATENCY_NO_REORDER
+    } else MtkDecoderMode.NONE
+    private var configuredMtkMode = MtkDecoderMode.NONE
+    private var configuredMtkCodec2LowLatency = false
     // main #496：正在配置的 codec 是否已设置厂商低延迟参数。
     private var configuredVendorLowLatency = false
     // main #496：低延迟解码器被拒后不再尝试；以及最近一次 tryConfigure 启动 codec 的实参。
@@ -1025,6 +1047,12 @@ private class VideoDecoder(
     private fun onJobFailure(stage: String, error: Exception) {
         if (running) Log.e(TAG, "video decoder job failed: $stage", error)
         if (running) reportFailure("stage=$stage", error)
+        // main #608：MTK 厂商失败可能以 CodecException 或更宽的 IllegalStateException 浮现,
+        // 重建解码器之前先撤下当前实验模式。
+        if (error is IllegalStateException) {
+            dropMtkTuning("codec failed during $stage")
+            dropMtkCodec2LowLatency("codec failed during $stage")
+        }
         // codec 可能接受速率却仍运行失败（start 错误可能在后续调用才浮现）：
         // 带速率却在首帧前失败的 codec 不再获得该速率。
         if (configuredRate > 0 && !renderedFrameLogged && error is MediaCodec.CodecException) {
@@ -1106,17 +1134,28 @@ private class VideoDecoder(
                 pps.takeIf { it.isNotEmpty() }?.let { START_CODE + it },
             )
         }
-        // main #417/#496/#456：按尝试列表顺序配置；速率/低延迟被拒后回退到不带这些参数的格式。
+        // main #417/#496/#456/#608：按尝试列表顺序配置；速率/低延迟/MTK 被拒后回退。
         val requestedRate = operatingRate
         val atOnce = framesAtOnce && codec == VideoCodec.H264
-        val requestedLowLatency = if (atOnce && !lowLatencyDecoderRefused) findLowLatencyDecoder(mime) else null
-        var next: MediaCodec? = null
+        val requestedMtkCodec2 = if (mtkDecoderTuningEnabled && !lowLatencyDecoderRefused) {
+            MtkDecoderTuning.codec2LowLatencyDecoderName(mime)
+        } else null
+        val requestedLowLatency = requestedMtkCodec2
+            ?: if (atOnce && !lowLatencyDecoderRefused) findLowLatencyDecoder(mime) else null
+        val requestedMtkMode = if (mtkDecoderTuningEnabled &&
+            MtkDecoderTuning.legacyAcodecDecoderName(mime) != null) maximumMtkMode else MtkDecoderMode.NONE
+        var configured: ConfiguredVideoDecoder? = null
         var used: DecoderAttempt? = null
-        for (attempt in videoDecoderAttempts(requestedRate, softwareDecoderName(mime), requestedLowLatency)) {
-            next = tryConfigure(mime, csd, surface, attempt, atOnce)
-            if (next != null) { used = attempt; break }
+        for (attempt in videoDecoderAttempts(
+            requestedRate,
+            softwareDecoderName(mime),
+            requestedLowLatency,
+            requestedMtkMode,
+        )) {
+            configured = tryConfigure(mime, csd, surface, attempt, atOnce)
+            if (configured != null) { used = attempt; break }
         }
-        if (next == null) {
+        if (configured == null) {
             queue.discardCurrentChain()
             report("decoder configuration failed mime=$mime size=${width}x$height")
         }
@@ -1128,19 +1167,35 @@ private class VideoDecoder(
         renderedFrameLogged = false
         submittedFrameLogged = false
         synchronized(outputLock) {
-            decoder = next
+            decoder = configured?.codec
             outputLock.notifyAll()
         }
         configuredRate = used?.operatingRate ?: 0
-        if (next != null) {
+        configuredMtkMode = configured?.mtkMode ?: MtkDecoderMode.NONE
+        configuredMtkCodec2LowLatency = configured != null && requestedMtkCodec2 != null &&
+            configured.codecName.equals(requestedMtkCodec2, ignoreCase = true)
+        if (configured != null && MtkDecoderTuning.supportsLegacyAcodecKeys(configured.codecName) &&
+            configuredMtkMode.ordinal < requestedMtkMode.ordinal) {
+            report("MTK decoder tuning fell back at configure from=${requestedMtkMode.diagnosticName} " +
+                "to=${configuredMtkMode.diagnosticName}")
+            maximumMtkMode = configuredMtkMode
+        }
+        if (configured != null) {
             val rate = if (requestedRate > 0) " operatingRate=$configuredRate" else ""
             val lowLatency = if (vendorLowLatency) " vendorLowLatency=$configuredVendorLowLatency" else ""
             val output = if (outputThread != null) " outputThread=true" else ""
             val atOnceReport = if (atOnce) " lowLatency=$startedLowLatency pictureOrder=$startedPictureOrder" else ""
-            report("decoder=${next.name} mime=$mime size=${width}x$height$rate$lowLatency$output$atOnceReport")
+            val mtk = when {
+                configuredMtkCodec2LowLatency -> " mtkTuning=codec2-low-latency"
+                MtkDecoderTuning.isDecoderName(configured.codecName) ->
+                    " mtkTuning=${configuredMtkMode.diagnosticName}"
+                else -> ""
+            }
+            report("decoder=${configured.codecName} mime=$mime size=${width}x$height" +
+                "$rate$lowLatency$output$atOnceReport$mtk")
             Log.i(
                 TAG,
-                "video decoder configured name=${next.name} mime=$mime size=${width}x$height",
+                "video decoder configured name=${configured.codecName} mime=$mime size=${width}x$height$mtk",
             )
         }
     }
@@ -1151,7 +1206,30 @@ private class VideoDecoder(
         operatingRate = 0
     }
 
-    private fun buildFormat(mime: String, csd: List<ByteArray>, attempt: DecoderAttempt): MediaFormat =
+    /** main #608：撤下当前 MTK 模式,回退一档并在报告里说明原因。 */
+    private fun dropMtkTuning(reason: String) {
+        val previous = configuredMtkMode
+        if (previous == MtkDecoderMode.NONE) return
+        val fallback = previous.fallback()
+        if (fallback.ordinal < maximumMtkMode.ordinal) maximumMtkMode = fallback
+        report("MTK decoder tuning ${previous.diagnosticName} dropped: $reason; " +
+            "next=${fallback.diagnosticName}")
+    }
+
+    /** main #608：专用 MTK Codec2 低延迟解码器失败后不再尝试,回到默认解码器。 */
+    private fun dropMtkCodec2LowLatency(reason: String) {
+        if (!configuredMtkCodec2LowLatency) return
+        configuredMtkCodec2LowLatency = false
+        lowLatencyDecoderRefused = true
+        report("MTK Codec2 low-latency decoder dropped: $reason; next=default")
+    }
+
+    private fun buildFormat(
+        mime: String,
+        csd: List<ByteArray>,
+        attempt: DecoderAttempt,
+        mtkMode: MtkDecoderMode,
+    ): MediaFormat =
         MediaFormat.createVideoFormat(mime, width, height).apply {
             if (attempt.tuned) {
                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_SIZE)
@@ -1161,8 +1239,16 @@ private class VideoDecoder(
                     setInteger(MediaFormat.KEY_OPERATING_RATE, attempt.operatingRate)
                 }
             }
+            // main #608：MTK 旧 ACodec 的低延迟/无重排键(拼写为 vdec-no-record)。
+            mtkMode.formatKeys().forEach { setInteger(it, 1) }
             csd.forEachIndexed { index, bytes -> setByteBuffer("csd-$index", ByteBuffer.wrap(bytes)) }
         }
+
+    private data class ConfiguredVideoDecoder(
+        val codec: MediaCodec,
+        val codecName: String,
+        val mtkMode: MtkDecoderMode,
+    )
 
     private fun tryConfigure(
         mime: String,
@@ -1171,17 +1257,21 @@ private class VideoDecoder(
         attempt: DecoderAttempt,
         /** main #456：解码器声明 [PICTURE_ORDER_PARAMETER] 时请求它（[framesAtOnce]、H.264）。 */
         atOnce: Boolean = false,
-    ): MediaCodec? {
+    ): ConfiguredVideoDecoder? {
         var candidate: MediaCodec? = null
+        var mtkMode = MtkDecoderMode.NONE
         var codecName = attempt.codecName ?: "default"
         var phase = "create"
         var phaseStartNs = System.nanoTime()
         val startedNs = phaseStartNs
         return try {
-            val format = buildFormat(mime, csd, attempt)
             val codec = attempt.codecName?.let { MediaCodec.createByCodecName(it) } ?: createDecoder(mime)
             candidate = codec
-            codecName = runCatching { codec.name }.getOrDefault(codecName)
+            val createdName = runCatching { codec.name }.getOrNull().orEmpty()
+            codecName = createdName.ifEmpty { codecName }
+            // main #608：MTK 键只对 OMX.MTK. 解码器生效;其他解码器直接忽略该模式。
+            mtkMode = appliedMtkDecoderMode(attempt.mtkMode, createdName)
+            val format = buildFormat(mime, csd, attempt, mtkMode)
             phase = "configure"
             phaseStartNs = System.nanoTime()
             val lowLatency = attempt.tuned && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
@@ -1200,18 +1290,24 @@ private class VideoDecoder(
             codec.start()
             startedLowLatency = lowLatency
             startedPictureOrder = pictureOrder
-            codec
+            val configuredName = runCatching { codec.name }.getOrNull().orEmpty()
+                .ifEmpty { createdName }
+                .ifEmpty { attempt.codecName ?: "default" }
+            ConfiguredVideoDecoder(codec, configuredName, mtkMode)
         } catch (error: Exception) {
             val phaseMs = (System.nanoTime() - phaseStartNs) / 1_000_000
             val elapsedMs = (System.nanoTime() - startedNs) / 1_000_000
             runCatching { candidate?.release() }.onFailure {
                 Log.w(TAG, "video decoder candidate release failed name=$codecName", it)
             }
-            reportFailure("stage=configure tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} mime=$mime", error)
+            reportFailure("stage=configure phase=$phase phaseMs=$phaseMs elapsedMs=$elapsedMs " +
+                "tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} " +
+                "mtkTuning=${mtkMode.diagnosticName} mime=$mime", error)
             Log.w(
                 TAG,
                 "video decoder configure failed name=$codecName phase=$phase phaseMs=$phaseMs elapsedMs=$elapsedMs " +
-                    "tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} mime=$mime size=${width}x$height",
+                    "tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} " +
+                    "mtkTuning=${mtkMode.diagnosticName} mime=$mime size=${width}x$height",
                 error,
             )
             null
@@ -1362,11 +1458,16 @@ private class VideoDecoder(
                 "video decoder first input avcc=${nalus.size} annexB=${annexB.size}",
             )
         }
-        val index = VideoInputPump.acquire(
+        val index = DecoderInputPump.acquire(
             running = { running }, drain = { if (outputThread == null) drainOutput(codec) },
             dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
         )
-        if (index < 0) { recover("video decoder input stalled"); return }
+        if (index < 0) {
+            // main #608：输入停滞也可能是 MTK 调优参数引起的,先撤下模式再重建解码器。
+            dropMtkTuning("video decoder input stalled")
+            dropMtkCodec2LowLatency("video decoder input stalled")
+            recover("video decoder input stalled"); return
+        }
         val input = checkNotNull(codec.getInputBuffer(index)) { "Decoder input buffer unavailable" }
         input.clear()
         if (annexB.size <= input.remaining()) {
@@ -1521,6 +1622,9 @@ private class VideoDecoder(
             awaitNotDequeuing(codec)
         }
         configuredRate = 0
+        // main #608：释放 codec 后清掉当前 MTK 模式;本流上限(maximumMtkMode)保留,供回退。
+        configuredMtkMode = MtkDecoderMode.NONE
+        configuredMtkCodec2LowLatency = false
         if (codec != null) {
             try {
                 codec.stop()
@@ -2078,7 +2182,12 @@ private class AudioRenderer(
     private fun feedCodec(payload: ByteArray, presentationTimeUs: Long) {
         val codec = codec ?: run { decoderUnavailablePackets++; return }
         diagnosticStage = "decoder-input"
-        val index = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
+        // 当阻塞的轨道写入占住本线程时,已解码输出会填满解码器、输入随之停滞(main #618f/#381)。
+        // 只等一次 10ms 就丢包,每次会剪掉约 21ms 音乐;改为边排空输出边继续等待。
+        val index = DecoderInputPump.acquire(
+            running = { running }, drain = { drainCodec(codec) },
+            dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
+        )
         if (index < 0) {
             inputDropped++
             if (inputDropped == 1) {

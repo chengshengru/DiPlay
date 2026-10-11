@@ -299,7 +299,7 @@ class AdaptiveSettingsUiTest {
                 candidate.contentDescription == screen.getString(
                     R.string.settings_open_category,
                     screen.getString(R.string.settings_advanced),
-                ) && descendants(candidate).filterIsInstance<ImageView>().count() == 2
+                ) && descendants(candidate).filterIsInstance<TextView>().count() == 2
             }
             .performClick()
 
@@ -343,7 +343,7 @@ class AdaptiveSettingsUiTest {
         assertTrue(connection.any { it.startsWith(text(R.string.settings_usb_charging)) })
         assertFalse(advanced.any { it.startsWith(text(R.string.settings_usb_charging)) })
         assertTrue(audio.any { it.startsWith(text(R.string.music_buffer)) })
-        listOf(R.string.main_buffered_audio, R.string.efficient_video, R.string.smooth_video, R.string.call_echo_cancellation, R.string.call_voice_filter, R.string.contrib_audio_home_toggle_audio_focus).forEach {
+        listOf(R.string.main_buffered_audio, R.string.efficient_video, R.string.smooth_video, R.string.call_echo_cancellation, R.string.call_voice_filter, R.string.settings_disable_media_key_audio_focus, R.string.contrib_audio_home_toggle_audio_focus).forEach {
             assertTrue(text(it), text(it) in advanced)
             assertFalse(text(it), text(it) in audio)
         }
@@ -352,7 +352,7 @@ class AdaptiveSettingsUiTest {
         assertTrue(text(R.string.wheel_siri_key) in vehicle)
         assertTrue(text(R.string.settings_wheel_keys) in vehicle)
         assertTrue(text(R.string.side_panel) in advanced)
-        listOf(R.string.main_buffered_audio, R.string.efficient_video, R.string.smooth_video, R.string.call_echo_cancellation, R.string.call_voice_filter, R.string.right_hand_drive, R.string.car_button_in_carplay,
+        listOf(R.string.main_buffered_audio, R.string.efficient_video, R.string.smooth_video, R.string.call_echo_cancellation, R.string.call_voice_filter, R.string.settings_disable_media_key_audio_focus, R.string.right_hand_drive, R.string.car_button_in_carplay,
             R.string.side_panel, R.string.split_screen_areas, R.string.carplay_rotation).forEach {
             assertFalse(text(it), text(it) in display)
         }
@@ -426,6 +426,78 @@ class AdaptiveSettingsUiTest {
         }
     }
 
+    // main #615：关闭媒体键音频焦点为 opt-in,切换时标记活动会话待重连（作者：TRAE AI）。
+    @Test
+    @Config(sdk = [28, 33])
+    fun disablingMediaKeyAudioFocusIsOptInAndMarksTheActiveSessionForReconnect() {
+        AirPlayPersistence.saveDisableMediaKeyAudioFocus(context, false)
+        val screen = openSettings()
+        val session = mock(CarPlayController::class.java)
+        var stops = 0
+        CarPlayBackgroundSession.store(session, mock(AndroidMediaSink::class.java), 800, 480, Any(),
+            CarPlaySessionDisplay(800, 480, Surface.ROTATION_0, false, false, 800, 480)) { stops++ }
+        CarPlayBackgroundSession.active = true
+        try {
+            ReflectionHelpers.setField(screen, "settingsCategory", SettingsCategory.ADVANCED)
+            PendingReconnect.clear()
+            ReflectionHelpers.callInstanceMethod<Unit>(screen, "render")
+            val setting = descendants(screen.window.decorView).filterIsInstance<Switch>()
+                .single { it.contentDescription == screen.getString(R.string.settings_disable_media_key_audio_focus) }
+            assertFalse(setting.isChecked)
+
+            setting.performClick()
+
+            assertTrue(AirPlayPersistence.loadDisableMediaKeyAudioFocus(context))
+            assertTrue(PendingReconnect.isPending(session))
+            assertEquals(View.VISIBLE, ReflectionHelpers.getField<View>(screen, "reconnectBar").visibility)
+            assertSame(session, CarPlayBackgroundSession.snapshot()?.controller)
+            assertEquals(0, stops)
+            assertEquals(null, shadowOf(screen).nextStartedActivity)
+        } finally {
+            AirPlayPersistence.saveDisableMediaKeyAudioFocus(context, false)
+            CarPlayBackgroundSession.clear()
+            PendingReconnect.clear()
+        }
+    }
+
+    // main #608：MTK 调优开关只在检测到 MTK 解码器时出现，且须标记活动会话待重连。
+    @Test
+    @Config(sdk = [28])
+    fun mtkDecoderTuningAppearsOnlyForMtkAndMarksReconnect() {
+        AirPlayPersistence.saveMtkDecoderTuning(context, false)
+        val screen = openSettings()
+        ReflectionHelpers.setField(screen, "settingsCategory", SettingsCategory.ADVANCED)
+        screen.selectedMtkDecoderName = { null }
+        ReflectionHelpers.callInstanceMethod<Unit>(screen, "render")
+        assertFalse(texts(screen).any { it.text == screen.getString(R.string.settings_mtk_decoder_tuning) })
+
+        val decoderName = "OMX.MTK.VIDEO.DECODER.HEVC"
+        screen.selectedMtkDecoderName = { decoderName }
+        ReflectionHelpers.callInstanceMethod<Unit>(screen, "render")
+        assertTrue(texts(screen).any {
+            it.text == screen.getString(R.string.settings_mtk_decoder_tuning_description, decoderName)
+        })
+
+        val session = mock(CarPlayController::class.java)
+        CarPlayBackgroundSession.store(session, mock(AndroidMediaSink::class.java), 800, 480, Any(),
+            CarPlaySessionDisplay(800, 480, Surface.ROTATION_0, false, false, 800, 480)) {}
+        CarPlayBackgroundSession.active = true
+        try {
+            val setting = descendants(screen.window.decorView).filterIsInstance<Switch>()
+                .single { it.contentDescription == screen.getString(R.string.settings_mtk_decoder_tuning) }
+            assertFalse(setting.isChecked)
+            setting.performClick()
+
+            assertTrue(AirPlayPersistence.loadMtkDecoderTuning(context))
+            assertTrue(PendingReconnect.isPending(session))
+            assertSame(session, CarPlayBackgroundSession.snapshot()?.controller)
+        } finally {
+            AirPlayPersistence.saveMtkDecoderTuning(context, false)
+            CarPlayBackgroundSession.clear()
+            PendingReconnect.clear()
+        }
+    }
+
     // main #482：自动让出焦点开关须标记活动会话待重连（作者：TRAE AI）。
     @Test
     @Config(sdk = [28, 33])
@@ -479,13 +551,13 @@ class AdaptiveSettingsUiTest {
     @Config(sdk = [29], qualifiers = "en-w1000dp-h700dp")
     fun expandedRailUsesAnIconForEveryDestination() {
         val screen = openSettings()
-
-        val destinations = descendants(screen.window.decorView).filter { destination ->
+        val rail = ReflectionHelpers.getField<ScrollView>(screen, "settingsRailScroll")
+        val destinations = descendants(rail).filter { destination ->
             destination.contentDescription?.startsWith("Open ") == true &&
                 destination.contentDescription?.endsWith(" settings") == true &&
                 descendants(destination).filterIsInstance<ImageView>().count() == 1
         }.toList()
-        assertEquals(8, destinations.size)
+        assertEquals(10, destinations.size)
         destinations.forEach { destination ->
             assertEquals(1, descendants(destination).filterIsInstance<ImageView>().count())
         }
@@ -536,20 +608,26 @@ class AdaptiveSettingsUiTest {
             ReflectionHelpers.getField<ScrollView>(screen, "rootScroll").scrollY)
     }
 
-    @Test fun overviewUtilitiesAreOneGroupedCardWithSectionSpacing() {
+    // main 0.2.18：Overview 的 About/Diagnostics/Advanced 是相连的三张分类卡（作者：TRAE AI）。
+    @Test fun overviewUtilitiesFollowAboutAsSeparateCategoryCards() {
         val screen = openSettings()
-        fun utilityRow(category: Int) = descendants(screen.window.decorView).single { candidate ->
+        fun categoryCard(category: Int) = descendants(screen.window.decorView).single { candidate ->
             candidate.contentDescription == screen.getString(
                 R.string.settings_open_category,
                 screen.getString(category),
-            ) && descendants(candidate).filterIsInstance<ImageView>().count() == 2
+            ) && descendants(candidate).filterIsInstance<TextView>().count() == 2
         }
-
-        val diagnostics = utilityRow(R.string.diagnostics)
-        val advanced = utilityRow(R.string.settings_advanced)
+        val about = categoryCard(R.string.about)
+        val diagnostics = categoryCard(R.string.diagnostics)
+        val advanced = categoryCard(R.string.settings_advanced)
+        assertSame(about.parent, diagnostics.parent)
         assertSame(diagnostics.parent, advanced.parent)
-        val card = diagnostics.parent as View
-        assertEquals(Math.round(18 * screen.resources.displayMetrics.density), (card.layoutParams as LinearLayout.LayoutParams).bottomMargin)
+        val categories = about.parent as LinearLayout
+        assertEquals(categories.indexOfChild(about) + 1, categories.indexOfChild(diagnostics))
+        assertEquals(categories.indexOfChild(diagnostics) + 1, categories.indexOfChild(advanced))
+        val gap = Math.round(16 * screen.resources.displayMetrics.density)
+        assertEquals(gap, (diagnostics.layoutParams as LinearLayout.LayoutParams).bottomMargin)
+        assertEquals(gap, (advanced.layoutParams as LinearLayout.LayoutParams).bottomMargin)
     }
 
     private fun installBydSettingsPackage() {

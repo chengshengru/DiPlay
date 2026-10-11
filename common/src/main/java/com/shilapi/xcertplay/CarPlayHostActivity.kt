@@ -4293,6 +4293,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             icons = listOf(loadAirPlayIcon()),
             videoInCar = com.shilapi.xcertplay.hud.BydOutputSettings.videoWhileParkedActive(this),
             mainBufferedAudio = AirPlayPersistence.loadMainBufferedAudio(this),
+            speechWithout8And16Khz = AirPlayPersistence.loadSpeechWithout8And16Khz(this),
             disableAudioOutput = carBluetoothAudio,
         )
     }
@@ -4517,6 +4518,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             mainVideoFrameRate = fps,
             // main #496：低延迟解码（实验性设置），下次连接时生效。
             vendorLowLatencyDecoder = AirPlayPersistence.loadLowLatencyDecoder(this),
+            // main #608：MTK 解码器调优（实验性设置），下次连接时生效。
+            mtkDecoderTuningEnabled = AirPlayPersistence.loadMtkDecoderTuning(this),
         )
     }
 

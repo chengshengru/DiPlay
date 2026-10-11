@@ -33,10 +33,10 @@ import kotlin.math.roundToInt
 /**
  * Steering-wheel and other hardware media buttons for CarPlay.
  *
- * Android delivers media keys to a media session; BYD picks the session of the audio-focus
- * owner. Once CarPlay plays music, DiPlay holds audio focus and an active session until the
- * CarPlay session ends, so play also works after a pause. Keys go to the iPhone as CarPlay media
- * HID presses ([CarPlayMediaButton]).
+ * Android delivers media keys to a media session; some head units pick the session of the
+ * audio-focus owner. DiPlay normally holds focus and an active session until the CarPlay session
+ * ends, but focus can be disabled on head units that otherwise route physical volume buttons to
+ * DiPlay. Keys go to the iPhone as CarPlay media HID presses ([CarPlayMediaButton]).
  */
 internal object CarPlayMediaKeys {
     private const val TAG = "DiPlay-MediaKeys"
@@ -288,42 +288,52 @@ internal object CarPlayMediaKeys {
     private fun start(context: Context) {
         // MediaSession 与 PlaybackState 均为 API 21+；API 17-20 车机直接跳过整个媒体会话功能。
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return
-        val expectedController = controller ?: return
-        val owner = Any().also { focusOwner = it }
-        focusEventRevision = 0L
-        val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        val listener = AudioManager.OnAudioFocusChangeListener { change ->
-            onFocusChanged(expectedController, owner, change)
-        }
+        val focusDisabled = AirPlayPersistence.loadDisableMediaKeyAudioFocus(context)
         val granted: Boolean
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // API 26+：使用 AudioFocusRequest。
-            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .build(),
-                )
-                .setOnAudioFocusChangeListener(listener, mainHandler)
-                .build()
-            focusRequest = request
-            granted = audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        if (focusDisabled) {
+            // 一些 OEM 把物理音量键路由给焦点拥有者。保留活跃 MediaSession 但不长期持有焦点,
+            // 让这些按键保持归车机所有(main #615)。
+            focusOwner = null
+            focusRequest = null
+            focusHeld = false
+            granted = false
         } else {
-            // API 21-25：AudioFocusRequest 不存在，走旧版 requestAudioFocus。
-            @Suppress("DEPRECATION")
-            granted = audio?.requestAudioFocus(listener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) ==
-                AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            legacyFocusListener = listener
+            val expectedController = controller ?: return
+            val owner = Any().also { focusOwner = it }
+            focusEventRevision = 0L
+            val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            val listener = AudioManager.OnAudioFocusChangeListener { change ->
+                onFocusChanged(expectedController, owner, change)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // API 26+：使用 AudioFocusRequest。
+                val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build(),
+                    )
+                    .setOnAudioFocusChangeListener(listener, mainHandler)
+                    .build()
+                focusRequest = request
+                granted = audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            } else {
+                // API 21-25：AudioFocusRequest 不存在，走旧版 requestAudioFocus。
+                @Suppress("DEPRECATION")
+                granted = audio?.requestAudioFocus(listener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) ==
+                    AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+                legacyFocusListener = listener
+            }
+            focusHeld = granted
+            if (granted) forwardGrantedFocusLocked()
         }
-        focusHeld = granted
-        if (granted) forwardGrantedFocusLocked()
         session = MediaSession(context, "DiPlay CarPlay").apply {
             setCallback(callback, mainHandler)
             setMetadata(androidMetadata(nowPlaying, shownArtworkLocked()))
             isActive = true
         }
-        Log.i(TAG, "media keys active focusGranted=$granted")
+        Log.i(TAG, "media keys active focusDisabled=$focusDisabled focusGranted=$granted")
     }
 
     private fun forwardGrantedFocusLocked() {

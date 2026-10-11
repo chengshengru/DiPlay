@@ -72,7 +72,10 @@ class CarPlayMediaEngine(
         val playoutLatencyMs: Int,
         @Volatile var firstSample: Int? = null,
         @Volatile var originNs: Long? = null,
-    )
+    ) {
+        // 每流一个反馈位置监视器,诊断 /feedback 与已收音频的偏差(main #625b)。
+        val position = FeedbackPositionMonitor(format.sampleRate)
+    }
 
     private data class PendingIapTunnel(
         val bridge: AirPlayIapTunnelStream,
@@ -207,6 +210,7 @@ class CarPlayMediaEngine(
                 }
 
                 override fun onRtp(rtp: ByteArray, sample: Int) {
+                    meta.position.observeRtp(sample)
                     // 记录 iPhone 实际使用的 RTP 时钟（观测 2 秒），便于核对麦克风上行计数时钟
                     clockProbe.observe(sample, System.nanoTime())?.let { hz ->
                         session.logDebug(
@@ -469,6 +473,9 @@ class CarPlayMediaEngine(
                 entry["timestamp"] = session.syncedNtp()
                 entry["timestampRawNs"] = nowNs
                 entry["sampleTime"] = sampleTime
+                // 诊断:把上报位置与最新收到的 RTP 采样对照(main #625b)。
+                meta.position.onFeedback(meta.type, entry["streamConnectionID"], sampleTime, nowNs)
+                    ?.let(session::logDebug)
             }
             entry
         } + listOfNotNull(buffered?.let { it.stream.feedback(session.syncedNtp(), it.connectionId) })

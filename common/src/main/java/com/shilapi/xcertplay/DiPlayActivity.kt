@@ -19,6 +19,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.MediaFormat
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -74,6 +75,7 @@ import com.shilapi.xcertplay.media.AmbientColorSource
 import com.shilapi.xcertplay.media.AmbientColorSpeed
 import com.shilapi.xcertplay.media.AmbientMusicController
 import com.shilapi.xcertplay.media.AmbientMusicSettings
+import com.shilapi.xcertplay.media.MtkDecoderTuning
 import com.shilapi.xcertplay.network.CarHotspotSettings
 import com.shilapi.xcertplay.network.CarHotspotTethering
 import com.shilapi.xcertplay.network.WifiP2pChannels
@@ -189,6 +191,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     internal var usbPermissionOperationFactory: (Context) -> UsbPermissionSetup.Operation = {
         UsbPermissionSetup.Operation(it.applicationContext)
     }
+    // main #608：MTK 解码器名查询可注入（测试用）。
+    internal var selectedMtkDecoderName: (String) -> String? = MtkDecoderTuning::selectedDecoderName
     private var navigationStreamType = 14
     private var testToneTrack: AudioTrack? = null
     private var toneStop: Runnable? = null
@@ -2156,7 +2160,24 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     AirPlayPersistence.saveHideBydCallPopup(this, it)
                 }
             }
-            toggle(card, getString(R.string.efficient_video), getString(R.string.use_hevc_leave_off_for_the_widest_head_unit_compatibility), AirPlayPersistence.loadHevcEnabled(this)) { AirPlayPersistence.saveHevcEnabled(this, it); markReconnectNeeded() }
+            toggle(card, getString(R.string.efficient_video), getString(R.string.use_hevc_leave_off_for_the_widest_head_unit_compatibility), AirPlayPersistence.loadHevcEnabled(this)) {
+                AirPlayPersistence.saveHevcEnabled(this, it)
+                markReconnectNeeded()
+                render()
+            }
+            // main #608：检测到所选视频格式的 MTK 解码器时才显示该卡(实验性)。
+            val hevc = AirPlayPersistence.loadHevcEnabled(this)
+            val selectedMime = if (hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+            val mtkDecoder = if (hevc && AirPlayPersistence.loadHevcSoftwareDecoderEnabled(this)) null
+                else selectedMtkDecoderName(selectedMime)
+            if (mtkDecoder != null) {
+                toggle(card, getString(R.string.settings_mtk_decoder_tuning),
+                    getString(R.string.settings_mtk_decoder_tuning_description, mtkDecoder),
+                    AirPlayPersistence.loadMtkDecoderTuning(this)) {
+                    AirPlayPersistence.saveMtkDecoderTuning(this, it)
+                    markReconnectNeeded()
+                }
+            }
             toggle(card, getString(R.string.smooth_video), getString(R.string.smooth_video_description),
                 AirPlayPersistence.loadSmoothVideo(this)) {
                 AirPlayPersistence.saveSmoothVideo(this, it)
@@ -2198,6 +2219,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             toggle(card, getString(R.string.main_buffered_audio), getString(R.string.main_buffered_audio_description),
                 AirPlayPersistence.loadMainBufferedAudio(this)) {
                 AirPlayPersistence.saveMainBufferedAudio(this, it)
+                reconnectIfRunning()
+            }
+            // main #622：USB 导航语音不提供 8/16 kHz（实验性）。
+            toggle(card, getString(R.string.settings_speech_without_low_rates), getString(R.string.settings_speech_without_low_rates_description),
+                AirPlayPersistence.loadSpeechWithout8And16Khz(this)) {
+                AirPlayPersistence.saveSpeechWithout8And16Khz(this, it)
                 reconnectIfRunning()
             }
             // main #432：CarPlay 音频走车机蓝牙（实验性，默认关）。
@@ -5069,6 +5096,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     appendLine("Authentication: local experimental beta identity; no remote fallback")
                     appendLine("CarPlay setup: ${if (setupError == null) "ready" else "authentication unavailable"}")
                     appendLine("Saved video preference (may differ from active session): ${if (AirPlayPersistence.loadHevcEnabled(appContext)) "HEVC" else "H.264"}; ${AirPlayPersistence.loadFps(appContext)} fps")
+                    appendLine("Media-key audio focus: ${if (AirPlayPersistence.loadDisableMediaKeyAudioFocus(appContext)) "disabled" else "enabled"}")
+                    appendLine("MTK decoder tuning preference: ${if (AirPlayPersistence.loadMtkDecoderTuning(appContext)) "enabled" else "disabled"}")
                     appendLine("CarPlay size: ${com.shilapi.xcertplay.airplay.CarPlaySize.fromWidthMillimeters(AirPlayPersistence.loadWidthPhysicalMm(appContext)).label}")
                     appendLine("Saved resolution preference (may differ from active session): ${AirPlayPersistence.loadDisplayScalePercent(appContext)}%")
                     appendLine("Session: ${if (CarPlayBackgroundSession.active) "active" else if (CarPlayBackgroundSession.hasSession()) "connecting" else "stopped"}")
@@ -5315,6 +5344,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private fun audioFocusControls(parent: LinearLayout) {
         val enabled = AirPlayPersistence.loadAudioFocusEnabled(this)
         val dependent = column().apply { visibility = if (enabled) View.VISIBLE else View.GONE }
+        // main #615：关闭媒体键音频焦点（实验性）。
+        toggle(parent, getString(R.string.settings_disable_media_key_audio_focus),
+            getString(R.string.settings_disable_media_key_audio_focus_description),
+            AirPlayPersistence.loadDisableMediaKeyAudioFocus(this)) {
+            AirPlayPersistence.saveDisableMediaKeyAudioFocus(this, it)
+            markReconnectNeeded()
+        }
         toggle(parent, getString(R.string.contrib_audio_home_toggle_audio_focus),
             getString(R.string.contrib_audio_home_toggle_audio_focus_desc), enabled) {
             AirPlayPersistence.saveAudioFocusEnabled(this, it)
@@ -5658,6 +5694,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         private const val GROUP_GAP_DP = 20
         private const val NOTE_LINE_GAP_DP = 4
         private const val NOTE_ATTACH_GAP_DP = 6
-        private const val SETTINGS_BLOCK_GAP_DP = 18
+        // main：设置卡片间距统一为 16dp（作者：TRAE AI）。
+        private const val SETTINGS_BLOCK_GAP_DP = 16
     }
 }

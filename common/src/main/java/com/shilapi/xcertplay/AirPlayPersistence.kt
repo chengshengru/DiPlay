@@ -45,6 +45,8 @@ object AirPlayPersistence {
     private const val KEY_ADVANCED_AUDIO_CHANNEL_MAPPING = "advanced_audio_channel_mapping"
     private const val KEY_AUDIO_FOCUS_ENABLED = "audio_focus_enabled"
     private const val KEY_AUDIO_FOCUS_AUTO_YIELD = "audio_focus_auto_yield"
+    // main #615：关闭媒体键音频焦点（实验性，默认关）。
+    private const val KEY_DISABLE_MEDIA_KEY_AUDIO_FOCUS = "disable_media_key_audio_focus"
     private const val KEY_MEDIA_AUDIO_CHANNEL = "media_audio_channel"
     private const val KEY_NAVIGATION_AUDIO_CHANNEL = "navigation_audio_channel"
     private const val KEY_NAVIGATION_STREAM_TYPE = "navigation_stream_type"
@@ -70,9 +72,13 @@ object AirPlayPersistence {
     private const val KEY_MAIN_BUFFERED_AUDIO = "main_buffered_audio"
     // main #432：CarPlay 音频走车机蓝牙（实验性，默认关）。
     private const val KEY_CAR_BLUETOOTH_AUDIO = "car_bluetooth_audio"
+    // main #622：USB 导航语音不提供 8/16 kHz（实验性，默认关）。
+    private const val KEY_SPEECH_WITHOUT_8_16KHZ = "speech_without_8_16khz"
     private const val KEY_CALL_ECHO_CANCELLATION = "call_echo_cancellation"
     private const val KEY_CALL_VOICE_FILTER = "call_voice_filter"
     private const val KEY_SMOOTH_VIDEO = "smooth_video"
+    // main #608：MTK 解码器低延迟（实验性，默认关）。
+    private const val KEY_MTK_DECODER_TUNING = "mtk_decoder_tuning"
     // main #496：直接视频输出与低延迟解码（实验性设置）。
     private const val KEY_DIRECT_VIDEO_OUTPUT = "direct_video_output"
     private const val KEY_LOW_LATENCY_DECODER = "low_latency_decoder"
@@ -234,6 +240,17 @@ object AirPlayPersistence {
     fun saveAudioFocusAutoYield(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_AUDIO_FOCUS_AUTO_YIELD, enabled)
+            .apply()
+    }
+
+    /** 关闭媒体键音频焦点:针对把物理音量键路由给 DiPlay 焦点拥有者的车机(main #615)。 */
+    fun loadDisableMediaKeyAudioFocus(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_DISABLE_MEDIA_KEY_AUDIO_FOCUS, false)
+
+    fun saveDisableMediaKeyAudioFocus(context: Context, disabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_DISABLE_MEDIA_KEY_AUDIO_FOCUS, disabled)
             .apply()
     }
 
@@ -612,11 +629,28 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_MAIN_BUFFERED_AUDIO, enabled).apply()
     }
 
+    /** USB 导航语音不提供 8/16 kHz（main #622，实验性，默认关；重连生效）。 */
+    fun loadSpeechWithout8And16Khz(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SPEECH_WITHOUT_8_16KHZ, false)
+
+    fun saveSpeechWithout8And16Khz(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_SPEECH_WITHOUT_8_16KHZ, enabled).apply()
+    }
+
     fun loadSmoothVideo(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SMOOTH_VIDEO, false)
 
     fun saveSmoothVideo(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_SMOOTH_VIDEO, enabled).apply()
+    }
+
+    /** MTK 旧解码器的低延迟/无重排路径（main #608,实验性,重连生效）。 */
+    fun loadMtkDecoderTuning(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MTK_DECODER_TUNING, false)
+
+    fun saveMtkDecoderTuning(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_MTK_DECODER_TUNING, enabled).apply()
     }
 
     // main #496：直接视频输出（实验性）：主屏绕过应用绘制直交合成器。
