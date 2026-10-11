@@ -7,7 +7,6 @@ import android.app.AlertDialog
 import android.app.Dialog
 import android.app.TimePickerDialog
 import android.view.Window
-import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -4883,7 +4882,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT); return
         }
-        val adapter = if (Build.VERSION.SDK_INT >= 18) (getSystemService(android.content.Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter else null
+        // API 17 适配：BluetoothManager 为 API 18+，本车机（Android 4.2.2）上恒为 null 会无条件
+        // 误弹"打开蓝牙"；统一走 BluetoothCompat.getAdapter（API 17 回退 getDefaultAdapter）。
+        val adapter = BluetoothCompat.getAdapter(this)
         if (adapter == null) {
             showTurnOnBluetoothDialog(); return
         }

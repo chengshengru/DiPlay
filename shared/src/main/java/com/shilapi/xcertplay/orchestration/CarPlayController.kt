@@ -5,7 +5,6 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHeadset
-import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothSocket
 import android.content.ComponentName
@@ -186,15 +185,12 @@ class CarPlayController(
     private val appContext = context.applicationContext
     private val diagnosticAttempt = diagnosticAttempts.incrementAndGet()
     private val diagnosticRun = AtomicInteger()
-    // Context.getSystemService(Class) is API 23+ and BluetoothManager is API 18+, so Jelly Bean
-    // (API 17) has neither the overload nor a BLE stack. Use the string service name and guard.
+    // Context.getSystemService(Class) is API 23+; the string-name overload works on all APIs.
     private val usbManager: UsbManager? = context.getSystemService(Context.USB_SERVICE) as? UsbManager
-    private val bluetoothAdapter =
-        if (Build.VERSION.SDK_INT >= 18) {
-            (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
-        } else {
-            null
-        }
+    // API 17 适配：BluetoothManager 为 API 18+，在 Jelly Bean 上恒为 null（曾使整条无线蓝牙链路
+    // 不可用）。经典蓝牙 RFCOMM/SPP 在 API 17 完整可用，统一走 BluetoothCompat.getAdapter
+    // （API 17 回退 getDefaultAdapter），与 BydBluetoothSuspend 的取法保持一致。
+    private val bluetoothAdapter = BluetoothCompat.getAdapter(appContext)
     private val iphoneHost by lazy {
         IphoneUsbHost(
             appContext,
@@ -2456,6 +2452,18 @@ class CarPlayController(
             return null
         }
         BluetoothCompat.findConnectedIphone(adapter)?.let { return it }
+        // 名称不可用（旧栈常见 device.name=null）时放宽：唯一处于 ACL 已连接状态的已配对设备。
+        // 车机上唯一连接的设备几乎总是目标 iPhone；歧义（多个已连接）时仍返回 null，
+        // 交回 selectWirelessBluetoothDevice 的最终裁决。
+        val connectedBonded = BluetoothCompat.getBondedDevices(adapter)
+            .filter { BluetoothCompat.isDeviceConnected(it) }
+        if (connectedBonded.size == 1) {
+            Log.i(
+                IphoneCarPlayConfiguration.TAG,
+                "wireless Plan A probe relaxed to sole connected bonded device ${connectedBonded.single().address}",
+            )
+            return connectedBonded.single()
+        }
         val profileConnected = connectedBluetoothDevices(adapter)
             .filter { it.name?.contains("iPhone", ignoreCase = true) == true }
         return if (profileConnected.size == 1) profileConnected.single() else null

@@ -148,29 +148,30 @@ class IphoneUsbHost(
     ) {
         executor.execute {
             callback(runTransition(device) { connection ->
-                // Apple CarPlay 激活是主机→设备的命令（OUT），必须携带 1 字节负载 0x01 才能命令 iPhone
-                // 切换到 CarPlay 配置并重枚举。原先使用 0xc0 IN 读 1 字节只会取到状态字节、被误判为
-                // “已请求重枚举”，而 iPhone 实际毫无反应（车机诊断：iPhone 无反应、无配置出现）。
-                val command = byteArrayOf(CARPLAY_CONFIGURATION_ENABLE.toByte())
+                // 与上游 LIVI 一致（native/livi-helperd/crates/iap2-usbmux/src/linux.rs::request_carplay_configs）：
+                // Apple 私有请求 0x52 是 **IN（0xc0 设备→主机）读 1 字节**，wValue=0、wIndex=4 选择 CarPlay
+                // 配置集。此前一度改为 OUT（0x40 写 0x01），真机复验显示会被 iPhone 直接以 transferred=-1
+                // 拒绝，反而更早失败——OUT 是错误假设，IN 才是让 iPhone 重枚举出 CarPlay 配置的正确请求。
+                val response = ByteArray(VENDOR_RESPONSE_LENGTH)
                 val transferred = connection.controlTransfer(
-                    USB_VENDOR_DEVICE_OUT,
+                    USB_VENDOR_DEVICE_IN,
                     CARPLAY_CONFIGURATION_REQUEST,
                     0,
                     CARPLAY_CONFIGURATION_INDEX,
-                    command,
-                    command.size,
+                    response,
+                    response.size,
                     CONTROL_TRANSFER_TIMEOUT_MILLIS,
                 )
                 onDiagnostic(
-                    "CarPlay reenumeration request dir=OUT bRequest=0x52 " +
+                    "CarPlay reenumeration request dir=IN bRequest=0x52 " +
                         "wIndex=0x${CARPLAY_CONFIGURATION_INDEX.toString(16)} transferred=$transferred",
                 )
-                if (transferred != command.size) {
+                if (transferred != response.size) {
                     // iOS 12 与 15 即使解锁也会拒绝该请求（#509、#455）；锁屏的 iPhone 同样拒绝（#100）。
                     // 记录 iPhone 暴露的信息以区分二者。
                     runCatching { onDiagnostic(modeRejectionDiagnostic(connection, device)) }
                     throw IphoneUsbException.Protocol(
-                        "CarPlay configuration request transferred $transferred of ${command.size} bytes",
+                        "CarPlay configuration request transferred $transferred of ${response.size} bytes",
                     )
                 }
                 TransitionResult.ReenumerationRequested
@@ -334,12 +335,10 @@ class IphoneUsbHost(
 
     companion object {
         private const val USB_VENDOR_DEVICE_IN = 0xc0
-        private const val USB_VENDOR_DEVICE_OUT = 0x40
         private const val GET_USB_MODE_REQUEST = 0x45
         private const val USB_MODE_RESPONSE_LENGTH = 4
         private const val CARPLAY_CONFIGURATION_REQUEST = 0x52
         private const val CARPLAY_CONFIGURATION_INDEX = 0x0004
-        private const val CARPLAY_CONFIGURATION_ENABLE = 0x01
         private const val VENDOR_RESPONSE_LENGTH = 1
         private const val CONTROL_TRANSFER_TIMEOUT_MILLIS = 1_000
 
