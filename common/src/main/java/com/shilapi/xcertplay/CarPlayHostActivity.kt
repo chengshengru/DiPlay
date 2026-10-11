@@ -197,6 +197,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         existingWifiSsid = existingWifiSsid,
         existingWifiPassphrase = existingWifiPassphrase,
         locationReportingEnabled = locationReportingEnabled,
+        availableCurrentMilliAmps = AirPlayPersistence.loadUsbChargingCurrent(this).milliAmps,
     )
 
     private val vpnConsent =
@@ -4723,7 +4724,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 "microphone=${airPlayConfig.microphone} " +
                 "location=${if (config.locationReportingEnabled) "enabled" else "disabled"}" +
                 "${if (config.identification.vehicleSpeedEnabled) "+wheel-speed" else ""} " +
-                "mfi=${mfiTargetLabel(config.mfiTarget)}",
+                "mfi=${mfiTargetLabel(config.mfiTarget)}" +
+                if (config.transport == CarPlayTransport.WIRED) " usbCharging=${config.availableCurrentMilliAmps}mA" else "",
         )
         Log.i(
             TAG,
@@ -5570,6 +5572,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         message == getString(R.string.vpn_authorization_unavailable) -> message
         message == getString(R.string.waiting_for_mfi_coprocessor) ||
             message == getString(R.string.requesting_mfi_usb_permission) -> message
+        // main 8a8a6ffa：iOS 12/15 拒绝 CarPlay USB 模式请求时，提示解锁重连或转无线，而非"连接中断"。
+        message.contains("CarPlay configuration request", true) -> getString(R.string.iphone_usb_mode_rejected)
         message.contains("Turn on Wi-Fi", true) -> getString(R.string.turn_on_wi_fi_in_the_head_unit_s_settings_to_connect)
         message.contains("Allow precise Location", true) -> getString(R.string.allow_precise_location_for_diplay_in_the_head_unit_s_app_p)
         message.contains("Allow Nearby devices", true) -> getString(R.string.allow_nearby_devices_for_diplay_in_the_head_unit_s_app_per)

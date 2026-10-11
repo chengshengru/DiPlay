@@ -110,6 +110,8 @@ object AirPlayPersistence {
     private const val KEY_BT_SUSPEND_DURING_CARPLAY = "bt_suspend_during_carplay"
     private const val KEY_BT_SUSPEND_DELAY = "bt_suspend_delay_seconds"
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
+    // main #583：有线 iAP2 充电电流报价档位。
+    private const val KEY_USB_CHARGING_CURRENT = "usb_charging_current"
     private const val KEY_MFI_TARGET = "mfi_target"
     private const val KEY_MFI_I2C_PATH = "mfi_i2c_path"
     private const val KEY_REMOTE_MFI_SERVER = "remote_mfi_server"
@@ -454,6 +456,17 @@ object AirPlayPersistence {
     fun saveBtSuspendDelaySeconds(context: Context, seconds: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_BT_SUSPEND_DELAY, if (seconds in listOf(5, 10, 15, 30)) seconds else 10).apply()
+    }
+
+    /** main #583：读取有线充电电流报价档位，缺省 NORMAL（2.4A）。 */
+    fun loadUsbChargingCurrent(context: Context): UsbChargingCurrent = UsbChargingCurrent.fromKey(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_USB_CHARGING_CURRENT, null),
+    )
+
+    /** main #583：保存有线充电电流报价档位。 */
+    fun saveUsbChargingCurrent(context: Context, current: UsbChargingCurrent) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_USB_CHARGING_CURRENT, current.key).apply()
     }
 
     fun loadLocationReportingEnabled(context: Context): Boolean =

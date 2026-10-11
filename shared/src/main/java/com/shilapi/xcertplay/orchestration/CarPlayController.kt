@@ -1314,8 +1314,10 @@ class CarPlayController(
                     CarPlayVpnService.AttachResult.Started -> Unit
                     CarPlayVpnService.AttachResult.AlreadyStarted ->
                         throw IOException("Wireless AirPlay transport is already attached")
-                    is CarPlayVpnService.AttachResult.Failed ->
+                    is CarPlayVpnService.AttachResult.Failed -> {
+                        debugLog("wireless AirPlay listener attach failed detail=${service.lastAttachFailure}")
                         throw IOException(result.message)
+                    }
                 }
             }
             val listenerPort = service.boundPort() ?: wirelessAirPlayConfig.port
@@ -2570,7 +2572,7 @@ class CarPlayController(
                 false
             }
             is CarPlayVpnService.AttachResult.Failed -> {
-                debugLog("wired VPN/NCM transport attach result=failed ${result.message}")
+                debugLog("wired VPN/NCM transport attach result=failed ${result.message} detail=${service.lastAttachFailure}")
                 ncm.close()
                 onStatus(CarPlayStatus.Failed(result.message))
                 false

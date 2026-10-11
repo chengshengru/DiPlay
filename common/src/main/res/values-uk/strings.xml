@@ -388,6 +388,7 @@
     <string name="usb_ch341">USB/CH341</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">Скористайтеся USB-кабелем для передавання даних і відповідним портом автомобіля. Розблокуйте iPhone та дозвольте CarPlay. Налаштовувати точку доступу не потрібно.</string>
     <string name="use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an">Скористайтеся USB-кабелем для передавання даних і розблокуйте iPhone.\nПідтвердьте довіру та CarPlay, якщо iPhone запитає.</string>
+    <string name="iphone_usb_mode_rejected">iPhone не перейшов у дротовий CarPlay. Розблокуйте його та перепідключіть кабель. На iOS 15 і раніших версіях оновіть iOS або використовуйте бездротовий CarPlay.</string>
     <string name="use_hevc_leave_off_for_the_widest_head_unit_compatibility">Використовувати HEVC. Залиште вимкненим для найширшої сумісності з головними пристроями.</string>
     <string name="use_software_hevc_decoder">Використовувати програмний декодер HEVC</string>
     <string name="use_usage_content_type_routing_instead_of_stream_type">Спрямовувати за призначенням і типом вмісту замість типу потоку</string>
@@ -765,4 +766,10 @@
     <string name="fps_counter_no_value">–</string>
     <string name="fps_counter_text">%1$d FPS\nRX %2$d · %3$s</string>
     <string name="fps_counter_waiting">-- FPS</string>
+    <string name="settings_usb_connection">USB-підключення</string>
+    <string name="settings_usb_charging">Заряджання iPhone</string>
+    <string name="settings_usb_charging_normal">Звичайне (2,4 А)</string>
+    <string name="settings_usb_charging_reduced">Знижене (1,5 А)</string>
+    <string name="settings_usb_charging_low">Низьке (0,5 А)</string>
+    <string name="settings_usb_charging_description">Струм заряджання, який DiPlay дозволяє iPhone через USB. Якщо дротовий CarPlay обривається кожні кілька секунд і iPhone сам перепідключається, USB-порт автомобіля може не видавати достатньо живлення: спробуйте «Знижене», потім «Низьке». iPhone заряджатиметься повільніше. Застосовується під час наступного USB-підключення.</string>
 </resources>

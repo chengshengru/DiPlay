@@ -99,6 +99,7 @@ internal enum class SettingsSection {
     CONNECTION_SETUP,
     DIAGNOSTICS,
     AUTOMATIC_CONNECTION,
+    USB_CONNECTION,
     BYD_ADB,
     DISPLAY_AND_PERFORMANCE,
     EXPERIMENTAL_DISPLAY,
@@ -121,6 +122,7 @@ internal object SettingsInformationArchitecture {
         SettingsCategory.CONNECTION to setOf(
             SettingsSection.CONNECTION_SETUP,
             SettingsSection.AUTOMATIC_CONNECTION,
+            SettingsSection.USB_CONNECTION,
             SettingsSection.BYD_ADB,
             SettingsSection.PERMISSIONS_AND_HELP,
         ),
@@ -1949,6 +1951,20 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             card.addView(label(getString(R.string.boot_start_repair_desc), 14, MUTED).apply { setPadding(0, dp(8), 0, dp(6)) })
             card.addView(button("${getString(R.string.choose_iphone_prefix)}${DiPlayPreferences.phoneName(this)}", false) { choosePhone() }, matchButton(12, 60))
         }
+        // main #583：USB 连接卡——有线充电电流报价档位（下次 USB 连接生效）。
+        filteredSection(content, SettingsSection.USB_CONNECTION,
+            getString(R.string.settings_usb_connection), R.drawable.ic_dp_connection) { card ->
+            val currents = UsbChargingCurrent.entries
+            choice(card, getString(R.string.settings_usb_charging), listOf(
+                getString(R.string.settings_usb_charging_normal),
+                getString(R.string.settings_usb_charging_reduced),
+                getString(R.string.settings_usb_charging_low),
+            ), currents.indexOf(AirPlayPersistence.loadUsbChargingCurrent(this)), reconnects = false) {
+                AirPlayPersistence.saveUsbChargingCurrent(this, currents[it])
+                if (!AirPlayPersistence.loadWirelessEnabled(this)) markReconnectNeeded()
+            }
+            card.addView(label(getString(R.string.settings_usb_charging_description), 14, MUTED))
+        }
         if (settingsSectionFilter?.contains(SettingsSection.BYD_ADB) != false) bydAdbSettings(content)
         filteredSection(content, SettingsSection.DISPLAY_AND_PERFORMANCE,
             getString(R.string.display_and_performance), R.drawable.ic_dp_display) { card ->
@@ -3330,8 +3346,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (!NavigationWheelSettings.enabled(this) || WheelKeyService.connected()) return
         card.addView(label(getString(R.string.settings_navigation_wheel_service_required), 14, WARNING))
         card.addView(button(getString(R.string.wheel_keys_open_settings), false) {
-            runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                .onFailure { toast(getString(R.string.wheel_keys_no_settings)) }
+            if (!UsbAutoConfirmService.openSettings(this)) toast(getString(R.string.wheel_keys_no_settings))
         }, matchButton(10, 56))
         card.addView(button(getString(R.string.wheel_keys_enable_adb), false) {
             Thread({
@@ -3450,8 +3465,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 }, "diplay-wheel-keys-enable").start()
             }, matchButton(10, 56))
             card.addView(button(getString(R.string.wheel_keys_open_settings), false) {
-                runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                    .onFailure { toast(getString(R.string.wheel_keys_no_settings)) }
+                if (!UsbAutoConfirmService.openSettings(this)) toast(getString(R.string.wheel_keys_no_settings))
             }, matchButton(10, 56))
         }
     }
@@ -4913,6 +4927,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
                     appendLine("Head unit: ${Build.MANUFACTURER} ${Build.MODEL}")
                     appendLine("Connection: ${if (AirPlayPersistence.loadWirelessEnabled(appContext)) "wireless" else "USB"}")
+                    // main #583：诊断报告记录当前充电电流报价档位。
+                    AirPlayPersistence.loadUsbChargingCurrent(appContext).let {
+                        appendLine("USB charging offer: ${it.key} (${it.milliAmps} mA)")
+                    }
                     appendLine("Authentication: local experimental beta identity; no remote fallback")
                     appendLine("CarPlay setup: ${if (setupError == null) "ready" else "authentication unavailable"}")
                     appendLine("Saved video preference (may differ from active session): ${if (AirPlayPersistence.loadHevcEnabled(appContext)) "HEVC" else "H.264"}; ${AirPlayPersistence.loadFps(appContext)} fps")
