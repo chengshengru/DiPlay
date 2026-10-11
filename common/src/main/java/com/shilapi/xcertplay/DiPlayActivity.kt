@@ -313,6 +313,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private val export = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) exportDiagnostics(uri)
     }
+    // main #541：Android 9 上申请存储权限后把报告放进可见的 Downloads/DiPlay 文件夹。
+    // 拒绝权限仍然保存报告，只是保存在 DiPlay 自己的存储里（作者：TRAE AI）。
+    private val reportStoragePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        exportDiagnostics()
+    }
 
     private var languagePreferenceAtCreate = AppLocale.SYSTEM
 
@@ -1878,12 +1883,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         filteredSection(content, SettingsSection.DIAGNOSTICS,
             getString(R.string.diagnostics), R.drawable.ic_dp_diagnostics) { card ->
             exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), false) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) exportDiagnostics()
-                else chooseReportDestination()
+                // main #541：所有版本默认直接保存到 Downloads/DiPlay（作者：TRAE AI）。
+                saveReportToDownloads()
             }.apply { isEnabled = !exportInProgress }
             card.addView(exportButton, matchButton(10, 60))
             card.addView(button(getString(R.string.choose_save_location), false) { chooseReportDestination() }, matchButton(10, 60))
-            val destination = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) getString(R.string.reports_save_to_downloads_diplay) else getString(R.string.choose_where_to_save_your_report)
+            val destination = getString(R.string.reports_save_to_downloads_diplay)
             card.addView(label(destination + getString(R.string.nothing_is_sent_automatically_protocol_payloads_and_creden), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
             // main #496：FPS 计数器，仅保存设置，回到投屏画面时生效，无需重连。
             toggle(card, getString(R.string.settings_fps_counter), getString(R.string.settings_fps_counter_description),
@@ -2827,7 +2832,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private fun wirelessLinkControls(parent: LinearLayout) {
         val mode = if (pendingCarHotspotSetup) WirelessHotspotMode.MANUAL else AirPlayPersistence.loadWirelessHotspotMode(this)
         val modes = listOf(WirelessHotspotMode.MANUAL, WirelessHotspotMode.WIFI_P2P, WirelessHotspotMode.EXISTING_WIFI)
-        val titles = listOf(getString(R.string.built_in_car_hotspot), getString(R.string.wifi_direct), getString(R.string.existing_wifi_title))
+        val titles = listOf(getString(R.string.settings_built_in_car_hotspot_recommended), getString(R.string.wifi_direct), getString(R.string.existing_wifi_title))
         val descriptions = listOf(
             getString(R.string.hotspot_mode_manual_desc),
             getString(R.string.hotspot_mode_p2p_desc),
@@ -4906,6 +4911,15 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun reportFileName() = "DiPlay-${SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())}.txt"
+
+    // main #541：保存按钮的统一入口——需要存储权限（Android 9）时先申请，其余直接导出（作者：TRAE AI）。
+    private fun saveReportToDownloads() {
+        if (exportInProgress) return
+        if (DiagnosticExportStore.needsStoragePermission(this)) {
+            runCatching { reportStoragePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE) }
+                .onFailure { exportDiagnostics() }
+        } else exportDiagnostics()
+    }
 
     private fun chooseReportDestination() {
         // Some head units omit or disable DocumentsUI. Launch itself can throw, before

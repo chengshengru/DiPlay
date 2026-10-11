@@ -16,6 +16,7 @@
     <string name="settings_wifi_direct_auto_band">تلقائي · %1$s</string>
     <string name="settings_wifi_direct_band_note">يُبقي «تلقائي · 5 GHz» و«تلقائي · 2.4 GHz» اتصال Wi-Fi Direct ضمن ذلك النطاق ويتركان للسيارة اختيار القناة. إذا تعذّر على السيارة استخدام ذلك النطاق، يتوقف الاتصال مع رسالة بدلاً من تبديل النطاق.</string>
     <string name="built_in_car_hotspot">نقطة اتصال السيارة المدمجة</string>
+    <string name="settings_built_in_car_hotspot_recommended">نقطة اتصال السيارة المدمجة (موصى بها)</string>
     <string name="hotspot_hint_manual">نقطة اتصال السيارة المدمجة · أبقِ نقطة الاتصال والبلوتوث وواي فاي iPhone مُفعّلة.</string>
     <string name="hotspot_hint_local">افتح إعداد الاتصال لحفظ بيانات نقطة اتصال السيارة المدمجة.</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · أبقِ مفتاح واي فاي السيارة والبلوتوث وواي فاي iPhone مُفعّلة.</string>
@@ -28,8 +29,8 @@
     <string name="marker_up">أعلى</string>
     <string name="marker_down">أسفل</string>
     <string name="marker_centre_default">الوسط · الافتراضي</string>
-    <string name="hotspot_mode_manual_desc">استخدم نقطة اتصال السيارة لـ CarPlay اللاسلكي. لا تحتاج إلى الاتصال بها يدويًا من iPhone؛ يرسل DiPlay بيانات نقطة الاتصال عبر Bluetooth. اختر 5 GHz في إعدادات السيارة إن توفر.</string>
-    <string name="hotspot_mode_p2p_desc">إعداد بديل. يتطلب تشغيل مفتاح واي فاي السيارة؛ وقد يتقطّع الاتصال على 2.4 GHz.</string>
+    <string name="hotspot_mode_manual_desc">استخدم نقطة اتصال السيارة للحصول على أسلس CarPlay لاسلكي. لا تحتاج إلى الاتصال بها يدويًا من iPhone؛ يرسل DiPlay بيانات نقطة الاتصال عبر Bluetooth. اختر 5 GHz في إعدادات السيارة إن توفر.</string>
+    <string name="hotspot_mode_p2p_desc">للسيارات التي لا تحتوي على نقطة اتصال. يتطلب تشغيل مفتاح واي فاي السيارة. أثناء بحث السيارة عن شبكات واي فاي، قد يتقطّع الصوت والصورة كل بضع ثوانٍ.</string>
     <string name="hotspot_details_off">نقطة الاتصال مُغلقة · شغّلها في إعدادات السيارة.</string>
     <string name="hotspot_details_saved">تم حفظ البيانات · تأكد من تشغيل نقطة اتصال السيارة قبل الاتصال.</string>
     <string name="permission_enabled_ready">الإذن مُفعّل · جاهز للاستخدام</string>

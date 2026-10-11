@@ -15,6 +15,7 @@
     <string name="settings_wifi_direct_auto_band">自動 · %1$s</string>
     <string name="settings_wifi_direct_band_note">「自動 · 5 GHz」和「自動 · 2.4 GHz」會讓 Wi-Fi Direct 維持在該頻段，並由車機選擇頻道。如果車機無法使用該頻段，連線會停止並顯示提示，而不會切換頻段。</string>
     <string name="built_in_car_hotspot">車載熱點</string>
+    <string name="settings_built_in_car_hotspot_recommended">車載熱點（建議）</string>
     <string name="wifi_direct">Wi-Fi Direct</string>
     <string name="hotspot_hint_manual">車載熱點 · 保持車載熱點、藍牙和 iPhone 的 Wi-Fi 開啟。</string>
     <string name="hotspot_hint_local">開啟「連線設定」以儲存車載熱點資訊。</string>
@@ -27,8 +28,8 @@
     <string name="marker_up">上</string>
     <string name="marker_down">下</string>
     <string name="marker_centre_default">置中 · 預設</string>
-    <string name="hotspot_mode_manual_desc">使用車載熱點連線無線 CarPlay。無需在 iPhone 上手動加入熱點；DiPlay 會透過藍牙傳送熱點資訊。如有 5 GHz，請在車機設定中選擇。</string>
-    <string name="hotspot_mode_p2p_desc">替代方案。需要開啟車機 Wi-Fi 開關；2.4 GHz 連線可能會卡頓。</string>
+    <string name="hotspot_mode_manual_desc">使用車載熱點，無線 CarPlay 最流暢。無需在 iPhone 上手動加入熱點；DiPlay 會透過藍牙傳送熱點資訊。如有 5 GHz，請在車機設定中選擇。</string>
+    <string name="hotspot_mode_p2p_desc">適用於沒有車載熱點的車輛。需要開啟車機 Wi-Fi 開關。車機搜尋 Wi-Fi 網路時，聲音和畫面可能每隔幾秒卡頓一次。</string>
     <string name="hotspot_details_off">熱點已關閉 · 請在車機設定中開啟。</string>
     <string name="hotspot_details_saved">詳細資訊已儲存 · 連線前請確認車載熱點已開啟。</string>
     <string name="permission_enabled_ready">權限已啟用 · 可以使用</string>

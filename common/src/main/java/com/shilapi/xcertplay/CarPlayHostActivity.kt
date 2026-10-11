@@ -3651,10 +3651,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             setPadding(0, dp(8), 0, 0)
         }
         val modes = buildList {
+            add(WirelessHotspotMode.MANUAL to getString(R.string.settings_built_in_car_hotspot_recommended))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 add(WirelessHotspotMode.WIFI_P2P to getString(R.string.wi_fi_p2p_5_ghz))
             }
-            add(WirelessHotspotMode.MANUAL to getString(R.string.built_in_car_hotspot))
             add(WirelessHotspotMode.EXISTING_WIFI to getString(R.string.existing_wifi_title))
         }
         var selectedId = View.NO_ID

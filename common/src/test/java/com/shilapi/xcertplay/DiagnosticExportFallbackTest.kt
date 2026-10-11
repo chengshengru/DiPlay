@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay
 
 import android.content.ContentProvider
+import android.Manifest
 import android.content.ContentValues
 import android.content.ContextWrapper
 import android.content.pm.ProviderInfo
@@ -14,6 +15,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowContentResolver
 import java.io.File
@@ -25,10 +27,17 @@ class DiagnosticExportFallbackTest {
     private val context get() = RuntimeEnvironment.getApplication()
     private val reports get() = File(context.getExternalFilesDir(null)!!, "diagnostic-reports")
     private val privateReports get() = File(context.filesDir, "diagnostic-reports")
+    private val publicReports get() = DiagnosticExportStore.publicDownloadsDirectory()
 
     @Before fun cleanReports() {
         reports.deleteRecursively()
         privateReports.deleteRecursively()
+        publicReports.deleteRecursively()
+        // API17 迁移适配：分支 Robolectric 4.10 的 MimeTypeMap shadow 缺 text/plain 映射
+        // （main 用 4.17 自带），为 getType 断言注册 txt → text/plain（作者：TRAE AI）。
+        // 4.10 的注册 API 是实例方法 addExtensionMimeTypMapping（历史拼写），4.17 起才是静态方法。
+        shadowOf(android.webkit.MimeTypeMap.getSingleton())
+            .addExtensionMimeTypMapping("txt", "text/plain")
         registerReportProvider()
     }
 
@@ -57,6 +66,49 @@ class DiagnosticExportFallbackTest {
         assertFalse(saved.savedInApp)
         assertEquals("report", reports.listFiles()!!.single().readText())
         assertEquals("report", read(saved.uri))
+    }
+
+    @Test fun publicDownloadsWriteSucceedsDirectly() {
+        val saved = DiagnosticExportStore.saveToPublicDownloads(context, "DiPlay-direct.txt", "report")
+        assertEquals("report", File(publicReports, "DiPlay-direct.txt").readText())
+        assertEquals("report", read(saved.uri))
+    }
+
+    @Test fun androidNineWithStorageAccessSavesToTheVisibleDownloadsFolder() {
+        shadowOf(context).grantPermissions(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        val saved = DiagnosticExportStore.saveWithoutPicker(context, "DiPlay-test.txt", "report")
+        val file = File(publicReports, "DiPlay-test.txt")
+        assertEquals("report", file.readText())
+        assertEquals(file.absolutePath, saved.savedPath)
+        assertFalse(saved.savedInApp)
+        assertEquals("report", read(saved.uri))
+    }
+
+    @Test fun repeatedPublicExportsNeverOverwriteAnEarlierReport() {
+        shadowOf(context).grantPermissions(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        DiagnosticExportStore.saveWithoutPicker(context, "DiPlay-test.txt", "first")
+        val second = DiagnosticExportStore.saveWithoutPicker(context, "DiPlay-test.txt", "second")
+        assertEquals("first", File(publicReports, "DiPlay-test.txt").readText())
+        assertEquals("second", File(publicReports, "DiPlay-test-1.txt").readText())
+        assertEquals("second", read(second.uri))
+    }
+
+    @Test @Config(sdk = [30]) fun missingMediaStoreDownloadsUsesThePublicFolderWithoutPermission() {
+        val provider = MissingDownloadsProvider()
+        provider.attachInfo(context, ProviderInfo().apply { authority = "media" })
+        ShadowContentResolver.registerProviderInternal("media", provider)
+        val saved = DiagnosticExportStore.saveWithoutPicker(context, "DiPlay-test.txt", "report")
+        assertTrue(provider.insertAttempted)
+        assertEquals(File(publicReports, "DiPlay-test.txt").absolutePath, saved.savedPath)
+        assertEquals("report", read(saved.uri))
+    }
+
+    @Test fun storageAccessIsOnlyRequestedOnAndroidNine() {
+        assertTrue(DiagnosticExportStore.needsStoragePermission(context, sdkInt = 28))
+        assertFalse(DiagnosticExportStore.needsStoragePermission(context, sdkInt = 29))
+        assertFalse(DiagnosticExportStore.needsStoragePermission(context, sdkInt = 30))
+        shadowOf(context).grantPermissions(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        assertFalse(DiagnosticExportStore.needsStoragePermission(context, sdkInt = 28))
     }
 
     @Test fun anEarlierShareUriCannotReadALaterExport() {

@@ -16,6 +16,7 @@
     <string name="settings_wifi_direct_auto_band">Auto · %1$s</string>
     <string name="settings_wifi_direct_band_note">Auto · 5 GHz y Auto · 2.4 GHz mantienen Wi-Fi Direct en esa banda y dejan que el coche elija el canal. Si el coche no puede usar esa banda, la conexión se detiene con un mensaje en lugar de cambiar de banda.</string>
     <string name="built_in_car_hotspot">Punto de acceso integrado del coche</string>
+    <string name="settings_built_in_car_hotspot_recommended">Punto de acceso integrado del coche (recomendado)</string>
     <string name="hotspot_hint_manual">Punto de acceso integrado · Mantén activos el punto de acceso, el Bluetooth y el Wi‑Fi del iPhone.</string>
     <string name="hotspot_hint_local">Abre la configuración de conexión para guardar los datos del punto de acceso integrado.</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · Mantén activos el interruptor Wi‑Fi del coche, el Bluetooth y el Wi‑Fi del iPhone.</string>
@@ -28,8 +29,8 @@
     <string name="marker_up">Arriba</string>
     <string name="marker_down">Abajo</string>
     <string name="marker_centre_default">Centro · predeterminado</string>
-    <string name="hotspot_mode_manual_desc">Usa el punto de acceso del coche para CarPlay inalámbrico. No necesitas conectarte a él manualmente desde el iPhone; DiPlay envía los datos por Bluetooth. Selecciona 5 GHz en los ajustes del coche si está disponible.</string>
-    <string name="hotspot_mode_p2p_desc">Configuración alternativa. Requiere el interruptor Wi‑Fi del coche; en 2,4 GHz la conexión puede trabarse.</string>
+    <string name="hotspot_mode_manual_desc">Usa el punto de acceso del coche para el CarPlay inalámbrico más fluido. No necesitas conectarte a él manualmente desde el iPhone; DiPlay envía los datos por Bluetooth. Selecciona 5 GHz en los ajustes del coche si está disponible.</string>
+    <string name="hotspot_mode_p2p_desc">Para coches sin punto de acceso. Requiere el interruptor Wi‑Fi del coche activado. Mientras el coche busca redes Wi‑Fi, el sonido y la imagen pueden trabarse cada pocos segundos.</string>
     <string name="hotspot_details_off">El punto de acceso está apagado · Actívalo en la configuración del coche.</string>
     <string name="hotspot_details_saved">Datos guardados · Comprueba que el punto de acceso del coche esté activado antes de conectarte.</string>
     <string name="permission_enabled_ready">Permiso activado · listo para usar</string>
