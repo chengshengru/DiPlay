@@ -863,4 +863,15 @@
         <string name="settings_disable_media_key_audio_focus">停用媒體按鍵音訊焦點（實驗性）</string>
         <string name="settings_disable_media_key_audio_focus_description">CarPlay 音樂播放時不再由 DiPlay 要求媒體音訊焦點。若車機將實體音量鍵導向 DiPlay，導致音量鍵無法調整音量，請開啟此項。部分依賴音訊焦點的車機可能無法繼續使用方向盤播放、暫停和切歌鍵。下次連接 CarPlay 時生效。</string>
     <string name="bluetooth_connections_not_real">此車機的系統藍牙回報「已連線」，但實際上沒有連到 iPhone：連一個不存在的服務也回報成功。這裡的藍牙由廠商自己的模組處理，App 無法使用，所以此車機無法使用無線 CarPlay。請嘗試使用 USB 連線。</string>
+
+    <!-- 波次十 #660：集群音乐卡片（作者：TRAE AI） -->
+    <string name="settings_cluster_music">儀表音樂（實驗性）</string>
+    <string name="settings_cluster_music_description">在儀表地圖上顯示方形專輯封面。可選擇暫時（8秒）或常駐封面；切歌時，歌曲名稱和藝人始終在封面上顯示8秒。位置和大小變更立即生效。需要儀表投影及iPhone歌曲資訊。</string>
+    <string name="settings_cluster_music_mode">封面顯示模式</string>
+    <string name="settings_cluster_music_temporary">暫時 · 8秒</string>
+    <string name="settings_cluster_music_permanent">常駐</string>
+    <string name="settings_cluster_music_horizontal">音樂卡片 · 水平位置</string>
+    <string name="settings_cluster_music_vertical">音樂卡片 · 垂直位置</string>
+    <string name="settings_cluster_music_size">音樂卡片 · 大小</string>
+    <string name="settings_cluster_music_unknown">未知藝人</string>
 </resources>

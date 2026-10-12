@@ -70,6 +70,8 @@ class AdbClusterActivity : Activity() {
         videoRegion.addView(waiting, FrameLayout.LayoutParams(-1, -1))
         turnCard = ClusterTurnCardView(this).apply { visibility = View.GONE }
         root.addView(turnCard, FrameLayout.LayoutParams(-1, -1))
+        // 波次十 #660：音乐卡片挂载在转弯卡之后、车速表之前（作者：TRAE AI）
+        root.addView(ClusterMusicView(this), FrameLayout.LayoutParams(-1, -1))
         root.addView(ClusterSpeedometerView(this), FrameLayout.LayoutParams(-1, -1))
         safeAreaPreview = SafeAreaEditorView(this).apply {
             visibility = View.GONE

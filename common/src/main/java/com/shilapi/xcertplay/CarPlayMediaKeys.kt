@@ -150,6 +150,8 @@ internal object CarPlayMediaKeys {
                 if (nowPlaying.elapsedMillis != update.elapsedMillis) elapsedUpdatedAt = SystemClock.elapsedRealtime()
                 val metadataChanged = metadataChanged(nowPlaying, update) || artwork !== previousArtwork
                 nowPlaying = update
+                // 波次十 #660：元数据变化时同步集群音乐卡片快照（作者：TRAE AI）
+                if (metadataChanged) ClusterMusicState.publish(update, update.artworkTransferId?.let { artworkCache[it] })
                 updateInitialAlbumRecovery(expected)
                 // The iPhone repeats NowPlayingUpdate about twice a second for the position alone.
                 // Republishing the metadata each time sent a copy of the artwork through system_server
@@ -182,6 +184,8 @@ internal object CarPlayMediaKeys {
         while (artworkCache.size > MAX_CACHED_ARTWORK) artworkCache.remove(artworkCache.keys.first())
         if (nowPlaying.artworkTransferId == id) {
             artwork = decoded
+            // 波次十 #660：封面解码完成后同步集群音乐卡片快照（作者：TRAE AI）
+            ClusterMusicState.publish(nowPlaying, artwork)
             controller?.let { com.shilapi.xcertplay.media.AmbientMusicController.albumColorChanged(it, result?.color) }
             controller?.let(::updateInitialAlbumRecovery)
             session?.setMetadata(androidMetadata(nowPlaying, shownArtworkLocked()))
@@ -389,6 +393,8 @@ internal object CarPlayMediaKeys {
         nowPlaying = CarPlayNowPlaying()
         artwork = null
         artworkCache.clear()
+        // 波次十 #660：会话清理时重置集群音乐卡片快照（作者：TRAE AI）
+        ClusterMusicState.publish(CarPlayNowPlaying(), null)
         val audio = appContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         focusRequest?.let { request ->
             // API 26+ 的焦点请求用新接口释放。

@@ -803,4 +803,15 @@
         <string name="settings_disable_media_key_audio_focus">Desactivar el foco de audio de las teclas multimedia (experimental)</string>
         <string name="settings_disable_media_key_audio_focus_description">Impide que DiPlay solicite el foco de audio multimedia mientras se reproduce música de CarPlay. Actívalo si la unidad dirige los botones físicos de volumen a DiPlay y dejan de ajustar el volumen. Los controles del volante para reproducir, pausar y cambiar de pista pueden dejar de funcionar en unidades que requieren el foco. Se aplica en la próxima conexión de CarPlay.</string>
     <string name="bluetooth_connections_not_real">El Bluetooth de Android de esta unidad principal indica una conexión, pero nada llega al iPhone: incluso la conexión a un servicio que no existe tiene éxito. Aquí el Bluetooth lo gestiona un módulo propio del fabricante que las apps no pueden usar, por lo que CarPlay inalámbrico no puede funcionar en esta unidad principal. Prueba una conexión USB.</string>
+
+    <!-- 波次十 #660：集群音乐卡片（作者：TRAE AI） -->
+    <string name="settings_cluster_music">Música en el cuadro (experimental)</string>
+    <string name="settings_cluster_music_description">Muestra la portada cuadrada sobre el mapa del cuadro. Elige portada temporal (8 segundos) o permanente; el título y artista siempre aparecen sobre ella durante 8 segundos al cambiar de canción. La posición y el tamaño se aplican al instante. Requiere proyección al cuadro y datos del iPhone.</string>
+    <string name="settings_cluster_music_mode">Visibilidad de la portada</string>
+    <string name="settings_cluster_music_temporary">Temporal · 8 segundos</string>
+    <string name="settings_cluster_music_permanent">Permanente</string>
+    <string name="settings_cluster_music_horizontal">Tarjeta musical · posición horizontal</string>
+    <string name="settings_cluster_music_vertical">Tarjeta musical · posición vertical</string>
+    <string name="settings_cluster_music_size">Tarjeta musical · tamaño</string>
+    <string name="settings_cluster_music_unknown">Artista desconocido</string>
 </resources>

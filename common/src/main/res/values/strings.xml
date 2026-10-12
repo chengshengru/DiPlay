@@ -900,4 +900,15 @@
         <string name="settings_disable_media_key_audio_focus">Disable media-key audio focus (experimental)</string>
         <string name="settings_disable_media_key_audio_focus_description">Stops DiPlay from requesting media audio focus while CarPlay music is active. Enable this if your head unit routes its physical volume buttons to DiPlay and they no longer adjust volume. Steering-wheel play, pause and track controls may stop working on head units that require focus. Applies at the next CarPlay connection.</string>
     <string name="bluetooth_connections_not_real">This head unit’s Android Bluetooth reports a connection, but nothing reaches the iPhone: even a connection to a service that does not exist succeeds. Bluetooth here is handled by the maker’s own module, which apps cannot use, so wireless CarPlay cannot work on this head unit. Try a USB connection.</string>
+
+    <!-- 波次十 #660：集群音乐卡片（作者：TRAE AI） -->
+    <string name="settings_cluster_music">Music on cluster (experimental)</string>
+    <string name="settings_cluster_music_description">Show a square album cover over the cluster map. Choose temporary (8 seconds) or permanent artwork; the title and artist always appear over the cover for 8 seconds when the song changes. Position and size apply immediately. Requires cluster projection and iPhone metadata.</string>
+    <string name="settings_cluster_music_mode">Album cover visibility</string>
+    <string name="settings_cluster_music_temporary">Temporary · 8 seconds</string>
+    <string name="settings_cluster_music_permanent">Permanent</string>
+    <string name="settings_cluster_music_horizontal">Music card · horizontal position</string>
+    <string name="settings_cluster_music_vertical">Music card · vertical position</string>
+    <string name="settings_cluster_music_size">Music card · size</string>
+    <string name="settings_cluster_music_unknown">Unknown artist</string>
 </resources>
