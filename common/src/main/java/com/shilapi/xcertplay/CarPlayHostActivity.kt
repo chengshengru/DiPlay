@@ -5721,7 +5721,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         statusScrollView?.visibility = View.GONE
         val waitingVisible = activeScreenStreamTypes.isEmpty()
         connectionPanel?.visibility = if (waitingVisible) View.VISIBLE else View.GONE
-        usbDiagView?.visibility = if (waitingVisible) View.VISIBLE else View.GONE
+        // 实验性①：仅当开关打开且处于等待/连接屏时显示 USB 实时诊断日志覆盖层；默认关则不展示。
+        usbDiagView?.visibility = if (waitingVisible && AirPlayPersistence.loadUsbRealtimeLog(this)) View.VISIBLE else View.GONE
     }
 
     private fun friendlyStage(message: String): String = when {

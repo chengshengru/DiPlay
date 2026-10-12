@@ -198,6 +198,10 @@
 
     <string name="settings_harman_fullscreen_experimental">Полный экран Harman (экспериментально)</string>
     <string name="settings_harman_fullscreen_experimental_description">Позволяет CarPlay занять область штатной боковой панели на совместимых устройствах Harman. Применяется при следующем открытии окна CarPlay; на других прошивках возможны ошибки отображения.</string>
+    <string name="settings_usb_realtime_log">Протокол USB в реальном времени при подключении (экспериментально)</string>
+    <string name="settings_usb_realtime_log_description">Показывает последние строки диагностики xcertplay-usb на экране CarPlay при USB-подключении, чтобы видеть, где зависло, без компьютера.</string>
+    <string name="settings_wireless_skip_bluetooth_config">Пропуск запроса Bluetooth для беспроводного режима (экспериментально)</string>
+    <string name="settings_wireless_skip_bluetooth_config_description">При беспроводном подключении пропускает окно “Включите Bluetooth” и продолжает с iPhone, уже подключённым к автомобилю по Bluetooth.</string>
     <string name="rect_fill_disable_safe_area">Заполнение центрального экрана, отключить безопасную область</string>
     <string name="rect_fill_disable_safe_area_description">Не объявлять safeArea в AirPlay info центрального экрана во избежание конфликта с cornerMasks</string>
     <string name="safe_area_disabled_rect_fill_summary">Безопасная область центр. экрана: отключена (прямоугольное заполнение)</string>

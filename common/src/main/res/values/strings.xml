@@ -205,6 +205,10 @@
 
     <string name="settings_harman_fullscreen_experimental">Harman head-unit full screen (experimental)</string>
     <string name="settings_harman_fullscreen_experimental_description">Let CarPlay occupy the OEM side-panel area on supported Harman head units. Applies when the CarPlay window next opens; other firmware may display incorrectly.</string>
+    <string name="settings_usb_realtime_log">USB connection real-time log (experimental)</string>
+    <string name="settings_usb_realtime_log_description">Show the latest xcertplay-usb diagnostic lines on the CarPlay screen while connected over USB, so you can see where it stalls without a computer.</string>
+    <string name="settings_wireless_skip_bluetooth_config">Skip Bluetooth prompt for wireless (experimental)</string>
+    <string name="settings_wireless_skip_bluetooth_config_description">When connecting wirelessly, skip the “Turn on Bluetooth” dialog and continue with the iPhone the car already has connected over Bluetooth.</string>
     <string name="rect_fill_disable_safe_area">Center display rectangular fill, disable safe area</string>
     <string name="rect_fill_disable_safe_area_description">Do not declare safeArea in center display AirPlay info to avoid conflict with cornerMasks</string>
     <string name="safe_area_disabled_rect_fill_summary">Center display safe area: disabled (rectangular full display)</string>

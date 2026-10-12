@@ -2166,6 +2166,18 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 SidePanelSettings.setEnabled(this, it)
                 markReconnectNeeded()
             }
+            // 实验性①：USB 连接页实时日志覆盖层（默认关，打开后 CarPlayHostActivity 才显示诊断行）。无需重连。
+            toggle(card, getString(R.string.settings_usb_realtime_log),
+                getString(R.string.settings_usb_realtime_log_description),
+                AirPlayPersistence.loadUsbRealtimeLog(this)) {
+                AirPlayPersistence.saveUsbRealtimeLog(this, it)
+            }
+            // 实验性②：无线连接绕过蓝牙开关配置（默认关，打开后跳过"打开蓝牙"弹框）。无需重连。
+            toggle(card, getString(R.string.settings_wireless_skip_bluetooth_config),
+                getString(R.string.settings_wireless_skip_bluetooth_config_description),
+                AirPlayPersistence.loadWirelessSkipBluetoothConfig(this)) {
+                AirPlayPersistence.saveWirelessSkipBluetoothConfig(this, it)
+            }
             if (CarPlayRotation.enabled(this)) {
                 val pictures = CarPlayRotation.Picture.entries
                 choice(card, getString(R.string.carplay_rotation_picture), listOf(
@@ -5130,10 +5142,21 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             "choosePhone: enabled=${adapter.isEnabled} bonded=${devices.size} " +
                 "connectedIphone=${connectedIphone?.address ?: "none"}",
         )
+        // 实验性②：绕过蓝牙开关配置。若已探测到车机已连接的 iPhone，跳过"打开蓝牙"弹框与设备选择，
+        // 直接保存并续接无线流程（应对 API 17 上 adapter.isEnabled 误报关闭的场景）。
+        if (AirPlayPersistence.loadWirelessSkipBluetoothConfig(this) && connectedIphone != null) {
+            DiPlayPreferences.savePhone(this, connectedIphone.address, connectedIphone.name ?: "iPhone")
+            val start = pendingWireless; pendingWireless = false
+            render()
+            if (start) connect(true)
+            return
+        }
         // Plan A 兜底：若 bondedDevices 为空但已探测到真实 ACL 连接的 iPhone，仍把它纳入可选列表。
         val candidates = if (devices.isEmpty() && connectedIphone != null) listOf(connectedIphone) else devices
         if (candidates.isEmpty()) {
-            if (!adapter.isEnabled) {
+            // 实验性②：绕过蓝牙开关配置时，即使 adapter.isEnabled 误报关闭也不弹"打开蓝牙"，降级为系统蓝牙配对引导。
+            val bluetoothOff = !adapter.isEnabled && !AirPlayPersistence.loadWirelessSkipBluetoothConfig(this)
+            if (bluetoothOff) {
                 showTurnOnBluetoothDialog(adapter); return
             }
             AlertDialog.Builder(this).setTitle(getString(R.string.pair_your_iphone))

@@ -60,6 +60,10 @@ object AirPlayPersistence {
     private const val KEY_MANUAL_HOTSPOT_CHANNEL = "manual_hotspot_channel"
     private const val KEY_MANUAL_HOTSPOT_SECURITY = "manual_hotspot_security"
     private const val KEY_DEBUG_LOGS_ENABLED = "debug_logs_enabled"
+    // 实验性：USB 连接页实时诊断日志覆盖层（默认关，打开后显示）。
+    private const val KEY_USB_REALTIME_LOG = "usb_realtime_log"
+    // 实验性：无线连接绕过"打开蓝牙"弹框，直接使用车机已连接 iPhone（默认关）。
+    private const val KEY_WIRELESS_SKIP_BT_CONFIG = "wireless_skip_bluetooth_config"
     private const val KEY_MANUFACTURER = "manufacturer"
     private const val KEY_MODEL = "model"
     private const val KEY_OEM_LABEL = "oem_label"
@@ -448,6 +452,28 @@ object AirPlayPersistence {
     fun saveDebugLogsEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_DEBUG_LOGS_ENABLED, enabled)
+            .apply()
+    }
+
+    /** 实验性：USB 连接页实时日志覆盖层；默认关，打开后 CarPlayHostActivity 才渲染诊断行。 */
+    fun loadUsbRealtimeLog(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_USB_REALTIME_LOG, false)
+
+    fun saveUsbRealtimeLog(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_USB_REALTIME_LOG, enabled)
+            .apply()
+    }
+
+    /** 实验性：无线连接绕过蓝牙开关配置；默认关，打开后跳过"打开蓝牙"弹框并续接已连接 iPhone。 */
+    fun loadWirelessSkipBluetoothConfig(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_WIRELESS_SKIP_BT_CONFIG, false)
+
+    fun saveWirelessSkipBluetoothConfig(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_WIRELESS_SKIP_BT_CONFIG, enabled)
             .apply()
     }
 

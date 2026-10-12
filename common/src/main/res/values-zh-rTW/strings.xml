@@ -198,6 +198,10 @@
 
     <string name="settings_harman_fullscreen_experimental">Harman 車機全螢幕（實驗性）</string>
     <string name="settings_harman_fullscreen_experimental_description">讓 CarPlay 佔用受支援 Harman 車機的原廠側欄區域。下次開啟 CarPlay 視窗時生效；其他韌體可能顯示異常。</string>
+    <string name="settings_usb_realtime_log">USB 連線即時記錄（實驗性）</string>
+    <string name="settings_usb_realtime_log_description">透過 USB 連線時，在 CarPlay 畫面上顯示最新的 xcertplay-usb 診斷行，無需電腦即可看到卡在哪一步。</string>
+    <string name="settings_wireless_skip_bluetooth_config">無線連線跳過藍牙提示（實驗性）</string>
+    <string name="settings_wireless_skip_bluetooth_config_description">發起無線連線時跳過「打開藍牙」彈框，直接以車機已透過藍牙連線的 iPhone 繼續後續流程。</string>
     <string name="rect_fill_disable_safe_area">中控直角鋪滿顯示，停用安全區域</string>
     <string name="rect_fill_disable_safe_area_description">不在中控 AirPlay 宣告中包含 safeArea，避免與 cornerMasks 衝突</string>
     <string name="safe_area_disabled_rect_fill_summary">中控安全區域：已停用（直角鋪滿顯示）</string>
