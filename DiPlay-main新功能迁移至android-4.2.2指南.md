@@ -34,7 +34,7 @@
 
 | 锚点 | Commit（完整哈希） | 时间 | 说明 |
 |------|--------------------|------|------|
-| **main 基线** | `24ae1fa52edbe27392a668d4c9e71a32d5691986` | 2026-10-11 14:47 +0400 | Merge PR #628（release/0.2.18）；增量轮（波次九，批次A–H）已迁移完成，上一基线 `4314bbe133599b21f40d23d3bf3de3f0d45353b4`（Merge PR #584，release/0.2.17） |
+| **main 基线** | `d9881b4a` | — | Merge PR #660（集群音乐卡片）；增量轮（波次十，批次A–H）已迁移完成，上一基线 `24ae1fa52edbe27392a668d4c9e71a32d5691986`（Merge PR #628，release/0.2.18）。增量 `24ae1fa5..d9881b4a` = 22 提交 / 70 文件（+2710/−118），方案 `DiPlay-main分支增量差异迁移报告-0.2.18-next.md`。 |
 | **分叉点** | `7887bb7bf2b52258e663a2a4ea1332382ed80ad8` | 2026-10-07 15:24 +0400 | v0.2.14 发布合并点，两分支共同祖先 |
 | **android-4.2.2 起点** | `6a08b07d2ee41f002d9f8b5151c94d7ed26d5fea` | 2026-10-09 20:42 +0800 | 分支已有 4 个移植提交（API 17 下移、legacy-mdns、热点恢复） |
 
@@ -74,6 +74,9 @@ flowchart LR
 | `IphoneUsbHost.kt` 的 requestWait 版本分支（守护线程 + queue poll） | main 的 `UsbRequestQueue.kt`（API 26+ 原生队列） | **混合**：API 26+ 路径直接采用 main 实现替换守护线程方案；API 17–25 保留守护线程路径 |
 | 分支 `MainActivity.kt` View 化实现 | main 的 Compose 实现 | **不替换**：技术栈不可逆，仅移植功能逻辑 |
 | 分支 `CrashFileLogger.kt`（分支自加） | main 的诊断上报增强（#499/#459） | **无需替换**：2026-10-11 核实 #499 仅涉及 AndroidMediaSink 诊断通道（onAudioDiagnostic），不触碰 CrashFileLogger；分支保留自加实现 |
+| `DiPlayActivity` 常驻搜索框（分支旧实现） | main #645 两态搜索（按钮展开/收起，单一编辑器） | **替换**：波次十批次E 已落地（分支提交 `a0791ed9`）；3 处 API 23 调用改写为 `SearchIconLayerDrawable`/SDK 守卫/废弃 `StaticLayout` 构造器 |
+| `AndroidMediaSink` 音频解码等待 500 ms（波次九沿用视频值） | main #644 音频专用 100 ms | **替换**：波次十批次B 已落地（分支提交 `19f2de2a`） |
+| `IphoneCarPlayConfiguration.find` 单一选取逻辑 | main #644 `WiredConfigurationAction` 状态机 | **替换**：波次十批次A 已落地（分支提交 `6bd2f503`），叠加在波次九 `UsbDescriptorCompat` 之上 |
 
 3. **替换后必须做**：
    - 跑被替换功能的单元测试（main 版测试优先采用 main 的测试文件）；
@@ -141,6 +144,14 @@ flowchart LR
 | 九 | 批次F 车辆/HUD | #622d/#600/#622e/#626/#599/#607/#587 | ✅ 已完成 | 2026-10-12 | 分支提交 `8f4091b3`（44 文件 +2112/-18）；来电方向盘键、窗口媒体键（API 28/33 双档测试）、WheelKeyService 恢复重试+诊断报告、Geely/Lynk 方向盘键（aidl + buildTools 34.0.0）、FCE 集群引导、测速表悬浮、BYD SOME/IP HUD 可用性前置检查 |
 | 九 | 批次G 新功能块 | #594/#598/#593 | ✅ 已完成 | 2026-10-12 | 分支提交 `bbcd16fc`（26 文件 +1362/-105）；DiPlayButton（ripple/stateListAnimator/foreground 全走 UiCompat）+ 等待屏/菜单 12 处 + 画面调节面板补齐基线 palette 化、设置备份（zxing 3.5.3 纯 Java 库 + settings-backup.html + backup 字符串 ×7）、安装器选择（公开副本哈希校验 + 多安装器选择器；manifest `<queries>` 保持注释，targetSdk 28 无包可见性过滤）；测试 sdk 35→33（Robolectric 4.9 上限） |
 | 九 | 批次H 守卫 | #595 | ⏭️ 跳过/守卫 | 2026-10-12 | Telecom 自管理通话整体跳过（API 26+）：分支无 telecom/ 文件、无 `phoneAudioRoute*` 引用、`WheelKeyService.wanted()` 未追加、shared/AndroidManifest 未声明 `MANAGE_OWN_CALLS`/`PhoneAudioConnectionService`；`:shared:assembleDebug` 验证无残留 |
+| 十 | 批次A 有线连接与启动（#644） | `817ff3fa` 等 | ✅ 已完成 | 2026-10-12 | 分支提交 `6bd2f503`；NCM 20 ms 超时、`WiredConfigurationAction` 状态机（叠加波次九 `UsbDescriptorCompat`）、USB 自动确认 `android.app.Dialog`、WheelKey 崩溃重置、5 GHz companion（`TAG` 保持 private） |
+| 十 | 批次B 音频与通话（#644） | `7d974f42`/`ddfb3fd2` | ✅ 已完成 | 2026-10-12 | 分支提交 `19f2de2a`；`rtpClockRate`、麦克风首读重启（`ERROR_DEAD_OBJECT` 用字面量常量守卫）、峰值电平、音频输入等待 100 ms、CALL 通道名 |
+| 十 | 批次C 显示（#644） | `817ff3fa` | ✅ 已完成 | 2026-10-12 | 分支提交 `e1398747`；新增 `values/colors.xml`；`values/themes.xml` 与 `values-v21/themes.xml` 两处 windowBackground 改资源引用；集群导航卡片 5 s 隐藏 |
+| 十 | 批次D 诊断（#644） | `817ff3fa` | ✅ 已完成 | 2026-10-12 | 分支提交 `e468aa9a`；新增 `Iap2RxLog` 节流；usbmux rx logcat 限 50 帧 |
+| 十 | 批次E 设置搜索 UI（#645） | `be1e42f8`/`a9734a10` | ✅ 已完成 | 2026-10-12 | 分支提交 `a0791ed9`；🔁 整段替换分支常驻搜索框（两态：按钮展开/收起）；3 处 API 23 调用改写：`SearchIconLayerDrawable.onBoundsChange` 替代 `setLayerGravity/setLayerSize`、`setIsLaidOutInScreen` 加 SDK 23 守卫、`StaticLayout` 废弃构造器替代 `Builder`；`Configuration.locales` 走 `firstLanguage()`；AdaptiveSettingsUiTest +5 用例 |
+| 十 | 批次F 本地化（#646/#631） | `9e1d122d`/`2c455744` | ✅ 已完成 | 2026-10-12 | 分支提交 `7cd38617`；日文全量（values-ja 988+9 条 key，含 24 条新译；`home_public_preview`/`about_public_preview_prefix` 占位符对齐分支拼接调用）；阿拉伯语补 `values-ar/strings_contrib_audio.xml` + `picture.xml` + 49 条；AppLocale/locales_config/JapaneseTranslationsTest/AppLocaleTest；⏭️ 跳过 site/ja |
+| 十 | 批次G 集群音乐卡片（#660） | `6a12786d`/`81b938ad` | ✅ 已完成 | 2026-10-12 | 分支提交 `7934a01a`；实验性默认关；`ClusterMusicView` 的 `StaticLayout.Builder`(API 23) 改废弃构造器+两行截断；字符串 9 条 ×8 语言（日文 `（実験的機能）`）；挂载顺序 turnCard → music → speedometer |
+| 十 | 批次H 测试与文档 | 各 PR | ✅ 已完成 | 2026-10-12 | 7 个新增测试全部到位（2 个随批次F/G、5 个随批次A/B/D 迁移）；测试改动随批次E/G；`versions` 维持 37/`0.2.18-api17`（main 本轮未推进版本号，见报告 §7）；CHANGELOG §7.4 扩写；README/INSTALL 8 语言说明 |
 
 ### 0.5 每轮迁移的文档更新义务
 
@@ -784,6 +795,8 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 - [x] 更新分支版 `CHANGELOG` 注明各功能对应 main PR 号（0.2.17-api17 段落，随版本同步完成）
 - [x] **版本号同步 main**（§0.6）：`mobile` `versionCode 36` / `versionName "0.2.17-api17"`，与 main v0.2.17 对齐；`automotive` / `:home` / `:maphost` 保持独立版本线未动
 - [x] 下一轮（波次九）版本号同步：`mobile` → `versionCode 37` / `versionName "0.2.18-api17"`（§0.6.2）；`CHANGELOG` 追加 `0.2.18-api17` 首段（2026-10-12 完成）
+- [x] 波次十版本号复核（§0.6，2026-10-12）：main `d9881b4a` 未推进版本号（仍 `0.2.18`/`37`）→ 分支 `37`/`"0.2.18-api17"` **不动**；`CHANGELOG` 首段首句推进到 `main` @ `d9881b4a` 并追加波次十增量 bullet（报告 §7.4 模板）
+- [x] 波次十收尾（2026-10-12）：§0.1 基线推进 `d9881b4a`、§0.3 追加 3 条替换条目、§0.4 波次十批次 A–H 登记、README/INSTALL 8 语言说明、AGENTS.md 日文实验性后缀 `（実験的機能）`
 
 ---
 

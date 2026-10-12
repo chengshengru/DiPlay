@@ -1,6 +1,6 @@
 # DiPlay 0.2.18-api17 — 2026-10-12
 
-Android 4.2.2 (API 17) port of DiPlay 0.2.18 (`main` @ `24ae1fa5`). Wave 9 ports the 0.2.18 increment (47 commits) on top of 0.2.17-api17; see the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for per-feature details and API 17 guards:
+Android 4.2.2 (API 17) port of DiPlay 0.2.18 (`main` @ `d9881b4a`). Wave 10 ports the post-0.2.18 increment (22 commits) on top of wave 9; see the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for per-feature details and API 17 guards:
 
 - Keep wired sessions running when a USB read finishes as DiPlay stops waiting for it, start wired CarPlay on Android 7.1 head units and when a head-unit USB audio driver holds the iPhone, and skip VPN pre-consent dialogs over approved network ADB (#625, #614, #618).
 - Stop discarding music packets after a 10 ms wait, drain queued AAC frames at a stream reset, and log the /feedback position against the received audio (#618, #625).
@@ -9,6 +9,22 @@ Android 4.2.2 (API 17) port of DiPlay 0.2.18 (`main` @ `24ae1fa5`). Wave 9 ports
 - Settings backup and restore from a phone browser (zxing 3.5.3), an installer choice for updates, and a shared DiPlayButton for code-built chrome with the picture panel repainted on night changes (#598, #593, #594).
 - Experimental, off-by-default options: Harman full screen (guarded to API 19+), square corners, clearer navigation voice over USB, MediaTek low-latency decoding (API 21+ paths), a media-key audio focus opt-out, a cluster speedometer, FCE cluster guidance and BYD SOME/IP windshield HUD gating (#613, #596, #622, #608, #615, #607, #599).
 - Skipped on API 17: car phone audio via Telecom self-managed calls (#595 — API 26+); the common `<queries>` block stays commented because targetSdk 28 needs no package-visibility filter.
+- Wave 10 ports the post-0.2.18 increment (22 commits, `main` @ `d9881b4a`): wired CarPlay starts
+  seconds sooner (a NAKed NCM pipe is dropped after 20 ms, #644), a USB configuration without Apple
+  Ethernet asks for CarPlay mode first (#644), the auto-confirm accessibility service now sees the
+  system USB dialog under `android.app.Dialog` (#644), the wheel-key service waits out Android's
+  crashed-service mark (#644), and 5 GHz companion car hotspots are accepted (#644).
+- Calls count their RTP position at the stream's own rate (16 kHz, not 48 kHz, #644), the head-unit
+  microphone restarts its first failed read (#644), the audio decoder waits at most 100 ms (#644),
+  and call playback stats reach the report again (#644).
+- Dialogs have a background on Android 9 and older, the cluster turn card goes 5 s after guidance
+  ends, and long reports keep the lines that matter (iAP2 rx thinning, usbmux frame cap) (#644).
+- Settings search opens from a button, keeps one editor and its keyboard, and no longer leaks layout
+  listeners (#645). The app adds Japanese; the release site stays at seven languages (#646, #631).
+- Experimental, off-by-default: a cluster music card on the dashboard map (#660 — temporary or
+  permanent square cover; the contributor's vehicle test is unresolved).
+- Skipped on this port: the release site's Japanese page; the 28 Japanese strings for features this
+  branch has not ported (car phone audio #595, the small-window cluster domain #493).
 
 See the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for skipped-item reasons; full-release vehicle acceptance is not claimed.
 

@@ -221,7 +221,9 @@ class BufferedAudioStreamTest {
 
     @Test
     fun tinyAuthenticatedFramesCannotGrowAnUnboundedObjectQueue() {
-        val stream = BufferedAudioStream(key, format, RecordingSink())
+        // 波次十：同步 main 版——本用例测帧计数上限而非节流填充，须传空 pause 全速取帧，
+        // 否则 #484 的节流暂停会让 3 秒时限内到不了目标队列长度（作者：TRAE AI）。
+        val stream = BufferedAudioStream(key, format, RecordingSink(), pause = {})
         val executor = Executors.newSingleThreadExecutor()
         try {
             stream.start()

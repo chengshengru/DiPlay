@@ -59,8 +59,10 @@ class BydAmapAdapterTest {
         assertEquals("1 h 5 min", text.duration(3900))
         assertNull(text.duration(-1))
         val utc = java.util.TimeZone.getTimeZone("UTC")
-        assertEquals("15:55", text.arrival(15L * 3_600_000 + 45 * 60_000, 600, utc, use24Hour = true))
-        assertEquals("3:55", text.arrival(15L * 3_600_000 + 45 * 60_000, 600, utc, use24Hour = false))
+        // 波次五 #458：DiLink3 到达时间格式化为 AMap 文案形式，断言随 main 同步（作者：TRAE AI）。
+        assertEquals("预计15:55到达", text.arrival(15L * 3_600_000 + 45 * 60_000, 600, utc, use24Hour = true))
+        assertEquals("预计3:55到达", text.arrival(15L * 3_600_000 + 45 * 60_000, 600, utc, use24Hour = false))
+        assertNull(text.arrival(0, -1, utc, use24Hour = true))
     }
 
     @Test
