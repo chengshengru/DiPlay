@@ -228,11 +228,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var updateSavedUri: Uri? = null
     // main #593：安装器选择——校验哈希等工作移出主线程（作者：TRAE AI）。
     internal var updateInstallWorker: (Runnable) -> Unit = { Thread(it, "diplay-update-install").start() }
-    // main B3：内嵌搜索状态——常驻输入框、下拉结果弹层、索引与焦点恢复标记（作者：TRAE AI）。
+    // main B3：内嵌搜索状态——输入框、下拉结果弹层、索引与焦点恢复标记（作者：TRAE AI）。
     private var settingsSearchBox: EditText? = null
     private var settingsSearchPopup: PopupWindow? = null
     private var settingsSearchIndex: List<SettingsSearchResult>? = null
     private var settingsSearchQuery = ""
+    // 波次十 #645：两态搜索——false 时页头显示搜索按钮，true 时展开为输入框（作者：TRAE AI）。
+    private var settingsSearchExpanded = false
     private var settingsSearchIndexing = false
     private var settingsSearchRestoreFocus = false
     private var renderedReadiness: SettingsReadiness? = null
@@ -666,9 +668,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val restoreRailFocus = keepRailPosition &&
             (pendingRailFocus || settingsRailScroll?.hasFocus() == true)
         settingsRailScroll = null
-        // main B3：结果挂在旧头部上；若搜索继续，由新头部重新打开（作者：TRAE AI）。
+        // 波次十 #645：结果挂在旧头部上；若搜索继续，由新头部重新打开（作者：TRAE AI）。
         settingsSearchPopup?.dismiss()
         settingsSearchPopup = null
+        // 展开态重渲染后焦点由新输入框接管，恢复标记随之延续（作者：TRAE AI）。
+        settingsSearchRestoreFocus = settingsSearchRestoreFocus ||
+            (settingsSearchExpanded && settingsSearchBox?.hasFocus() == true)
         settingsSearchBox = null
         if (page != "settings") clearSettingsSearchState()
         status = null; connectButton = null; disconnectButton = null; lastRunning = null; carButtonCard = null
@@ -921,7 +926,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     private fun navigateBack() {
         // main B3：返回键先关闭打开的搜索，与系统搜索栏行为一致（作者：TRAE AI）。
-        if (page == "settings" && settingsSearchQuery.isNotEmpty()) {
+        // 波次十 #645：判定改为两态展开标记，收起态下返回键不再吞掉（作者：TRAE AI）。
+        if (page == "settings" && settingsSearchExpanded) {
             closeSettingsSearch()
             return
         }
@@ -1161,19 +1167,69 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
     }
 
+    /**
+     * 波次十 #645：设置页头两态搜索（作者：TRAE AI）。
+     * 收起态：标题占满剩余宽度，尾部是搜索按钮（窄屏/竖屏为图标、完整横屏为文字按钮）。
+     * 展开态：标题收缩为自适应宽度，搜索输入框占满剩余宽度。
+     */
     private fun settingsHeader(compact: Boolean): LinearLayout = row().apply {
+        val controlHeight = dp(if (compact) 44 else 52)
+        val iconOnlySearch = compact || resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
         gravity = Gravity.CENTER_VERTICAL
         addView(button(getString(R.string.back), false, ::navigateBack),
-            LinearLayout.LayoutParams(if (compact) dp(78) else dp(112), if (compact) dp(44) else dp(52)))
-        // main B3：标题不再拉伸占满，搜索框常驻页首占满剩余宽度（作者：TRAE AI）。
-        addView(label(getString(R.string.settings), if (compact) 20 else 26, TEXT, true).apply {
+            LinearLayout.LayoutParams(if (compact) dp(78) else dp(112), controlHeight))
+        val settingsTitle = label(getString(R.string.settings), if (compact) 20 else 26, TEXT, true).apply {
             setPadding(dp(12), 0, dp(12), 0)
-        }, LinearLayout.LayoutParams(-2, if (compact) dp(44) else dp(52)))
-        addView(settingsSearchField(compact), LinearLayout.LayoutParams(0, if (compact) dp(44) else dp(52), 1f).apply {
-            marginEnd = dp(if (compact) 8 else 12)
-        })
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        // 先给操作按钮占位；窄头部里只允许标题收缩（作者：TRAE AI）。
+        addView(settingsTitle, LinearLayout.LayoutParams(
+            if (settingsSearchExpanded) -2 else 0, controlHeight,
+            if (settingsSearchExpanded) 0f else 1f,
+        ))
+        val searchGap = dp(if (compact) SETTINGS_HEADER_COMPACT_GAP_DP else SETTINGS_HEADER_GAP_DP)
+        if (settingsSearchExpanded) {
+            val searchField = settingsSearchField(compact)
+            addView(searchField, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
+                marginEnd = searchGap
+            })
+            searchField.doOnLayout {
+                // 被挤窄的输入框放不下提示文案时，把标题的空间让给它（按当前语言与字体缩放测量）。
+                val hintWidth = searchField.paint.measureText(searchField.hint.toString())
+                val requiredWidth = hintWidth + searchField.compoundPaddingLeft + searchField.compoundPaddingRight
+                if (searchField.width < requiredWidth) {
+                    settingsTitle.visibility = View.GONE
+                    searchField.layoutParams = (searchField.layoutParams as LinearLayout.LayoutParams).apply {
+                        marginStart = searchGap
+                    }
+                }
+            }
+        } else {
+            val openSearch = {
+                // 索引构建会重渲染设置页；先建索引再聚焦，避免第一个按键替换输入法的连接（作者：TRAE AI）。
+                settingsSearchIndex = buildSettingsSearchIndex()
+                settingsSearchExpanded = true
+                settingsSearchRestoreFocus = true
+                render()
+            }
+            val searchButton = if (iconOnlySearch) {
+                iconButton(R.drawable.ic_dp_search, getString(R.string.settings_search), openSearch).apply {
+                    UiCompat.setImageTint(this, TEXT)
+                }
+            } else {
+                button(getString(R.string.settings_search_hint), false, openSearch)
+            }.apply {
+                tag = SETTINGS_SEARCH_BUTTON_TAG
+                contentDescription = getString(R.string.settings_search)
+            }
+            addView(searchButton, LinearLayout.LayoutParams(
+                if (iconOnlySearch) controlHeight else -2, controlHeight).apply {
+                marginEnd = searchGap
+            })
+        }
         // 标题栏右侧加入外观切换按钮（main #422，作者：TRAE AI）。
-        addView(appearanceButton(), LinearLayout.LayoutParams(dp(if (compact) 44 else 52), dp(if (compact) 44 else 52)))
+        addView(appearanceButton(), LinearLayout.LayoutParams(controlHeight, controlHeight))
     }
 
     private fun home(content: LinearLayout) {
@@ -1582,6 +1638,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     // 分类页统一入口：ABOUT 归入设置层级，与其他分类一致（main #597，作者：TRAE AI）。
     private fun openSettingsCategory(category: SettingsCategory) {
+        // 波次十 #645：跳转前收起键盘并清理搜索状态（作者：TRAE AI）。
+        setSearchKeyboard(settingsSearchBox, false)
+        clearSettingsSearchState()
         settingsCategory = category
         render()
     }
@@ -1725,10 +1784,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     /**
-     * main B3：设置页头部常驻搜索框，输入时下拉结果（作者：TRAE AI）。
-     * 索引在首个按键时构建；构建会触发整页重渲染，由替换后的新输入框接管查询、焦点与键盘。
+     * 波次十 #645：设置页头部搜索框；输入时在下方下拉结果（作者：TRAE AI）。
+     * 索引在展开输入框之前构建，因此输入过程保持同一个编辑器与键盘输入连接。
      */
-    private fun settingsSearchField(compact: Boolean): EditText = EditText(this).apply {
+    private fun settingsSearchField(compact: Boolean): EditText = SettingsSearchEditText(this).apply {
         settingsSearchBox = this
         setSingleLine()
         hint = getString(R.string.settings_search_hint)
@@ -1736,15 +1795,20 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         textSize = if (compact) 16f else 18f
         setTextColor(TEXT)
         setHintTextColor(MUTED)
-        background = rounded(BUTTON, BORDER)
-        // API17 适配：View.setForeground 是 API 23+，走 UiCompat（作者：TRAE AI）。
-        UiCompat.setForeground(this, focusRing())
-        setPadding(dp(16), 0, dp(16), 0)
-        compoundDrawablePadding = dp(10)
-        setCompoundDrawablesRelativeWithIntrinsicBounds(
-            // API17 适配：Context.getDrawable 是 API 21+，低版本走 ContextCompat；setTint 是 API 21+，走 UiCompat（作者：TRAE AI）。
-            androidx.core.content.ContextCompat.getDrawable(this@DiPlayActivity, R.drawable.ic_dp_search)?.mutate()
-                ?.let { UiCompat.tint(it, MUTED) }, null, null, null)
+        // 编辑框横向滚动长文本时画布随之滚动，但背景不滚动：图标与焦点环画在背景层，
+        // 因此它们位置稳定，也无需为文本垂直居中做补偿（作者：TRAE AI）。
+        val iconSize = headerIconSize(compact)
+        // API17 适配：Context.getDrawable 是 API 21+，低版本走 ContextCompat；setTint 是 API 21+，走 UiCompat（作者：TRAE AI）。
+        val icon = androidx.core.content.ContextCompat.getDrawable(this@DiPlayActivity, R.drawable.ic_dp_search)
+            ?.mutate()?.let { UiCompat.tint(it, MUTED) }
+        // API17 适配：LayerDrawable.setLayerGravity/setLayerSize/setLayerInsetRelative 是 API 23+，
+        // 改为 LayerDrawable 子类在 onBoundsChange 里手动摆放图标层（作者：TRAE AI）。
+        background = SearchIconLayerDrawable(
+            listOfNotNull(rounded(BUTTON, BORDER), icon, focusRing()).toTypedArray(),
+            iconSize, dp(16))
+        gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        includeFontPadding = false
+        setPaddingRelative(dp(16) + if (icon != null) iconSize + dp(10) else 0, 0, dp(16), 0)
         inputType = android.text.InputType.TYPE_CLASS_TEXT
         // 横屏车机不然会用全屏编辑器盖住结果列表。
         imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or
@@ -1774,6 +1838,17 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
         })
+        // 键盘改变的是窗口尺寸而不是输入框，因此跟随窗口布局。监听器若直接挂在窗口观察者上
+        // 会在每次重建后残留；只在输入框附着期间注册，随视图脱离自动移除（作者：TRAE AI）。
+        val followWindow = android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            if (settingsSearchBox === this && settingsSearchPopup?.isShowing == true) {
+                positionSettingsSearchResults(this, settingsSearchPopup!!)
+            }
+        }
+        addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) = view.viewTreeObserver.addOnGlobalLayoutListener(followWindow)
+            override fun onViewDetachedFromWindow(view: View) = view.viewTreeObserver.removeOnGlobalLayoutListener(followWindow)
+        })
         if (settingsSearchRestoreFocus) {
             settingsSearchRestoreFocus = false
             post {
@@ -1785,12 +1860,87 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
     }
 
+    /**
+     * 波次十 #645：搜索框背景的三层绘制（作者：TRAE AI）。
+     * API17 适配：底板、左侧图标与焦点环的摆放不使用 API 23 的 setLayerGravity/setLayerSize/
+     * setLayerInsetRelative，改为覆写 onBoundsChange 在 bounds 变化时手动摆放图标层——
+     * 左缩进与文本内边距一致，垂直居中，所有层在 API 17 上行为一致。
+     */
+    private class SearchIconLayerDrawable(
+        layers: Array<android.graphics.drawable.Drawable>,
+        private val iconSizePx: Int,
+        private val iconInsetPx: Int,
+    ) : android.graphics.drawable.LayerDrawable(layers) {
+        override fun onBoundsChange(bounds: android.graphics.Rect) {
+            super.onBoundsChange(bounds)
+            if (numberOfLayers < 2) return
+            val top = bounds.top + (bounds.height() - iconSizePx).coerceAtLeast(0) / 2
+            getDrawable(1).setBounds(
+                bounds.left + iconInsetPx, top,
+                bounds.left + iconInsetPx + iconSizePx, top + iconSizePx)
+        }
+    }
+
+    /**
+     * 波次十 #645：搜索输入框——文本与提示按内容视觉中心垂直对齐（作者：TRAE AI）。
+     * 中文按字形包围盒对齐，其余语言按字体度量对齐（带下伸部或重音时基线仍稳定）。
+     */
+    private class SettingsSearchEditText(context: android.content.Context) : EditText(context) {
+        private val glyphBounds = android.graphics.Rect()
+        private var measuredHint: String? = null
+        private var measuredHintHeight = -1
+        private var measuredHintTextSize = -1f
+        private var measuredHintBaseline = 0
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            val value: CharSequence = if (text.isNullOrEmpty()) hint ?: "" else text
+            val drawingBaseline = if (text.isNullOrEmpty() && value.isNotEmpty()) hintBaseline(value) else baseline
+            val offset = if (baseline >= 0) {
+                val contentCentre = paddingTop + (height - paddingTop - paddingBottom) / 2f
+                contentCentre - alignedTextCentreY(this, value, glyphBounds, drawingBaseline)
+            } else 0f
+            // 文本、选区与光标一起移动。
+            val checkpoint = canvas.save()
+            canvas.translate(0f, offset)
+            super.onDraw(canvas)
+            canvas.restoreToCount(checkpoint)
+        }
+
+        /**
+         * TextView.baseline 描述的是可编辑布局的基线——绘制提示时也在用它，而回退字体里的
+         * 提示位置可能不同。每次提示/高度/字号变化只测量一次，而不是光标每帧闪烁都测。
+         */
+        private fun hintBaseline(value: CharSequence): Int {
+            if (value.toString() != measuredHint || height != measuredHintHeight || paint.textSize != measuredHintTextSize) {
+                // 编辑框横向滚动不换行：把提示按单行排版。
+                val hintWidth = maxOf(
+                    (width - compoundPaddingLeft - compoundPaddingRight).coerceAtLeast(1),
+                    kotlin.math.ceil(android.text.Layout.getDesiredWidth(value, paint).toDouble()).toInt(),
+                )
+                // API17 适配：StaticLayout.Builder 是 API 23+，改用 API 1 的废弃构造器（作者：TRAE AI）。
+                @Suppress("DEPRECATION")
+                val hintLayout = android.text.StaticLayout(
+                    value, 0, value.length, paint, hintWidth,
+                    android.text.Layout.Alignment.ALIGN_NORMAL, 1f, 0f, includeFontPadding)
+                measuredHintBaseline = extendedPaddingTop +
+                    ((height - extendedPaddingTop - extendedPaddingBottom - hintLayout.height).coerceAtLeast(0) / 2) +
+                    hintLayout.getLineBaseline(0)
+                measuredHint = value.toString()
+                measuredHintHeight = height
+                measuredHintTextSize = paint.textSize
+            }
+            return measuredHintBaseline
+        }
+    }
+
+    // 波次十 #645：页头图标统一尺寸（作者：TRAE AI）。
+    private fun headerIconSize(compact: Boolean) = dp(if (compact) 20 else 24)
+
     private fun onSettingsSearchChanged(box: EditText) {
         if (box !== settingsSearchBox) return
         settingsSearchQuery = box.text.toString()
         if (settingsSearchQuery.isEmpty()) {
-            // 下次搜索时重建索引，让索引跟随期间变更过的设置项。
-            settingsSearchIndex = null
+            // 波次十 #645：清空查询时保留本次搜索的索引；关闭搜索才会使其失效（作者：TRAE AI）。
             settingsSearchPopup?.dismiss()
             return
         }
@@ -1826,29 +1976,58 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             })
         }
         results.forEach { list.addView(settingsSearchRow(it)) }
-        val width = box.width.coerceAtLeast(dp(320))
-        // 矮屏上让结果列表保持在键盘上方。
-        val maxHeight = dp(if (resources.configuration.screenHeightDp < 600) 180 else 360)
         val existing = settingsSearchPopup?.takeIf { it.isShowing }
         val scroll = (existing?.contentView as? ScrollView) ?: ScrollView(this)
         scroll.removeAllViews()
         scroll.addView(list)
-        scroll.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST))
-        val height = scroll.measuredHeight.coerceIn(1, maxHeight)
         if (existing != null) {
-            existing.update(box, 0, dp(6), width, height)
+            positionSettingsSearchResults(box, existing)
             return
         }
-        settingsSearchPopup = PopupWindow(scroll, width, height, false).apply {
+        settingsSearchPopup = PopupWindow(scroll, box.width, 0, false).apply {
             setBackgroundDrawable(rounded(SURFACE, BORDER))
             // API17 适配：PopupWindow.setElevation 是 API 21+，走 UiCompat（作者：TRAE AI）。
             UiCompat.setPopupElevation(this, dp(8).toFloat())
             // 点击其他位置关闭列表但保留查询；点回搜索框重新打开。
             isOutsideTouchable = true
             inputMethodMode = PopupWindow.INPUT_METHOD_NEEDED
-            // API17 适配：showAsDropDown(view,x,y,gravity) 是 API 19+，低版本用调用方换算的 x 做 END 对齐（作者：TRAE AI）。
-            UiCompat.showAsDropDown(this, box, 0, dp(6), Gravity.END, box.width - width)
+            // API17 适配：setIsLaidOutInScreen 是 API 23+，加版本守卫；弹层按屏幕坐标定位（作者：TRAE AI）。
+            if (Build.VERSION.SDK_INT >= 23) setIsLaidOutInScreen(true)
+            positionSettingsSearchResults(box, this)
+        }
+    }
+
+    /**
+     * 波次十 #645：把结果弹层定位在搜索框正下方（作者：TRAE AI）。
+     * 宽度不超出可视区，左右钳制在屏幕内，高度不超过键盘顶部；绝不把列表翻转到锚点上方。
+     */
+    private fun positionSettingsSearchResults(box: EditText, popup: PopupWindow) {
+        val visible = android.graphics.Rect()
+        box.getWindowVisibleDisplayFrame(visible)
+        val location = IntArray(2)
+        box.getLocationOnScreen(location)
+        val top = location[1] + box.height + dp(SETTINGS_SEARCH_RESULTS_GAP_DP)
+        val width = minOf(box.width, visible.width())
+        val maxHeight = minOf(
+            visible.bottom - top,
+            dp(if (resources.configuration.screenHeightDp < 600)
+                SETTINGS_SEARCH_RESULTS_SHORT_HEIGHT_DP else SETTINGS_SEARCH_RESULTS_HEIGHT_DP),
+        )
+        if (width <= 0 || maxHeight <= 0) {
+            popup.dismiss()
+            return
+        }
+        val left = location[0].coerceIn(visible.left, visible.right - width)
+        val content = popup.contentView
+        content.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST))
+        val height = content.measuredHeight.coerceIn(1, maxHeight)
+        if (popup.isShowing) {
+            popup.update(left, top, width, height)
+        } else {
+            popup.width = width
+            popup.height = height
+            popup.showAtLocation(box.rootView, Gravity.TOP or Gravity.LEFT, left, top)
         }
     }
 
@@ -1872,13 +2051,16 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val box = settingsSearchBox
         setSearchKeyboard(box, false)
         clearSettingsSearchState()
-        box?.setText("")
         box?.clearFocus()
-        box?.isFocusableInTouchMode = false
+        // 波次十 #645：整体重渲染回收起态，焦点回到搜索按钮（作者：TRAE AI）。
+        render()
+        descendants(window.decorView).firstOrNull { it.tag == SETTINGS_SEARCH_BUTTON_TAG }?.requestFocus()
     }
 
     private fun clearSettingsSearchState() {
         settingsSearchQuery = ""
+        // 波次十 #645：两态复位（作者：TRAE AI）。
+        settingsSearchExpanded = false
         settingsSearchIndex = null
         settingsSearchRestoreFocus = false
         settingsSearchPopup?.dismiss()
@@ -5924,6 +6106,36 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private val RIPPLE get() = palette.ripple
 
     companion object {
+        /** 波次十 #645：取资源配置里的首选语言；Configuration.locales 是 API 24+，低版本走废弃 locale（作者：TRAE AI）。 */
+        private fun firstLanguage(resources: android.content.res.Resources): String =
+            if (Build.VERSION.SDK_INT >= 24) resources.configuration.locales[0].language
+            else @Suppress("DEPRECATION") resources.configuration.locale.language
+
+        /**
+         * 波次十 #645：文本视觉中心相对绘制原点的纵坐标（作者：TRAE AI）。
+         * 中文标签按字形包围盒取中心，其余语言按字体度量取中心（含下伸部时基线仍稳定）。
+         */
+        private fun alignedTextCentreY(
+            view: TextView,
+            text: CharSequence,
+            bounds: android.graphics.Rect,
+            drawingBaseline: Int = view.baseline,
+        ): Float {
+            if (usesChineseGlyphAlignment(firstLanguage(view.resources), text)) {
+                val value = text.toString()
+                view.paint.getTextBounds(value, 0, value.length, bounds)
+                return drawingBaseline + (bounds.top + bounds.bottom) / 2f
+            }
+            val metrics = view.paint.fontMetrics
+            return drawingBaseline + (metrics.ascent + metrics.descent) / 2f
+        }
+
+        /** 波次十 #645：纯中文（无拉丁字母）标签才用字形对齐（作者：TRAE AI）。 */
+        private fun usesChineseGlyphAlignment(language: String, text: CharSequence): Boolean {
+            return language == "zh" && text.isNotBlank() &&
+                text.none { it in 'A'..'Z' || it in 'a'..'z' }
+        }
+
         internal fun isLauncherIntent(intent: Intent): Boolean =
             intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER) &&
                 !intent.hasExtra("page")
@@ -5934,6 +6146,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         // 外观兜底轮询间隔与外观按钮焦点标签（main #422）。
         private const val APPEARANCE_POLL_MILLIS = 2_000L
         private const val APPEARANCE_BUTTON_TAG = "app_appearance_button"
+        // 波次十 #645：设置搜索两态与弹层定位常量（作者：TRAE AI）。
+        private const val SETTINGS_SEARCH_BUTTON_TAG = "settings_search_button"
+        private const val SETTINGS_HEADER_COMPACT_GAP_DP = 8
+        private const val SETTINGS_HEADER_GAP_DP = 12
+        private const val SETTINGS_SEARCH_RESULTS_GAP_DP = 6
+        private const val SETTINGS_SEARCH_RESULTS_SHORT_HEIGHT_DP = 200
+        private const val SETTINGS_SEARCH_RESULTS_HEIGHT_DP = 380
         private const val VALUE_SEPARATOR = " · "
         private const val SEARCH_HIGHLIGHT_MILLIS = 900L
         private const val SPACER = "spacer"

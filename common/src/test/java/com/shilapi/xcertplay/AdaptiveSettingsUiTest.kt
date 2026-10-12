@@ -12,6 +12,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.ScrollView
 import androidx.appcompat.widget.SwitchCompat
 import android.widget.TextView
@@ -103,6 +104,126 @@ class AdaptiveSettingsUiTest {
 
         assertEquals(SettingsCategory.DISPLAY, ReflectionHelpers.getField<SettingsCategory>(screen, "settingsCategory"))
         assertTrue(texts(screen).any { it.text.startsWith(screen.getString(R.string.frame_rate) + " · ") })
+    }
+
+    @Test fun headerSearchBoxListsMatchesAsYouTypeAndOpensTheChosenSetting() {
+        val screen = openSettings()
+        fun box() = descendants(screen.window.decorView).filterIsInstance<EditText>()
+            .single { it.contentDescription == screen.getString(R.string.settings_search) }
+        assertTrue(descendants(screen.window.decorView).none { it is EditText })
+        descendants(screen.window.decorView).single {
+            it.contentDescription == screen.getString(R.string.settings_search)
+        }.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(box().hasFocus())
+
+        val editor = box()
+        box().setText("FRAME rate")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // Typing and clearing a query must keep the keyboard's original editor.
+        assertSame(editor, box())
+        box().setText("")
+        shadowOf(Looper.getMainLooper()).idle()
+        box().setText("FRAME rate")
+        shadowOf(Looper.getMainLooper()).idle()
+        assertSame(editor, box())
+        assertEquals("FRAME rate", box().text.toString())
+        assertTrue(box().hasFocus())
+        val popup = ReflectionHelpers.getField<PopupWindow>(screen, "settingsSearchPopup")
+        assertTrue(popup.isShowing)
+        val row = descendants(popup.contentView).first {
+            it.isClickable && it.contentDescription?.startsWith(screen.getString(R.string.frame_rate) + ", ") == true
+        }
+        row.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertFalse(popup.isShowing)
+        assertEquals(SettingsCategory.DISPLAY, ReflectionHelpers.getField<SettingsCategory>(screen, "settingsCategory"))
+        assertTrue(texts(screen).any { it.text.startsWith(screen.getString(R.string.frame_rate) + " · ") })
+        assertTrue(descendants(screen.window.decorView).none { it is EditText })
+    }
+
+    @Test fun backClosesAnOpenSearchBeforeLeavingSettings() {
+        val screen = openSettings()
+        fun box() = descendants(screen.window.decorView).filterIsInstance<EditText>()
+            .single { it.contentDescription == screen.getString(R.string.settings_search) }
+        descendants(screen.window.decorView).single {
+            it.contentDescription == screen.getString(R.string.settings_search)
+        }.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        box().setText("no such setting zz")
+        shadowOf(Looper.getMainLooper()).idle()
+        val popup = ReflectionHelpers.getField<PopupWindow>(screen, "settingsSearchPopup")
+        assertTrue(descendants(popup.contentView).filterIsInstance<TextView>()
+            .any { it.text == screen.getString(R.string.settings_search_empty) })
+
+        screen.onBackPressedDispatcher.onBackPressed()
+
+        assertEquals("settings", ReflectionHelpers.getField<String>(screen, "page"))
+        assertFalse(popup.isShowing)
+        assertTrue(descendants(screen.window.decorView).none { it is EditText })
+        screen.onBackPressedDispatcher.onBackPressed()
+        assertEquals("home", ReflectionHelpers.getField<String>(screen, "page"))
+    }
+
+    @Test fun rebuiltSearchFieldsDoNotLeaveLayoutListenersOnTheWindow() {
+        val screen = openSettings()
+        descendants(screen.window.decorView).single {
+            it.contentDescription == screen.getString(R.string.settings_search)
+        }.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        fun globalLayoutListeners(): Int {
+            val listeners = ReflectionHelpers.getField<Any?>(screen.window.decorView.viewTreeObserver, "mOnGlobalLayoutListeners")
+                ?: return 0
+            return ReflectionHelpers.callInstanceMethod<Int>(listeners, "size")
+        }
+        val before = globalLayoutListeners()
+        repeat(5) {
+            ReflectionHelpers.callInstanceMethod<Unit>(screen, "render")
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+        assertTrue(descendants(screen.window.decorView).any { it is EditText })
+        assertEquals(before, globalLayoutListeners())
+    }
+
+    @Test
+    @Config(qualifiers = "en-w900dp-h600dp-land")
+    fun backCollapsesAnEmptySearchAndFullLayoutKeepsItsExistingLabel() {
+        val screen = openSettings()
+        val button = descendants(screen.window.decorView).single {
+            it.contentDescription == screen.getString(R.string.settings_search)
+        }
+        assertTrue(button is android.widget.Button)
+        assertEquals(screen.getString(R.string.settings_search_hint), (button as TextView).text.toString())
+        button.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(descendants(screen.window.decorView).any { it is EditText && it.hasFocus() })
+        screen.onBackPressedDispatcher.onBackPressed()
+        assertEquals("settings", ReflectionHelpers.getField<String>(screen, "page"))
+        assertTrue(descendants(screen.window.decorView).none { it is EditText })
+        assertTrue(descendants(screen.window.decorView).single {
+            it.contentDescription == screen.getString(R.string.settings_search)
+        }.hasFocus())
+    }
+
+    @Test
+    @Config(qualifiers = "en-w500dp-h400dp-land")
+    fun compactSearchUsesAnIconTheSameSizeAsAppearanceAndCollapsesAfterBack() {
+        val screen = openSettings()
+        fun search() = descendants(screen.window.decorView).single {
+            it.contentDescription == screen.getString(R.string.settings_search)
+        }
+        val appearance = descendants(screen.window.decorView).single { it.tag == "app_appearance_button" }
+        assertTrue(search() is android.widget.ImageButton)
+        assertEquals(appearance.layoutParams.width, search().layoutParams.width)
+        assertEquals(appearance.layoutParams.height, search().layoutParams.height)
+        search().performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(search() is EditText)
+        screen.onBackPressedDispatcher.onBackPressed()
+        assertTrue(search() is android.widget.ImageButton)
+        assertEquals("settings", ReflectionHelpers.getField<String>(screen, "page"))
     }
 
     @Test
@@ -678,9 +799,11 @@ class AdaptiveSettingsUiTest {
         val appearance = descendants(screen.window.decorView).single { it.tag == "app_appearance_button" }
         val actions = (appearance.parent as ViewGroup).let { header ->
             (0 until header.childCount).map(header::getChildAt)
-                .filter { it is android.widget.Button || it is EditText || it === appearance }
+                .filter { it is android.widget.Button || it is android.widget.ImageButton || it is EditText }
         }
-        assertTrue(actions.size >= 3)
+        assertTrue("header action controls: ${
+            actions.map { "${it.javaClass.simpleName}=${it.layoutParams.height}" }
+        }", actions.size >= 3)
         assertEquals(1, actions.map { it.layoutParams.height }.toSet().size)
     }
 
