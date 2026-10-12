@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+    窗口背景必须是资源引用：Android 9 及以下用 getResourceId() 读取 windowBackground，
+    写成字面量颜色会让窗口完全没有背景，对话框直接画在后面的页面上（#640, #617）。
+    -->
+    <color name="window_background_dark">#0C111B</color>
+    <color name="window_background_light">#E9EEF6</color>
+    <color name="dialog_background_dark">#151E2C</color>
+    <color name="dialog_background_light">#F8FAFD</color>
+</resources>

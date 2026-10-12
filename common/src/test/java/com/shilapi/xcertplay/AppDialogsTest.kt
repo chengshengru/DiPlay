@@ -2,7 +2,9 @@ package com.shilapi.xcertplay
 
 import android.content.ContextWrapper
 import android.graphics.drawable.ColorDrawable
+import com.shilapi.xcertplay.host.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +47,23 @@ class AppDialogsTest {
         }
 
         assertDialogColors(lightOwner.appDialogContext(), DiPlayPalette.LIGHT)
+    }
+
+    /** Android 9 及以下在此处丢弃字面量颜色，对话框会透出后面的页面（#640, #617）。 */
+    @Test fun windowBackgroundsAreResourcesThatAndroid9CanLoad() {
+        for (theme in listOf(
+            R.style.Theme_Xcertplay, R.style.Theme_Xcertplay_Light,
+            R.style.Theme_Xcertplay_Dialog_Dark, R.style.Theme_Xcertplay_Dialog_Light,
+        )) {
+            val attributes = android.view.ContextThemeWrapper(context, theme).theme
+                .obtainStyledAttributes(intArrayOf(android.R.attr.windowBackground))
+            try {
+                // API 28 的 PhoneWindow.generateLayout() 正是这样取值的。
+                assertNotEquals("theme $theme", 0, attributes.getResourceId(0, 0))
+            } finally {
+                attributes.recycle()
+            }
+        }
     }
 
     private fun assertDialogColors(themedContext: android.content.Context, palette: DiPlayPalette) {

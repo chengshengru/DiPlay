@@ -34,9 +34,11 @@ internal class BydHudRouteState(
     /**
      * The dashboard overlay keeps the last instruction across a wireless session drop: the iPhone
      * often sends NoRouteSet (0) while the tunnel is tearing down, which is not a real arrival.
-     * Arrived (2) still ends the route. The overlay's own stale window retires a truly ended one.
+     * Arrived (2) still ends the route. 会话保持时 NoRouteSet 是司机结束导航，卡片在
+     * [noRouteHideNs] 后消失（除非导航回来）；取消导航后转弯卡最长停留两分钟是 #511。
      */
     private val keepAcrossNoRoute: Boolean = false,
+    private val noRouteHideNs: Long = NO_ROUTE_HIDE_NS,
 ) {
     private data class Maneuver(val type: Int, val drivingSide: Int, val afterRoad: String)
 
@@ -50,6 +52,9 @@ internal class BydHudRouteState(
     private var remainingMeters: Long? = null
     private var emptyListSinceNs: Long? = null
     private var lastRouteUpdateNs: Long? = null
+    // 波次十 #511：NoRouteSet 起始时间与无线掉线保持标记
+    private var noRouteSinceNs: Long? = null
+    private var holdingAcrossDrop = false
 
     fun accept(messageId: Int, payload: ByteArray): BydHudRouteChange {
         if (!validTlvs(payload)) return BydHudRouteChange.NONE
@@ -92,8 +97,19 @@ internal class BydHudRouteState(
         remainingMeters = null
         emptyListSinceNs = null
         lastRouteUpdateNs = null
+        noRouteSinceNs = null
+        holdingAcrossDrop = false
         maneuvers.clear()
         return wasActive
+    }
+
+    /**
+     * 无线会话在导航卡片显示期间掉线。掉线前以及替换会话发来的 NoRouteSet 都属于切换本身，
+     * 卡片保留到新指引到来或其陈旧窗口到期（波次十 #511）。
+     */
+    fun holdAcrossDrop() {
+        noRouteSinceNs = null
+        holdingAcrossDrop = true
     }
 
     private fun activeManeuver(): Maneuver? {
@@ -102,6 +118,8 @@ internal class BydHudRouteState(
         if (nanoTime() - updated >= staleRouteNs) return null
         val emptySince = emptyListSinceNs
         if (emptySince != null && nanoTime() - emptySince >= emptyListHideNs) return null
+        val noRouteSince = noRouteSinceNs
+        if (noRouteSince != null && nanoTime() - noRouteSince >= noRouteHideNs) return null
         return maneuvers[activeIndex]
     }
 
@@ -116,7 +134,13 @@ internal class BydHudRouteState(
             forEachTlv(data) { type, value, valueLength ->
                 if (type == 0x01 && valueLength >= 1) noRoute = data[value] == 0.toByte()
             }
-            if (noRoute) return BydHudRouteChange.NONE
+            if (noRoute) {
+                // 重复帧保留第一次的时间，避免推迟隐藏（波次十 #511）。
+                if (!holdingAcrossDrop && noRouteSinceNs == null) noRouteSinceNs = nanoTime()
+                return BydHudRouteChange.NONE
+            }
+            noRouteSinceNs = null
+            holdingAcrossDrop = false
         }
         lastRouteUpdateNs = nanoTime()
         var state: Int? = null
@@ -223,5 +247,7 @@ internal class BydHudRouteState(
         private const val TLV_HEADER_BYTES = 4
         private const val STALE_ROUTE_NS = 30_000_000_000L
         private const val EMPTY_LIST_HIDE_NS = 3_000_000_000L
+        // 波次十 #511：NoRouteSet（取消导航）后卡片保留时长
+        private const val NO_ROUTE_HIDE_NS = 5_000_000_000L
     }
 }

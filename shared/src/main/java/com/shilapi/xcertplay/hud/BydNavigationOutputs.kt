@@ -154,6 +154,9 @@ object BydNavigationOutputs {
         if (!preserveTurnOverlay) {
             synchronized(overlayLock) { overlayRoute.clear() }
             refreshTurnOverlay()
+        } else {
+            // 波次十 #511：无线会话替换保留卡片，但取消导航后 5 s 内要隐藏。
+            synchronized(overlayLock) { overlayRoute.holdAcrossDrop() }
         }
     }
 }
