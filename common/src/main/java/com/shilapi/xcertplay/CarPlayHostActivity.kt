@@ -60,7 +60,7 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.SeekBar
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -312,7 +312,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var settingsBaseline: SettingsBaseline? = null
     // main #500：菜单打开时的暂存设置签名（哈希而非原值，其中含热点口令），离开时判断是否有未保存的修改（作者：TRAE AI）。
     private var menuSettingsSignature: Int? = null
-    private var locationReportingSwitch: Switch? = null
+    private var locationReportingSwitch: SwitchCompat? = null
     private var statusView: TextView? = null
     private var statusScrollView: ScrollView? = null
     private var stageStatusView: TextView? = null
@@ -3166,7 +3166,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 menuText(getString(R.string.report_location_to_iphone), 20f, MENU_SECONDARY),
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
-            val switch = Switch(this@CarPlayHostActivity).apply {
+            val switch = SwitchCompat(this@CarPlayHostActivity).apply {
                 isChecked = locationReportingEnabled
                 contentDescription = getString(R.string.report_android_location_to_the_iphone)
                 // main 9c7fda97：覆盖层开关统一用大开关样式（内部已做 API 17 适配）（作者：TRAE AI）。

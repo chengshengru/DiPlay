@@ -6,6 +6,7 @@ import android.Manifest
 import android.app.AlertDialog
 import android.app.Dialog
 import android.app.TimePickerDialog
+import android.bluetooth.BluetoothAdapter
 import android.view.Window
 import android.content.Context
 import android.content.Intent
@@ -32,6 +33,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.appcompat.widget.SwitchCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -254,7 +256,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var adbSwitchChangePending = false
     private var pausedForAdbSwitchChange = false
     private var updatingAdbSwitches = false
-    private val adbSwitches = mutableMapOf<Int, Pair<Switch, () -> Boolean>>()
+    private val adbSwitches = mutableMapOf<Int, Pair<SwitchCompat, () -> Boolean>>()
     private var hotspotStartupResult: CarHotspotTethering.Result? = null
     @Volatile private var startupHotspotCancelled = false
     @Volatile private var vehicleProbeGeneration = 0
@@ -5116,19 +5118,24 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         // 误弹"打开蓝牙"；统一走 BluetoothCompat.getAdapter（API 17 回退 getDefaultAdapter）。
         val adapter = BluetoothCompat.getAdapter(this)
         if (adapter == null) {
-            showTurnOnBluetoothDialog(); return
+            showTurnOnBluetoothDialog(adapter); return
         }
-        // Plan A：即使 adapter.isEnabled 误报为 false，只要真实 ACL 已连接的 iPhone 存在，
-        // 即证明无线电可用，跳过"打开蓝牙"死循环，直接进入设备选择让用户点选已连接的 iPhone。
-        val connectedIphone = BluetoothCompat.findConnectedIphone(adapter)
-        if (!adapter.isEnabled && connectedIphone == null) {
-            showTurnOnBluetoothDialog(); return
-        }
+        // Plan A 列表优先：先读已配对列表与已连接探针，只要能给出候选设备就放行进入选择；
+        // "打开蓝牙"弹窗只留给"无适配器 / 一个候选都拿不到且 isEnabled 关闭"的场景。
+        // 旧栈常出现 device.name=null，严格按名称的探针会全部滤空，因此不能让探针结果单独决定拦截。
         val devices = runCatching { adapter.bondedDevices.sortedBy { it.name ?: "" } }.getOrDefault(emptyList())
-        // Plan A 兜底：若 isEnabled 误报导致 bondedDevices 为空，但已探测到真实 ACL 连接的 iPhone，
-        // 仍把它纳入可选列表，确保用户始终能点选"已连接的 iPhone"。
+        val connectedIphone = BluetoothCompat.findConnectedIphone(adapter)
+        android.util.Log.i(
+            "DiPlay-BT",
+            "choosePhone: enabled=${adapter.isEnabled} bonded=${devices.size} " +
+                "connectedIphone=${connectedIphone?.address ?: "none"}",
+        )
+        // Plan A 兜底：若 bondedDevices 为空但已探测到真实 ACL 连接的 iPhone，仍把它纳入可选列表。
         val candidates = if (devices.isEmpty() && connectedIphone != null) listOf(connectedIphone) else devices
         if (candidates.isEmpty()) {
+            if (!adapter.isEnabled) {
+                showTurnOnBluetoothDialog(adapter); return
+            }
             AlertDialog.Builder(this).setTitle(getString(R.string.pair_your_iphone))
                 .setMessage(getString(R.string.on_your_iphone_open_settings_bluetooth_and_pair_with_the_c))
                 .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ -> openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
@@ -5148,10 +5155,33 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             .setNegativeButton(getString(R.string.cancel)) { _, _ -> pendingWireless = false }.show()
     }
 
-    /** Plan A：抽取"打开蓝牙"提示弹窗，供无适配器 / 无已连接 iPhone 两种分支复用。 */
-    private fun showTurnOnBluetoothDialog() {
+    /**
+     * Plan A：蓝牙不可用 / 无候选设备时的提示弹窗。
+     * 由于真机无法查看 logcat，这里把关键探测值直接显示在对话框里，
+     * 用户截图即可反馈实际卡点，无需 adb。
+     */
+    private fun showTurnOnBluetoothDialog(adapter: BluetoothAdapter? = null) {
+        val diag = buildString {
+            append(getString(R.string.enable_the_car_s_bluetooth_and_pair_your_iphone_first))
+            append("\n\n———— 诊断信息（请截图反馈）————\n")
+            append("系统版本: Android ${Build.VERSION.SDK_INT}\n")
+            if (adapter == null) {
+                append("蓝牙适配器: 获取失败(getDefaultAdapter 返回 null)\n")
+                append("→ 本机系统未向应用开放蓝牙适配器，Plan A/B 不可行，需改用 Wi-Fi 直连方案")
+            } else {
+                append("蓝牙适配器: 可用\n")
+                append("开关状态(isEnabled): ${adapter.isEnabled}\n")
+                val bonded = runCatching { adapter.bondedDevices }.getOrNull()
+                append("已配对设备数: ${bonded?.size ?: "读取失败"}\n")
+                val conn = BluetoothCompat.findConnectedIphone(adapter)
+                append("已连接 iPhone: ${conn?.address ?: "未探测到"}\n")
+                if (bonded.isNullOrEmpty() && !adapter.isEnabled) {
+                    append("→ 应用层既拿不到配对列表、开关又误报关闭，疑似系统未向应用开放蓝牙数据")
+                }
+            }
+        }
         AlertDialog.Builder(this).setTitle(getString(R.string.turn_on_bluetooth))
-            .setMessage(getString(R.string.enable_the_car_s_bluetooth_and_pair_your_iphone_first))
+            .setMessage(diag)
             .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ -> openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
             .setNegativeButton(getString(R.string.later), null).show()
     }
@@ -5592,7 +5622,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
     }
 
-    private fun toggle(parent: LinearLayout, title: String, description: String, value: Boolean, enabled: Boolean = true, save: (Boolean) -> Unit): Switch {
+    private fun toggle(parent: LinearLayout, title: String, description: String, value: Boolean, enabled: Boolean = true, save: (Boolean) -> Unit): SwitchCompat {
         searchIndexSink?.add(title)
         val result = SettingsWidgets.createSwitchRow(
             context = this,
@@ -5805,7 +5835,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
         fun isNote(view: View?) = view is TextView && view !is Button
         fun isToggleRow(view: View?) = view is LinearLayout && view.orientation == LinearLayout.HORIZONTAL &&
-            (0 until view.childCount).any { view.getChildAt(it) is Switch }
+            (0 until view.childCount).any { view.getChildAt(it) is SwitchCompat }
         fun isControl(view: View?) = view is Button || isToggleRow(view)
         var previous: View? = null
         var last: View? = null

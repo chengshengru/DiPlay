@@ -13,8 +13,8 @@ import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.SeekBar
-import android.widget.Switch
 import android.widget.TextView
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.graphics.ColorUtils
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.UiCompat
@@ -26,13 +26,15 @@ object SettingsWidgets {
     /**
      * 把平台 Switch（约 36x14dp 轨道）替换为 60x34dp 轨道 + 28dp 圆形拇指，
      * 保证车载远距离可读（对应 main #420 大开关样式）。
-     * API 17 适配：thumbDrawable/trackDrawable/switchMinWidth 为 API 16/17+，可直接调用；
-     * showText 与 thumb/track tint 为 API 21+，走 UiCompat 守卫（低版本保持白色形状）。
+     *
+     * 用 SwitchCompat 替代框架 Switch：showText / thumbTintList / trackTintList
+     * 由 AppCompat 下放到 API 7+，C140A（API17）上既能染色、又无 SDK_INT>=21 的
+     * 崩溃风险，外观与本机 AppCompat 一致（main 在 API21+ 上即为此外观）。
      */
-    fun applyLargeSwitchStyle(switch: Switch, thumbOn: Int, thumbOff: Int, trackOn: Int, trackOff: Int) {
+    fun applyLargeSwitchStyle(switch: SwitchCompat, thumbOn: Int, thumbOff: Int, trackOn: Int, trackOff: Int) {
         val density = switch.resources.displayMetrics.density
         fun px(value: Int) = (value * density).roundToInt()
-        // Switch 会把拇指拉伸到轨道全高，用 InsetDrawable 留出边距。
+        // SwitchCompat 会把拇指拉伸到轨道全高，用 InsetDrawable 留出边距。
         val thumbInset = px(3)
         switch.thumbDrawable = InsetDrawable(
             GradientDrawable().apply {
@@ -50,13 +52,13 @@ object SettingsWidgets {
             alpha = (0.3f * 255).roundToInt()
         }
         switch.switchMinWidth = px(60)
-        UiCompat.setShowText(switch, false)
-        UiCompat.setThumbTint(switch, switchStates(thumbOn, thumbOff))
-        UiCompat.setTrackTint(switch, switchStates(trackOn, trackOff))
+        switch.showText = false
+        switch.thumbTintList = switchColorStates(thumbOn, thumbOff)
+        switch.trackTintList = switchColorStates(trackOn, trackOff)
     }
 
     /** 开关拇指/轨道的三态颜色：禁用（30% 透明）、选中、默认。 */
-    private fun switchStates(on: Int, off: Int) = ColorStateList(
+    private fun switchColorStates(on: Int, off: Int) = ColorStateList(
         arrayOf(
             intArrayOf(-android.R.attr.state_enabled),
             intArrayOf(android.R.attr.state_checked),
@@ -78,7 +80,7 @@ object SettingsWidgets {
 
     data class SwitchRowResult(
         val rowView: View,
-        val switch: Switch,
+        val switch: SwitchCompat,
     )
 
     data class ChoiceRowResult<T>(
@@ -118,7 +120,7 @@ object SettingsWidgets {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val switch = Switch(context).apply {
+        val switch = SwitchCompat(context).apply {
             isChecked = checked
             this.contentDescription = contentDescription
             isEnabled = enabled
@@ -176,7 +178,7 @@ object SettingsWidgets {
                 @Suppress("DEPRECATION")
                 override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
                     super.onInitializeAccessibilityNodeInfo(host, info)
-                    info.className = Switch::class.java.name
+                    info.className = "android.widget.Switch"
                     info.isCheckable = true
                     info.isChecked = switch.isChecked
                     info.isEnabled = switch.isEnabled

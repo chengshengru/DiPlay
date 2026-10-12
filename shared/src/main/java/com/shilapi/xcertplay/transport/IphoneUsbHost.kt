@@ -272,9 +272,30 @@ class IphoneUsbHost(
                     "out=${describeUsbEndpoint(endpoints.first)} " +
                     "in=${describeUsbEndpoint(endpoints.second)}",
             )
-            if (!connection.claimInterface(usbMux, true)) {
-                throw IphoneUsbException.DeviceUnavailable("Android could not claim USBMUX interface 1")
+            // 真机复验：claim 失败时唯一能解释的现场就是"配置未真正切换"或"内核驱动重新绑定"。
+            // 把切换目标值、切换后内核报告的活动配置(标准 GET_CONFIGURATION)、原始描述符里的所有配置值、
+            // USBMUX 接口详情、设备全部接口一起抛到屏幕诊断，一次复验即可区分二者。
+            onDiagnostic(
+                "usbmux pre-claim config=${configuration.label} id=${configuration.id} " +
+                    "index=${configuration.index} active=${activeConfiguration(connection)} " +
+                    "rawConfigs=${UsbDescriptorCompat.configurationValues(connection.rawDescriptors)} " +
+                    "iface=${usbMux.id} alt=${UsbDescriptorCompat.alternateSetting(usbMux)} " +
+                    "class=${usbMux.interfaceClass}/${usbMux.interfaceSubclass}/${usbMux.interfaceProtocol} " +
+                    "endpoints=${usbMux.endpointCount} " +
+                    "out=${describeUsbEndpoint(endpoints.first)} in=${describeUsbEndpoint(endpoints.second)} " +
+                    "deviceIfaces=[${describeDeviceInterfaces(device)}]",
+            )
+            // #518：厂商内核可能在配置切换后、claim 之前重新绑定驱动，单次 claim 会失败。
+            // NCM 路径早已用 5 次 /100ms 重试兜底，USBMUX 这一路此前只 claim 一次，故在此补齐。
+            val claimAttempt = claimWithRetry(connection, usbMux)
+            if (claimAttempt == null) {
+                throw IphoneUsbException.DeviceUnavailable(
+                    "Android could not claim USBMUX interface ${usbMux.id} " +
+                        "(active=${activeConfiguration(connection)} " +
+                        "deviceIfaces=[${describeDeviceInterfaces(device)}])",
+                )
             }
+            onDiagnostic("usbmux claimed iface=${usbMux.id} attempts=$claimAttempt")
             claimedInterface = usbMux
             return Iap2UsbSession(connection, endpoints.first, endpoints.second, onDiagnostic)
         } catch (error: Throwable) {
@@ -334,6 +355,29 @@ class IphoneUsbHost(
         return if (read == value.size) value[0].toInt() and 0xff else null
     }
 
+    /**
+     * #518：厂商内核驱动可能在 Android 强制分离与 claim 之间重新绑定接口，单次 claim 会失败。
+     * NCM 路径用 5 次 /100ms 重试兜底，USBMUX 路径此前只 claim 一次；此处补齐。返回成功所用次数。
+     */
+    private fun claimWithRetry(connection: UsbDeviceConnection, usbInterface: UsbInterface): Int? {
+        for (attempt in 1..USB_CLAIM_ATTEMPTS) {
+            if (connection.claimInterface(usbInterface, true)) return attempt
+            if (attempt < USB_CLAIM_ATTEMPTS) Thread.sleep(USB_CLAIM_RETRY_MILLIS)
+        }
+        return null
+    }
+
+    /** 设备暴露的全部接口 `id/alt:class.subclass.protocol x endpoints`，用于诊断 claim 失败现场。 */
+    private fun describeDeviceInterfaces(device: UsbDevice): String =
+        (0 until device.interfaceCount).joinToString(",") { index ->
+            val usbInterface = device.getInterface(index)
+            val alt = UsbDescriptorCompat.alternateSetting(usbInterface)
+            "${usbInterface.id}/${if (alt < 0) "?" else alt}:" +
+                "${usbInterface.interfaceClass.toString(16)}." +
+                "${usbInterface.interfaceSubclass.toString(16)}." +
+                "${usbInterface.interfaceProtocol.toString(16)}x${usbInterface.endpointCount}"
+        }
+
     private fun requireConfiguredDevice(device: UsbDevice) {
         if (!matcher.matches(device.vendorId, device.productId)) {
             throw IphoneUsbException.DeviceUnavailable("USB device is not a configured iPhone identity")
@@ -389,6 +433,10 @@ class IphoneUsbHost(
         private const val CARPLAY_CONFIGURATION_INDEX = 0x0004
         private const val VENDOR_RESPONSE_LENGTH = 1
         private const val CONTROL_TRANSFER_TIMEOUT_MILLIS = 1_000
+
+        /** #518：USBMUX claim 重试次数与间隔（与 NCM 路径的 retryUsbSetup 对齐）。 */
+        private const val USB_CLAIM_ATTEMPTS = 5
+        private const val USB_CLAIM_RETRY_MILLIS = 100L
 
         /** usbmuxd reads 3:3:3:0 in the initial mode and 5:3:3:0 once a mode is set. */
         /** iOS 12 and 15 answer the mode request with 3 bytes instead of 4 (#509, #455); keep them. */

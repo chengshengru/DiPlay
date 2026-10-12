@@ -5,7 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import com.shilapi.xcertplay.host.R
 import org.junit.After
 import org.junit.Before
@@ -117,8 +117,8 @@ class LocationReportingSettingsTest {
             Intent(context, DiPlayActivity::class.java).putExtra("page", "settings")).setup()
     }
 
-    private fun locationSwitch(): Switch = descendants(activity.window.decorView)
-        .filterIsInstance<Switch>()
+    private fun locationSwitch(): SwitchCompat = descendants(activity.window.decorView)
+        .filterIsInstance<SwitchCompat>()
         .single { it.contentDescription == activity.getString(R.string.report_location_to_iphone) }
 
     private fun descendants(view: View): Sequence<View> = sequence {

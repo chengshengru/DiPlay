@@ -5,7 +5,7 @@ import android.content.pm.PackageInfo
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import android.widget.TextView
 import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.host.R
@@ -128,5 +128,5 @@ class BydAdbSettingsUiTest {
         if (view is ViewGroup) for (index in 0 until view.childCount) addAll(descendants(view.getChildAt(index)))
     }
     private fun labels(view: View) = descendants(view).filterIsInstance<TextView>().map { it.text.toString() }
-    private fun switches(view: View) = descendants(view).filterIsInstance<Switch>()
+    private fun switches(view: View) = descendants(view).filterIsInstance<SwitchCompat>()
 }

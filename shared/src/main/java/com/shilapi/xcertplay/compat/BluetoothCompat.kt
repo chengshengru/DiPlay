@@ -32,13 +32,20 @@ object BluetoothCompat {
      */
     @Suppress("DEPRECATION")
     fun getAdapter(context: Context): BluetoothAdapter? {
-        return if (ApiLevel.isAtLeast(ApiLevel.JELLY_BEAN_MR2)) {
-            // API 18+：使用 BluetoothManager
-            val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
-            manager?.adapter
-        } else {
-            // API 17：使用 getDefaultAdapter()
+        // 优先尝试 BluetoothManager（API 18+），失败或低版本一律回退 getDefaultAdapter()，
+        // 避免部分 OEM 在 API 17 上 BluetoothManager 存在但取 adapter 异常导致应用层拿不到适配器。
+        if (ApiLevel.isAtLeast(ApiLevel.JELLY_BEAN_MR2)) {
+            try {
+                (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+                    ?.let { return it }
+            } catch (_: Throwable) {
+                // 落入下方 getDefaultAdapter 兜底
+            }
+        }
+        return try {
             BluetoothAdapter.getDefaultAdapter()
+        } catch (_: Throwable) {
+            null
         }
     }
 

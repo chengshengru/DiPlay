@@ -3,7 +3,7 @@ package com.shilapi.xcertplay
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import com.shilapi.xcertplay.host.R
@@ -80,8 +80,8 @@ class BydCallPopupSettingsTest {
         bitmap.recycle()
     }
 
-    private fun switches(view: View): List<Switch> = when (view) {
-        is Switch -> listOf(view)
+    private fun switches(view: View): List<SwitchCompat> = when (view) {
+        is SwitchCompat -> listOf(view)
         is ViewGroup -> (0 until view.childCount).flatMap { switches(view.getChildAt(it)) }
         else -> emptyList()
     }

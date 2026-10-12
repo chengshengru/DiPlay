@@ -7,7 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ScrollView
 import android.widget.LinearLayout
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import android.widget.TextView
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.adb.LocalAdb
@@ -734,11 +734,11 @@ class BydVehicleDataSettingsTest {
         target.performClick()
     }
 
-    private fun switches(): Sequence<Switch> = descendants(activity.window.decorView).filterIsInstance<Switch>()
+    private fun switches(): Sequence<SwitchCompat> = descendants(activity.window.decorView).filterIsInstance<SwitchCompat>()
 
     private fun texts(): Sequence<TextView> = descendants(activity.window.decorView).filterIsInstance<TextView>()
 
-    private fun vehicleSwitch(title: Int): Switch = switches()
+    private fun vehicleSwitch(title: Int): SwitchCompat = switches()
         .single { it.contentDescription == activity.getString(title) }
 
     private fun invokeProbe() {

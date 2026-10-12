@@ -13,7 +13,7 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import android.widget.TextView
 import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.host.R
@@ -131,7 +131,7 @@ class AdaptiveSettingsUiTest {
 
         assertEquals(SettingsCategory.CONNECTION,
             ReflectionHelpers.getField<SettingsCategory>(screen, "settingsCategory"))
-        assertEquals(1, descendants(screen.window.decorView).filterIsInstance<Switch>().count {
+        assertEquals(1, descendants(screen.window.decorView).filterIsInstance<SwitchCompat>().count {
             it.contentDescription == screen.getString(R.string.auto_car_hotspot_title)
         })
     }
@@ -166,7 +166,7 @@ class AdaptiveSettingsUiTest {
         val scroll = ReflectionHelpers.getField<ScrollView>(screen, "rootScroll")
 
         val buttons = descendants(scroll).filterIsInstance<android.widget.Button>()
-            .filter { it !is Switch && (it.parent as? LinearLayout)?.orientation == LinearLayout.VERTICAL }
+            .filter { it !is SwitchCompat && (it.parent as? LinearLayout)?.orientation == LinearLayout.VERTICAL }
             .toList()
 
         assertTrue(buttons.size >= 4)
@@ -206,7 +206,7 @@ class AdaptiveSettingsUiTest {
         AirPlayPersistence.saveHideTopBar(context, false)
         AirPlayPersistence.saveHideBottomBar(context, false)
         val screen = openSettings()
-        val fullScreen = descendants(screen.window.decorView).filterIsInstance<Switch>()
+        val fullScreen = descendants(screen.window.decorView).filterIsInstance<SwitchCompat>()
             .single { it.contentDescription == screen.getString(R.string.full_screen) }
 
         (fullScreen.parent as View).performClick()
@@ -252,7 +252,7 @@ class AdaptiveSettingsUiTest {
         AirPlayPersistence.saveHideTopBar(context, false)
         AirPlayPersistence.saveHideBottomBar(context, false)
         val screen = openSettings()
-        val fullScreen = descendants(screen.window.decorView).filterIsInstance<Switch>()
+        val fullScreen = descendants(screen.window.decorView).filterIsInstance<SwitchCompat>()
             .single { it.contentDescription == screen.getString(R.string.full_screen) }
 
         fullScreen.performClick()
@@ -374,7 +374,7 @@ class AdaptiveSettingsUiTest {
             listOf(R.string.call_echo_cancellation, R.string.call_voice_filter).forEach { title ->
                 PendingReconnect.clear()
                 ReflectionHelpers.callInstanceMethod<Unit>(screen, "render")
-                val setting = descendants(screen.window.decorView).filterIsInstance<Switch>()
+                val setting = descendants(screen.window.decorView).filterIsInstance<SwitchCompat>()
                     .single { it.contentDescription == screen.getString(title) }
                 assertFalse(setting.isChecked)
                 setting.performClick()
@@ -441,7 +441,7 @@ class AdaptiveSettingsUiTest {
             ReflectionHelpers.setField(screen, "settingsCategory", SettingsCategory.ADVANCED)
             PendingReconnect.clear()
             ReflectionHelpers.callInstanceMethod<Unit>(screen, "render")
-            val setting = descendants(screen.window.decorView).filterIsInstance<Switch>()
+            val setting = descendants(screen.window.decorView).filterIsInstance<SwitchCompat>()
                 .single { it.contentDescription == screen.getString(R.string.settings_disable_media_key_audio_focus) }
             assertFalse(setting.isChecked)
 
@@ -483,7 +483,7 @@ class AdaptiveSettingsUiTest {
             CarPlaySessionDisplay(800, 480, Surface.ROTATION_0, false, false, 800, 480)) {}
         CarPlayBackgroundSession.active = true
         try {
-            val setting = descendants(screen.window.decorView).filterIsInstance<Switch>()
+            val setting = descendants(screen.window.decorView).filterIsInstance<SwitchCompat>()
                 .single { it.contentDescription == screen.getString(R.string.settings_mtk_decoder_tuning) }
             assertFalse(setting.isChecked)
             setting.performClick()
@@ -515,7 +515,7 @@ class AdaptiveSettingsUiTest {
             ReflectionHelpers.setField(screen, "settingsCategory", SettingsCategory.ADVANCED)
             PendingReconnect.clear()
             ReflectionHelpers.callInstanceMethod<Unit>(screen, "render")
-            val setting = descendants(screen.window.decorView).filterIsInstance<Switch>()
+            val setting = descendants(screen.window.decorView).filterIsInstance<SwitchCompat>()
                 .single { it.contentDescription == screen.getString(R.string.audio_focus_auto_yield) }
             assertTrue(setting.isChecked)
             setting.performClick()

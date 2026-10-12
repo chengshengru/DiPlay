@@ -3,7 +3,7 @@ package com.shilapi.xcertplay
 import android.content.Intent
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import com.shilapi.xcertplay.host.R
 import org.junit.After
 import org.junit.Assert.*
@@ -32,7 +32,7 @@ class SystemBarSettingsTest {
 
         assertTrue(statusBarSwitch().isChecked)
         assertTrue(navigationBarSwitch().isChecked)
-        assertFalse(descendants(activity.window.decorView).filterIsInstance<Switch>()
+        assertFalse(descendants(activity.window.decorView).filterIsInstance<SwitchCompat>()
             .any { it.contentDescription == activity.getString(R.string.full_screen) })
     }
 
@@ -98,7 +98,7 @@ class SystemBarSettingsTest {
             ) }
             .performClick()
         val harmanSwitch = descendants(activity.window.decorView)
-            .filterIsInstance<Switch>()
+            .filterIsInstance<SwitchCompat>()
             .single { it.contentDescription == activity.getString(R.string.settings_harman_fullscreen_experimental) }
 
         assertFalse(harmanSwitch.isChecked)
@@ -126,12 +126,12 @@ class SystemBarSettingsTest {
         assertEquals(hideBottom, navigationBarSwitch().isChecked)
     }
 
-    private fun statusBarSwitch(): Switch = barSwitch(R.string.hide_the_status_bar)
+    private fun statusBarSwitch(): SwitchCompat = barSwitch(R.string.hide_the_status_bar)
 
-    private fun navigationBarSwitch(): Switch = barSwitch(R.string.hide_the_navigation_bar)
+    private fun navigationBarSwitch(): SwitchCompat = barSwitch(R.string.hide_the_navigation_bar)
 
-    private fun barSwitch(label: Int): Switch = descendants(activity.window.decorView)
-        .filterIsInstance<Switch>().single { it.contentDescription == activity.getString(label) }
+    private fun barSwitch(label: Int): SwitchCompat = descendants(activity.window.decorView)
+        .filterIsInstance<SwitchCompat>().single { it.contentDescription == activity.getString(label) }
 
     private fun descendants(view: View): Sequence<View> = sequence {
         yield(view)

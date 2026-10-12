@@ -11,7 +11,7 @@ import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ScrollView
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import android.widget.TextView
 import com.shilapi.xcertplay.host.R
 import java.nio.file.Files
@@ -65,7 +65,7 @@ class AmbientAlbumUiScreenshotsTest {
                 layout(decor, RuntimeEnvironment.getApplication().resources.displayMetrics.density, widthDp)
 
                 val scroll = albumSettingsScroll(decor, opened.first.getString(R.string.settings_ambient_album))
-                val album = descendants(scroll).filterIsInstance<Switch>().single {
+                val album = descendants(scroll).filterIsInstance<SwitchCompat>().single {
                     it.contentDescription == opened.first.getString(R.string.settings_ambient_album)
                 }
                 assertTrue("Album artwork toggle must have a visible label", descendants(scroll)
@@ -151,7 +151,7 @@ class AmbientAlbumUiScreenshotsTest {
 
     private fun albumSettingsScroll(decor: View, albumLabel: String): ScrollView =
         descendants(decor).filterIsInstance<ScrollView>().single { scroll ->
-            descendants(scroll).filterIsInstance<Switch>().any { it.contentDescription == albumLabel }
+            descendants(scroll).filterIsInstance<SwitchCompat>().any { it.contentDescription == albumLabel }
         }
 
     private fun reportDirectory(): Path {

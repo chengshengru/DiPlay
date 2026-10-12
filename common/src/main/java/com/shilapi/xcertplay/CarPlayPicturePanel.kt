@@ -3,6 +3,7 @@ package com.shilapi.xcertplay
 import android.content.Context
 import android.view.View
 import android.widget.*
+import androidx.appcompat.widget.SwitchCompat
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.settings.SettingsWidgets
 
@@ -16,7 +17,7 @@ internal class CarPlayPicturePanel(
     private var palette = initialPalette
     private val prefs = CarPlayPicture.preferences(context)
     private val controls = mutableMapOf<String, Pair<TextView, SeekBar>>()
-    private val original = Switch(context)
+    private val original = SwitchCompat(context)
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     private fun text(value: String) = TextView(context).apply {
         text = value; textSize = 15f; setTextColor(palette.overlayPrimaryText)
@@ -103,7 +104,7 @@ internal class CarPlayPicturePanel(
         setBackgroundColor(palette.overlayBackground)
         fun apply(view: View) {
             when (view) {
-                is Switch -> {
+                is SwitchCompat -> {
                     view.setTextColor(palette.overlayPrimaryText)
                     SettingsWidgets.applyLargeSwitchStyle(
                         view,

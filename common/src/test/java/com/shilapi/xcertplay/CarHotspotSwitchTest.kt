@@ -5,7 +5,7 @@ import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.hud.BydAdbAccess
@@ -271,9 +271,9 @@ class CarHotspotSwitchTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
-    private fun hotspotSwitch(): Switch = switchFor(R.string.auto_car_hotspot_title)
+    private fun hotspotSwitch(): SwitchCompat = switchFor(R.string.auto_car_hotspot_title)
 
-    private fun switchFor(title: Int): Switch = switches(controls).single {
+    private fun switchFor(title: Int): SwitchCompat = switches(controls).single {
         it.contentDescription == activity.getString(title)
     }
 
@@ -283,7 +283,7 @@ class CarHotspotSwitchTest {
         }.invoke(activity)
     }
 
-    private fun bootSwitch(): Switch {
+    private fun bootSwitch(): SwitchCompat {
         switches(controls).firstOrNull {
             it.contentDescription == activity.getString(R.string.open_after_the_car_starts)
         }?.let { return it }
@@ -295,8 +295,8 @@ class CarHotspotSwitchTest {
         return switches(controls).single { it.contentDescription == activity.getString(R.string.open_after_the_car_starts) }
     }
 
-    private fun switches(view: View): List<Switch> = buildList {
-        if (view is Switch) add(view)
+    private fun switches(view: View): List<SwitchCompat> = buildList {
+        if (view is SwitchCompat) add(view)
         if (view is ViewGroup) for (i in 0 until view.childCount) addAll(switches(view.getChildAt(i)))
     }
 

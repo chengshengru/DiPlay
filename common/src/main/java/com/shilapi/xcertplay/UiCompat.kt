@@ -97,9 +97,19 @@ internal object UiCompat {
         }
     }
 
-    /** Switch.setShowText is API 21+. */
+    /**
+     * 关闭/开启 Switch 的 on/off 文案。
+     *
+     * 不能简单用 `SDK_INT >= 21` 守卫：GM C140A 上报 SDK_INT=17，但其 OEM 框架回移植了
+     * Switch 的 showText（直接调用可正常关闭文案）；而真·API17 原生 Switch 无此方法。这里改为
+     * 能力探测——直接调用并捕获 LinkageError 兜底，两种设备都不会崩，且 C140A 上的文案被真正关掉。
+     */
     fun setShowText(switch: Switch, show: Boolean) {
-        if (Build.VERSION.SDK_INT >= 21) switch.showText = show
+        try {
+            switch.showText = show
+        } catch (_: LinkageError) {
+            // 真 API17 原生 Switch 无 showText：本就不渲染 on/off 文案，忽略即可。
+        }
     }
 
     /** CompoundButton.setButtonTintList is API 21+ (Switch and RadioButton). */

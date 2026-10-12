@@ -5,7 +5,7 @@ import android.os.Looper
 import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.media.AndroidMediaSink
 import com.shilapi.xcertplay.orchestration.CarPlayController
@@ -153,7 +153,7 @@ class ClusterSettingsConsentTest {
 
     private fun dialog() = requireNotNull(ShadowAlertDialog.getLatestAlertDialog())
 
-    private fun setting(title: Int) = views(screen.window.decorView).filterIsInstance<Switch>()
+    private fun setting(title: Int) = views(screen.window.decorView).filterIsInstance<SwitchCompat>()
         .single { it.contentDescription == screen.getString(title) }
 
     private fun views(view: View): Sequence<View> = sequence {

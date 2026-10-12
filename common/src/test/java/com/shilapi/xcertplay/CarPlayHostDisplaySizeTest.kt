@@ -8,7 +8,7 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import com.shilapi.xcertplay.airplay.*
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.media.AndroidMediaSink
@@ -536,10 +536,10 @@ class CarPlayHostDisplaySizeTest {
         assertEquals(hideBottom, activity.window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION != 0)
     }
 
-    private fun menuBarSwitch(controls: ViewGroup, label: Int): Switch = (0 until controls.childCount)
+    private fun menuBarSwitch(controls: ViewGroup, label: Int): SwitchCompat = (0 until controls.childCount)
         .mapNotNull { controls.getChildAt(it) as? ViewGroup }
         .flatMap { row -> (0 until row.childCount).map { row.getChildAt(it) } }
-        .filterIsInstance<Switch>().single { it.contentDescription == activity.getString(label) }
+        .filterIsInstance<SwitchCompat>().single { it.contentDescription == activity.getString(label) }
 
     private fun setField(name: String, value: Any?) {
         activity.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(activity, value)

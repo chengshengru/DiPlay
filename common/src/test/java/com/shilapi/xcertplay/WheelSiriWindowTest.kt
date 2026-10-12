@@ -9,7 +9,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import android.widget.TextView
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.airplay.AirPlaySession
@@ -176,12 +176,12 @@ class WheelSiriWindowTest {
         assertFalse(CarHotspotSetup.isBydHeadUnit(settings))
 
         val controls = wheelControls()
-        val joystick = views(controls).filterIsInstance<Switch>().single {
+        val joystick = views(controls).filterIsInstance<SwitchCompat>().single {
             it.contentDescription == settings.getString(R.string.wheel_joystick)
         }
         assertTrue(joystick.isChecked)
         assertSharedServiceSetupOnce(controls)
-        assertFalse(views(controls).filterIsInstance<Switch>().any {
+        assertFalse(views(controls).filterIsInstance<SwitchCompat>().any {
             it.contentDescription == settings.getString(R.string.wheel_map_zoom)
         })
         assertTrue(views(controls).filterIsInstance<TextView>().any {
@@ -209,11 +209,11 @@ class WheelSiriWindowTest {
             assertFalse(CarHotspotSetup.isBydHeadUnit(settings))
             assertEquals(displayId, ClusterMapPresentation.findDisplay(settings)?.displayId)
             val controls = wheelControls()
-            val zoom = views(controls).filterIsInstance<Switch>().single {
+            val zoom = views(controls).filterIsInstance<SwitchCompat>().single {
                 it.contentDescription == settings.getString(R.string.wheel_map_zoom)
             }
             assertFalse(zoom.isChecked)
-            assertTrue(views(controls).filterIsInstance<Switch>().any {
+            assertTrue(views(controls).filterIsInstance<SwitchCompat>().any {
                 it.contentDescription == settings.getString(R.string.wheel_joystick)
             })
 

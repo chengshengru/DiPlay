@@ -3,7 +3,7 @@ package com.shilapi.xcertplay
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import com.shilapi.xcertplay.host.R
 import org.junit.Assert.*
 import org.junit.Test
@@ -26,7 +26,7 @@ class AudioFocusSettingsTest {
         DiPlayActivity::class.java.getDeclaredMethod("audioFocusControls", LinearLayout::class.java)
             .apply { isAccessible = true }.invoke(activity, page)
         activity.setContentView(page)
-        val switches = views(page).filterIsInstance<Switch>().toList()
+        val switches = views(page).filterIsInstance<SwitchCompat>().toList()
         assertEquals(3, switches.size)
         val disableMediaKeyFocus = switches.single {
             it.contentDescription == activity.getString(R.string.settings_disable_media_key_audio_focus)

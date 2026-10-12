@@ -7,7 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.SeekBar
 import android.widget.Button
-import android.widget.Switch
+import androidx.appcompat.widget.SwitchCompat
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import com.shilapi.xcertplay.host.R
@@ -71,7 +71,7 @@ class LivePictureTest {
         val args = Bundle().apply { putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 125f) }
         assertTrue(contrast.performAccessibilityAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, args))
         assertEquals(125, CarPlayPicture.value(CarPlayPicture.preferences(context), CarPlayPicture.CONTRAST))
-        val original = views.filterIsInstance<Switch>().single()
+        val original = views.filterIsInstance<SwitchCompat>().single()
         original.isChecked = true
         assertFalse(contrast.isEnabled)
         views.filterIsInstance<Button>().first { it.text == context.getString(R.string.picture_reset) }.performClick()
@@ -93,7 +93,7 @@ class LivePictureTest {
             it.text == context.getString(R.string.picture_surface_output_unavailable)
         })
         assertTrue(views.filterIsInstance<SeekBar>().all { !it.isEnabled })
-        assertFalse(views.filterIsInstance<Switch>().single().isEnabled)
+        assertFalse(views.filterIsInstance<SwitchCompat>().single().isEnabled)
         val reset = views.filterIsInstance<Button>().single { it.text == context.getString(R.string.picture_reset) }
         assertFalse(reset.isEnabled)
         reset.performClick()
