@@ -67,6 +67,8 @@ class Iap2WirelessControlClient(
         }
 
         var forwardedFrames = 0
+        // 波次十 #473/#536/#606：周期消息节流日志
+        val rxLog = Iap2RxLog()
         var wifiConfigurationsSent = 0
         var carPlayStartSessionsSent = 0
         var preTransportWiFiConfigurationsSent = 0
@@ -218,7 +220,7 @@ class Iap2WirelessControlClient(
                     }
 
                     else -> {
-                        onProgress("iap2 rx=0x${incoming.messageId.toString(16).padStart(4, '0')}")
+                        rxLog.line(incoming.messageId)?.let(onProgress)
                         onIncoming(incoming)
                         forwardedFrames++
                     }

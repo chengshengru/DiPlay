@@ -23,6 +23,8 @@ class Iap2UsbMuxHost private constructor(
     private var failure: IphoneUsbException? = null
     private var nextMuxSequence = 0
     private var nextMuxAcknowledgement = 0
+    // 波次十 #634：已收到的 usbmux 帧计数（仅前 50 帧写日志）
+    private var receivedFrames = 0
     private var nextSourcePort = FIRST_SOURCE_PORT
     private lateinit var readerThread: Thread
     private val receiveFrames = UsbMuxFrameBuffer { line ->
@@ -160,7 +162,8 @@ class Iap2UsbMuxHost private constructor(
                 receiveFrames.takeFrame()?.let { frame ->
                     // LIVI only trusts the length field on receive: iPhone replies do not
                     // carry the 0xFEEDFACE word in the header's fourth field.
-                    Log.i(
+                    // 波次十 #634：一帧一行会在有线会话开始一分钟内刷满 logcat。
+                    if (++receivedFrames <= LOGGED_RX_FRAMES) Log.i(
                         "xcertplay-usb",
                         "usbmux rx proto=${frame.protocol} length=${frame.length} word8=0x" +
                             frame.word8.toUInt().toString(16),
@@ -265,6 +268,8 @@ class Iap2UsbMuxHost private constructor(
 
     companion object {
         const val LOCKDOWN_PORT = 62078
+        // 波次十 #634：写日志的接收帧上限
+        private const val LOGGED_RX_FRAMES = 50
 
         private const val PROTOCOL_VERSION = 0
         private const val PROTOCOL_SETUP = 2
