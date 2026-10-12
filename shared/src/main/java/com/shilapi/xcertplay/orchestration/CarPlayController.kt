@@ -1918,22 +1918,29 @@ class CarPlayController(
                 when (phase) {
                     Phase.REENUMERATION, Phase.IPHONE -> {
                         val configuration = IphoneCarPlayConfiguration.find(result.device)
+                        // 波次十 #634：配置选取改为状态机。无 Apple Ethernet 的配置先请求
+                        // CarPlay 模式，被拒后再回落采用，避免 AirPlay 永不打开。
+                        val carPlayMode = configuration?.let(IphoneCarPlayConfiguration::isCarPlayMode) == true
+                        val action = WiredConfigurationAction.choose(
+                            found = configuration != null,
+                            carPlayMode = carPlayMode,
+                            transitionsTried = reenumerationAttempts,
+                            maximumTransitions = MAXIMUM_REENUMERATION_ATTEMPTS,
+                        )
                         connectionDiagnostic(
                             "USB configuration ready=${configuration != null} " +
                                 "configurationId=${configuration?.label ?: "none"} " +
                                 "reenumerationAttempts=$reenumerationAttempts " +
-                                "action=${when {
-                                    configuration != null -> "reuse-descriptors"
-                                    reenumerationAttempts < MAXIMUM_REENUMERATION_ATTEMPTS -> "request-transition"
-                                    else -> "reject-missing-configuration"
-                                }}",
+                                "action=${action.diagnostic}",
                         )
-                        if (configuration != null) {
-                            openDataPaths(result.device)
-                        } else if (reenumerationAttempts < MAXIMUM_REENUMERATION_ATTEMPTS) {
-                            beginReenumeration(result.device)
-                        } else {
-                            fail(
+                        when (action) {
+                            WiredConfigurationAction.USE,
+                            WiredConfigurationAction.USE_WITHOUT_APPLE_ETHERNET -> openDataPaths(result.device)
+                            WiredConfigurationAction.REQUEST_TRANSITION -> beginReenumeration(
+                                result.device,
+                                WiredConfigurationAction.fallbackAfterRejection(configuration != null, carPlayMode),
+                            )
+                            WiredConfigurationAction.REJECT -> fail(
                                 IphoneUsbException.Protocol(
                                     "iPhone did not expose a complete CarPlay USB configuration",
                                 ),
@@ -1977,7 +1984,11 @@ class CarPlayController(
         mainHandler.postDelayed(check, PERMISSION_POLL_INTERVAL_MILLIS)
     }
 
-    private fun beginReenumeration(device: UsbDevice) {
+    /**
+     * [fallbackAfterRejection]：iPhone 已提供 USBMUX 与 NCM，因此拒绝模式请求时直接尝试
+     * 该配置（波次十 #634）。
+     */
+    private fun beginReenumeration(device: UsbDevice, fallbackAfterRejection: Boolean = false) {
         phase = Phase.REENUMERATION
         reenumerationAttempts += 1
         lastIphoneDevice = device
@@ -1990,7 +2001,17 @@ class CarPlayController(
                     onStatus(CarPlayStatus.WaitingForReenumeration)
                     scheduleReenumerationWatchdog()
                 }
-                is IphoneUsbHost.TransitionResult.Failed -> fail(transition.error)
+                is IphoneUsbHost.TransitionResult.Failed -> if (fallbackAfterRejection) {
+                    connectionDiagnostic(
+                        "USB transition rejected; using the configuration without Apple Ethernet " +
+                            "error=${transition.error.message}",
+                    )
+                    mainHandler.post {
+                        if (!closed && phase == Phase.REENUMERATION) openDataPaths(device)
+                    }
+                } else {
+                    fail(transition.error)
+                }
             }
         }
     }

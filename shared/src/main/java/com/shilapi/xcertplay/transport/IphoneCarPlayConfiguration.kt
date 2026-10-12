@@ -47,6 +47,13 @@ object IphoneCarPlayConfiguration {
     /** Every configuration of the device with its descriptor summary, for USB diagnostics. */
     fun describeAll(device: UsbDevice): List<String> = UsbDescriptorCompat.describeAll(device)
 
+    /**
+     * 波次十 #634：只有 CarPlay 模式才带 Apple Ethernet；iOS 17+ 在非 CarPlay 模式下也会
+     * 提供 USBMUX 与 NCM。参数用分支的 [UsbConfigurationView] 抽象（API 17-20 走描述符回退）。
+     */
+    fun isCarPlayMode(configuration: UsbConfigurationView): Boolean =
+        usbMuxInterface(configuration) != null && hasCdcNcm(configuration) && hasAppleEthernet(configuration)
+
     fun usbMuxInterface(configuration: UsbConfigurationView): UsbInterface? =
         configuration.interfaces.firstOrNull {
             it.interfaceClass == USBMUX_CLASS &&

@@ -53,6 +53,9 @@ class WheelKeyPermissionSetupTest {
         val writes = commands.filter { it.contains("settings put secure enabled_accessibility_services") }
         assertEquals(2, writes.size)
         assertTrue(writes[0].contains("'$other:another.package/.Service'"))
+        // 只有当 settings observer 读到“不含本服务”的列表时，Android 才清除 crashed 标记（#606）。
+        assertTrue(writes[0].contains("&& sleep 1"))
+        assertFalse(writes[1].contains("sleep"))
         assertEquals("$other:another.package/.Service:$ours",
             Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES))
     }

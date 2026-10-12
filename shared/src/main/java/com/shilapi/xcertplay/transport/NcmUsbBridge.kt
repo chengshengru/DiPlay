@@ -41,6 +41,9 @@ class NcmUsbBridge internal constructor(
     private var failure: IphoneUsbException? = null
     private var sequence = 0
     private var loggedWriteTimeout = false
+    // 波次十 #634：车机未 StartCarPlaySession 前手机一直 NAK 该管道，先按短超时丢弃帧
+    private var bulkOutAccepted = false
+    private var notReadyFrames = 0
     private val frames = ArrayDeque<ByteArray>()
     private var queuedBytes = 0
     private var buffered = ByteArray(0)
@@ -95,15 +98,29 @@ class NcmUsbBridge internal constructor(
             this.sequence.also { this.sequence = (this.sequence + 1) and 0xffff }
         }
         val block = Ntb16Codec.build(frame, sequence)
-        val transferred = connection.bulkTransfer(outEndpoint, block, block.size, timeoutMillis)
-        // Before StartCarPlaySession the phone keeps the NCM data path NAKed. Android reports the
-        // resulting timeout as -1; it is not a detach and later packets must be allowed to retry.
+        // bulkTransfer() 在 JNI 关键区内持有 buffer 直到返回（见上方读路径）。手机仍在 NAK 该
+        // 管道时，每帧都要等满超时，iAP2 握手的每次 USBMUX 写入都要等一次超时才完成：
+        // Android 8.1–14 上每步约 2 s（#634, #335, #301）。在手机收下第一帧之前，无法立即
+        // 发出的帧直接丢弃（与等满超时后的结果一致），让有线启动提前数秒。
+        val transferred = connection.bulkTransfer(
+            outEndpoint,
+            block,
+            block.size,
+            if (bulkOutAccepted) timeoutMillis else minOf(timeoutMillis, NOT_READY_WRITE_TIMEOUT_MILLIS),
+        )
+        // StartCarPlaySession 之前手机保持 NCM 数据路径 NAK。Android 把该超时上报为 -1；
+        // 这不是断开，后续数据包必须允许重试。
         if (transferred <= 0) {
+            if (!bulkOutAccepted) notReadyFrames++
             if (!loggedWriteTimeout) {
                 loggedWriteTimeout = true
                 Log.i(IphoneCarPlayConfiguration.TAG, "ncm bulk-out not ready; retaining bridge for retry")
             }
             return@synchronized
+        }
+        if (!bulkOutAccepted) {
+            bulkOutAccepted = true
+            runCatching { onDiagnostic("NCM bulk-out ready after $notReadyFrames dropped frames") }
         }
         if (transferred != block.size) {
             throw IphoneUsbException.DeviceUnavailable(
@@ -431,6 +448,8 @@ class NcmUsbBridge internal constructor(
         private const val USB_PACKET_SIZE = 512
         private const val STATUS_POLL_TIMEOUT_MILLIS = 20
         private const val STATUS_POLL_INTERVAL_MILLIS = 500L
+        // 波次十 #634：管道未就绪时的写入超时上限（毫秒），避免每帧等满 2 s
+        internal const val NOT_READY_WRITE_TIMEOUT_MILLIS = 20
         private const val MAX_QUEUED_FRAMES = 256
         private const val MAX_QUEUED_BYTES = 1 shl 20
         private const val NANOS_PER_MILLISECOND = 1_000_000L

@@ -75,13 +75,20 @@ class ManualHotspotManager(
         }
         require(timeoutMillis > 0) { "timeoutMillis must be positive" }
 
-        val apConfiguration = readApConfiguration()
-        if (apConfiguration != null && apConfiguration.ssid != expectedSsid) {
+        val readConfiguration = readApConfiguration()
+        // 波次十 #617：车机会同时广播 HOTSPOT 与 HOTSPOT_5G（5 GHz companion），Android 只
+        // 认识前一个，这里识别后缀并放行，避免名称不匹配直接失败。
+        val companion = readConfiguration != null &&
+            isFiveGhzCompanion(apSsid = readConfiguration.ssid, expectedSsid = expectedSsid)
+        if (readConfiguration != null && readConfiguration.ssid != expectedSsid && !companion) {
             throw WirelessStartupException(WirelessStartupFailure.HOTSPOT_CONFIGURATION,
                 "Manual hotspot SSID does not match the active local AP configuration: " +
-                    "'${apConfiguration.ssid}'",
+                    "'${readConfiguration.ssid}'",
             )
         }
+        // Android 配置描述的是 2.4 GHz 网络，其信道/频段/频率对 companion 无意义，只沿用安全设置。
+        val apConfiguration = if (companion) null else readConfiguration
+        if (companion) onDiagnostic("Manual hotspot uses the car's 5 GHz companion network of the configured hotspot")
         validateApConfiguration(apConfiguration)
 
         // 老安卓（API 17..22）：已启用的 AP 若长时间没有接口，做一次有界重启恢复。
@@ -121,8 +128,8 @@ class ManualHotspotManager(
             runCatching { network?.hardwareAddress?.toMacAddressString() }.getOrNull()
                 ?.takeUnless { it == "02:00:00:00:00:00" || it == "00:00:00:00:00:00" }
                 ?: HotspotInterfaceBssid.read(selected.name))
-        val connectionFrequency = frequencyFromConnectionInfo()
-        val scanFrequency = frequencyFromScanResult(localInterface)
+        val connectionFrequency = if (companion) null else frequencyFromConnectionInfo()
+        val scanFrequency = if (companion) null else frequencyFromScanResult(localInterface)
         val channel = observedManualHotspotChannel(
             apChannel = apConfiguration?.channel ?: 0,
             connectionFrequencyMHz = connectionFrequency,
@@ -135,13 +142,13 @@ class ManualHotspotManager(
             scanFrequency != null -> scanFrequency
             else -> null
         }
-        val security = apConfiguration?.security ?: expectedSecurity
+        val security = readConfiguration?.security ?: expectedSecurity
         // Keep the existing IPv4-first endpoint selection and also publish the selected AP's
         // scoped IPv6 address, using the same dual-stack policy as existing Wi-Fi connections.
         val hostAddresses = network?.let {
             existingWifiHostAddresses(Collections.list(it.inetAddresses), selected.index)
         }?.takeIf { it.isNotEmpty() } ?: listOfNotNull(localInterface.hostAddress)
-        onDiagnostic("Manual hotspot configReadable=${apConfiguration != null} " +
+        onDiagnostic("Manual hotspot configReadable=${readConfiguration != null} " +
             "security=$security channelKnown=${channel > 0} " +
             "hardwareAddressKnown=${localInterface.hardwareAddress != null} iface=${localInterface.name} " +
             "family=${if (localInterface.hostAddress is Inet6Address) "IPv6" else "IPv4"} " +
@@ -172,7 +179,7 @@ class ManualHotspotManager(
             bandLabel = when (expectedBand) {
                 ManualHotspotBand.GHZ_2_4 -> "2.4 GHz"
                 ManualHotspotBand.GHZ_5 -> "5 GHz"
-                ManualHotspotBand.AUTO ->
+                ManualHotspotBand.AUTO -> if (companion) "5 GHz" else
                     frequencyMHz?.let(::bandLabel) ?: observedBandLabel ?: "Auto"
             },
             backend = WirelessHotspotBackend.MANUAL_HOTSPOT,
@@ -398,9 +405,16 @@ class ManualHotspotManager(
         val hardwareAddress: String?,
     )
 
-    private companion object {
-        const val TAG = "xcertplay-usb"
+    internal companion object {
+        private const val TAG = "xcertplay-usb"
+        private val FIVE_GHZ_SUFFIXES = listOf("_5G", "-5G")
 
+        /**
+         * 波次十 #617：部分车机在 Android 里配置一个热点名，同时以 “_5G” 后缀（大小写不敏感）
+         * 额外广播同名 5 GHz 网络、密码相同。Android 只认识前者，选后者会按名称不匹配失败。
+         */
+        fun isFiveGhzCompanion(apSsid: String, expectedSsid: String): Boolean =
+            apSsid.isNotEmpty() && FIVE_GHZ_SUFFIXES.any { expectedSsid.equals(apSsid + it, ignoreCase = true) }
     }
 }
 

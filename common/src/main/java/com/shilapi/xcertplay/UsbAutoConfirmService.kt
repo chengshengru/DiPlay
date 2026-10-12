@@ -19,11 +19,15 @@ class UsbAutoConfirmService : AccessibilityService() {
 
     private var lastClickTime = -DEBOUNCE_MILLIS
     private var usbWindowId: Int? = null
+    // 波次十 #409：抑制重复的“非目标窗口”日志
+    private var ignoredWindowId: Int? = null
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            usbWindowId = if (isSystemUsbWindow(event.packageName?.toString(), event.className?.toString())) {
+            val className = event.className?.toString()
+            usbWindowId = if (isSystemUsbWindow(event.packageName?.toString(), className)) {
+                if (event.windowId != usbWindowId) Log.i(TAG, "System dialog window class=$className; checking its prompt")
                 event.windowId
             } else null
         }
@@ -40,7 +44,13 @@ class UsbAutoConfirmService : AccessibilityService() {
                 false
             }
             val appLabel = applicationInfo.loadLabel(packageManager).toString()
-            if (!isTargetPrompt(texts.joinToString(" "), appLabel)) return
+            if (!isTargetPrompt(texts.joinToString(" "), appLabel)) {
+                if (ignoredWindowId != usbWindowId) {
+                    ignoredWindowId = usbWindowId
+                    Log.i(TAG, "System dialog does not ask for DiPlay USB access; left alone")
+                }
+                return
+            }
             // Only the system USB dialog's optional default checkbox may be changed.
             visit(root) { node ->
                 node.isCheckable && !node.isChecked && node.isEnabled &&
@@ -89,20 +99,26 @@ class UsbAutoConfirmService : AccessibilityService() {
             "com.android.systemui.usb.UsbConfirmActivity",
         )
         private val CONFIRM_LABELS = setOf("确定", "允许", "OK", "Allow", "Confirm")
+        // 波次十 #409：USB 权限活动继承 AlertActivity，Android 7–14 上无障碍上报的窗口类名
+        // 都是 android.app.Dialog 而非活动名，导致自动确认从未匹配到 USB 窗口。其他系统
+        // systemui 对话框（如截屏授权）也上报同名类，因此 isTargetPrompt 还必须命中 USB 词。
+        private const val ALERT_ACTIVITY_CLASS = "android.app.Dialog"
+        private val USB_DEVICE_WORDS = Regex("USB|iPhone|iPad", RegexOption.IGNORE_CASE)
 
         internal fun isSystemUsbWindow(pkg: String?, className: String?): Boolean =
-            pkg in SYSTEM_PACKAGES && className in USB_ACTIVITIES
+            pkg in SYSTEM_PACKAGES && (className in USB_ACTIVITIES || className == ALERT_ACTIVITY_CLASS)
 
         /**
-         * The window is already known to be the system USB dialog, so the prompt only has to name
-         * this app. Android 10+ words it "Allow DiPlay to access iPhone?" with no "USB", and Chinese
-         * puts the name between letters ("要允许DiPlay访问iPhone吗？"), so only ASCII word characters
-         * count as part of a longer name such as "FakeDiPlay".
+         * 提示必须同时包含本应用名与 USB 设备词。Android 10+ 文案 "Allow DiPlay to access
+         * iPhone?" 没有 "USB"，Android 7.1 说 "the USB device" 而不提手机名，中文把应用名
+         * 夹在文字中间（"要允许DiPlay访问iPhone吗？"），因此只有 ASCII 单词字符才计入
+         * "FakeDiPlay" 这类更长名字的匹配。
          */
         internal fun isTargetPrompt(text: String, appLabel: String): Boolean =
             appLabel.isNotBlank() &&
                 Regex("(?<![A-Za-z0-9_])${Regex.escape(appLabel)}(?![A-Za-z0-9_])", RegexOption.IGNORE_CASE)
-                    .containsMatchIn(text)
+                    .containsMatchIn(text) &&
+                USB_DEVICE_WORDS.containsMatchIn(text)
 
 
         fun isEnabled(context: Context): Boolean {
