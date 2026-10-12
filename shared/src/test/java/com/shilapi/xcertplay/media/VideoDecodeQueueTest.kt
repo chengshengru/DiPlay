@@ -73,4 +73,22 @@ class VideoDecodeQueueTest {
         assertEquals(3, attempts)
         assertEquals(-1, DecoderInputPump.acquire(running = { false }, drain = { fail() }, dequeue = { fail(); 0 }))
     }
+
+    @Test fun aWaitShorterThanOneDrainStillDrainsAndRetriesOnce() {
+        // 音频把等待上限压到 100 ms（#649）；阻塞的轨道写入可能超过这个时长。
+        var time = 0L
+        var drains = 0
+        var dequeues = 0
+        assertEquals(-1, DecoderInputPump.acquire(
+            running = { true }, drain = { drains++; time += 260 }, dequeue = { dequeues++; -1 },
+            nanoTime = { time }, timeoutNs = 100,
+        ))
+        assertEquals(1, drains)
+        assertEquals(1, dequeues)
+        time = 0
+        assertEquals(4, DecoderInputPump.acquire(
+            running = { true }, drain = { time += 260 }, dequeue = { 4 },
+            nanoTime = { time }, timeoutNs = 100,
+        ))
+    }
 }

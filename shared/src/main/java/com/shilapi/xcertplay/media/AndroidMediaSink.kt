@@ -2183,10 +2183,13 @@ private class AudioRenderer(
         val codec = codec ?: run { decoderUnavailablePackets++; return }
         diagnosticStage = "decoder-input"
         // 当阻塞的轨道写入占住本线程时,已解码输出会填满解码器、输入随之停滞(main #618f/#381)。
-        // 只等一次 10ms 就丢包,每次会剪掉约 21ms 音乐;改为边排空输出边继续等待。
+        // 只等一次 10ms 就丢包,每次会剪掉约 21ms 音乐;改为排空输出后再等。一次排空重试足够,
+        // 泵总会等到。但若照搬视频的 500ms,变慢的解码器只会越落越远:CarPlay 画面退后台时
+        // 队列涨到 190 包,轨道每几秒欠载一次(#649),因此音频等待上限为 100ms。
         val index = DecoderInputPump.acquire(
             running = { running }, drain = { drainCodec(codec) },
             dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
+            timeoutNs = AUDIO_INPUT_WAIT_NS,
         )
         if (index < 0) {
             inputDropped++
@@ -2408,7 +2411,10 @@ private class AudioRenderer(
             previous?.let { (current - it) and 0xffff_ffffL }
         }
         val queuedFrames = playbackHeadFrames?.let { (totalWrittenFrames - it).coerceAtLeast(0L) }
-        val line = "audio stats audioType=${format.audioType} channel=$mappedChannel " +
+        // "PHONE " 是 iPhone 自身日志行的前缀，报告生成时会整行丢弃，连带丢掉了每次通话的
+        // 播放统计行（#647），因此诊断行里把 PHONE 通道显示为 CALL。
+        val channelName = if (mappedChannel == AudioChannel.PHONE) "CALL" else mappedChannel?.name
+        val line = "audio stats audioType=${format.audioType} channel=$channelName " +
             "routeType=${currentTrack?.routedDevice?.type ?: -1} codec=${format.codec} " +
             "trackState=${currentTrack?.state ?: -1} playState=${currentTrack?.playState ?: -1} " +
             "sampleRate=${currentTrack?.sampleRate ?: format.sampleRate} " +
@@ -2520,6 +2526,8 @@ private class AudioRenderer(
         const val OPUS_CODEC_DELAY_NANOS = 6_500_000L
         const val OPUS_SEEK_PRE_ROLL_NANOS = 80_000_000L
         const val INPUT_TIMEOUT_US = 10_000L
+        // 波次十 #649：音频解码输入等待上限 100 ms（视频仍是 500 ms）
+        const val AUDIO_INPUT_WAIT_NS = 100_000_000L
         const val AUDIO_POLL_MILLIS = 10L
         const val BUFFER_TAIL_WAIT_NS = 500_000_000L
         // Holds a burst after a Wi-Fi gap (~4 s of AAC) instead of dropping it.

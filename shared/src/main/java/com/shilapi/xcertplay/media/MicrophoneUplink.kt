@@ -271,6 +271,8 @@ internal class MicrophoneUplink(
         val clock = canceller?.let { CaptureClock(config.sampleRate) }
         val reference = canceller?.let { ShortArray(it.frameSamples) }
         var filled = 0
+        // 波次十 #647：首读失败后的重启次数
+        var readRestarts = 0
         try {
             while (running.get()) {
                 stats.reading()
@@ -281,6 +283,16 @@ internal class MicrophoneUplink(
                     if (running.get()) {
                         Log.e(TAG, "microphone read failed code=$count")
                         stats.failure(MicrophoneFailureStage.READ, code = count)
+                    }
+                    // 车机进入通话模式后的首次读取可能返回 ERROR_INVALID_OPERATION，此前捕获
+                    // 就此结束、整个通话静音（#647）。放弃前先重启录音数次。
+                    // ERROR_DEAD_OBJECT(-6) 为 API 24+ 常量，API 17 上用字面量避免类解析失败。
+                    if (running.get() && count != DEAD_OBJECT_READ_CODE &&
+                        readRestarts < MAX_READ_RESTARTS && restartRecording(recorder)
+                    ) {
+                        readRestarts++
+                        stats.restarted(readRestarts)
+                        continue
                     }
                     return
                 }
@@ -312,6 +324,7 @@ internal class MicrophoneUplink(
                                 canceller = null
                             }
                         }
+                        stats.level(frame)
                         sendFrame(socket, counters, frame)
                         filled = 0
                     }
@@ -328,6 +341,16 @@ internal class MicrophoneUplink(
             running.set(false)
             release()
         }
+    }
+
+    /** 波次十 #647：停止并重新启动录音，成功恢复到 RECORDSTATE_RECORDING 才算成功。 */
+    private fun restartRecording(recorder: AudioRecord): Boolean = try {
+        runCatching { recorder.stop() }
+        Thread.sleep(READ_RESTART_PAUSE_MILLIS)
+        recorder.startRecording()
+        recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING
+    } catch (error: IllegalStateException) {
+        false
     }
 
     private fun sendFrame(socket: DatagramSocket, counters: MicrophoneCounters, frame: ByteArray) {
@@ -457,6 +480,11 @@ internal class MicrophoneUplink(
         const val CLOSE_JOIN_MILLIS = 500L
         const val ECHO_TAIL_MILLIS = 250
         const val ECHO_REFERENCE_LEAD_NS = 30_000_000L
+        // 波次十 #647：首读失败自动重启的上限与暂停
+        const val MAX_READ_RESTARTS = 3
+        const val READ_RESTART_PAUSE_MILLIS = 50L
+        // AudioRecord.ERROR_DEAD_OBJECT 的字面量（API 24+ 才有该常量，API 17 需内联避免解析失败）
+        const val DEAD_OBJECT_READ_CODE = -6
     }
 }
 

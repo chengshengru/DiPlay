@@ -10,6 +10,22 @@ class MicrophoneCaptureStatsTest {
     private val config = MicrophoneConfig("telephony", 48_000, 1, 100, 20,
         InetAddress.getByName("198.51.100.20"), 54321, ByteArray(32) { 0x7f }, AudioCodecKind.OPUS)
 
+    @Test fun reportsTheLoudestSampleSoSilentCaptureStandsOut() {
+        // #647: 报告里“麦克风静音”与“iPhone 丢弃上行”此前无法区分。
+        var now = 0L
+        val reports = mutableListOf<String>()
+        val stats = MicrophoneCaptureStats(config, reports::add) { now }
+        stats.level(ByteArray(960))
+        now = 5_000_000_000
+        stats.flush()
+        assertTrue(reports.last().contains("peakDbfs=silent"))
+        // 小端 -16384 是满量程一半：-6 dBFS。
+        stats.level(byteArrayOf(0, 0, 0x00, 0xc0.toByte(), 0x10, 0x00))
+        stats.flush(ended = true)
+        assertTrue(reports.last().contains("peakDbfs=-6 ended=true"))
+        assertEquals("0", MicrophoneCaptureStats.peakDbfs(32768))
+    }
+
     @Test fun aggregatesFiveSecondWindowsAndKeepsFinalPartialWindow() {
         var now = 0L
         val reports = mutableListOf<String>()

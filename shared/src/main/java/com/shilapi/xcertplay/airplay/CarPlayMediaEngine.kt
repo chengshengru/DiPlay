@@ -74,7 +74,7 @@ class CarPlayMediaEngine(
         @Volatile var originNs: Long? = null,
     ) {
         // 每流一个反馈位置监视器,诊断 /feedback 与已收音频的偏差(main #625b)。
-        val position = FeedbackPositionMonitor(format.sampleRate)
+        val position = FeedbackPositionMonitor(format.rtpClockRate)
     }
 
     private data class PendingIapTunnel(
@@ -454,9 +454,12 @@ class CarPlayMediaEngine(
         val buffered = bufferedStreams[session]
         if (active.isEmpty() && buffered == null) return null
         val streams = active.map { meta ->
+            // sampleTime 按流自身的 RTP 时钟计数。此前按 48 kHz Opus 解码速率计数，16 kHz
+            // 通话流的位置比已到达的音频领先 3 倍（20 s 通话领先 14.5 s），司机听不清对方（#473）。
+            val clockRate = meta.format.rtpClockRate
             val entry = linkedMapOf<String, Any?>(
                 "type" to meta.type,
-                "sampleRate" to meta.format.sampleRate,
+                "sampleRate" to clockRate,
             )
             val firstSample = meta.firstSample
             val originNs = meta.originNs
@@ -467,7 +470,7 @@ class CarPlayMediaEngine(
                     (nowNs - originNs) / 1e9 - meta.playoutLatencyMs / 1000.0,
                 )
                 val firstUnsigned = firstSample.toLong() and 0xffff_ffffL
-                val sampleTime = (firstUnsigned + Math.round(elapsedSec * meta.format.sampleRate)) and
+                val sampleTime = (firstUnsigned + Math.round(elapsedSec * clockRate)) and
                     0xffff_ffffL
                 entry["streamConnectionID"] = unsignedPlistInteger(meta.connectionId ?: 0L)
                 entry["timestamp"] = session.syncedNtp()
