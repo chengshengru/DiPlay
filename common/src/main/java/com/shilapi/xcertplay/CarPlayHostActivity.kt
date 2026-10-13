@@ -110,6 +110,7 @@ import com.shilapi.xcertplay.settings.SettingsTheme
 import com.shilapi.xcertplay.settings.SettingsWidgets
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.BluetoothLinkCheck
+import com.shilapi.xcertplay.transport.BluetoothRadioCheck
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
 import com.shilapi.xcertplay.transport.IphoneUsbMatcher
 import com.shilapi.xcertplay.transport.UsbDeviceId
@@ -316,6 +317,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var statusView: TextView? = null
     private var statusScrollView: ScrollView? = null
     private var stageStatusView: TextView? = null
+    // 波次十一批次B（main #673）：连接失败时用可操作提示替换默认说明文字。
+    private var connectionInstructionsView: TextView? = null
+    private var connectionHelpView: TextView? = null
     private var usbDiagView: TextView? = null
     private val usbDiagLines = ArrayDeque<String>()
     private val usbDiagLock = Any()
@@ -1463,6 +1467,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         refreshConfiguration(newConfig, ThemeModeDiagnostics.Source.CALLBACK)
         applyFullscreenMode()
         stageStatusView?.maxWidth = (resources.displayMetrics.widthPixels * 0.78f).toInt()
+        connectionHelpView?.maxWidth = (resources.displayMetrics.widthPixels * 0.78f).toInt()
         scrollLogsToBottom()
         videoView?.post {
             val view = videoView ?: return@post
@@ -1571,6 +1576,12 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             gravity = Gravity.CENTER
         }
         panel.addView(instructions)
+        // 波次十一批次B（main #673）：连接失败时的可操作提示；无失败时隐藏，由 instructions 承担说明。
+        val help = TextView(this).apply {
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+        }
+        panel.addView(help)
         val recovery = DiPlayButton(this).apply {
             text = getString(R.string.reset_carplay_wi_fi)
             visibility = View.GONE
@@ -1609,6 +1620,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             title.setTextColor(colors.text)
             stage.setTextColor(colors.text)
             instructions.setTextColor(colors.secondary)
+            help.setTextColor(colors.secondary)
             gestureHint.setTextColor(colors.secondary)
             // main #594：等待屏按钮跟随日夜配色统一由 DiPlayButton 着色（作者：TRAE AI）。
             val buttonPalette = DiPlayPalette.of(darkMode)
@@ -1711,6 +1723,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         gestureOverlay = gestureLayer
         settingsGestureHint = gestureHint
         stageStatusView = stage
+        connectionInstructionsView = instructions
+        connectionHelpView = help
         connectionPanel = viewport
         updateDebugOverlays()
         return root
@@ -4612,6 +4626,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                     }
                     activeAirPlaySession = session
                     CarPlayBackgroundSession.active = true
+                    // 波次十一批次B（main #673）：会话已建立，撤下连接失败的可操作提示。
+                    showConnectionHelp(null)
                     callPopupSessionReady = true
                     updateCallPopupGuard()
                     reconnectAttempts = 0
@@ -4724,6 +4740,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         updateHotspotStatus(status)
         val description = status.describe()
         setConnectionStage(description)
+        // 波次十一批次B（main #673）：自动重试期间保留可操作提示；仅当 AirPlay 会话建立或出现新失败时才替换。
+        if (status is CarPlayStatus.Failed) showConnectionHelp(status)
         when (status) {
             is CarPlayStatus.Failed -> if (status.wifiResetRequired) {
                 wifiRecoveryButton?.visibility = View.VISIBLE
@@ -5717,6 +5735,19 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         updateDebugOverlays()
     }
 
+    /** 波次十一批次B（main #673）：连接失败时显示可操作提示，替换默认说明；会话建立/新失败时更新。 */
+    private fun showConnectionHelp(failure: CarPlayStatus.Failed?) {
+        connectionInstructionsView?.visibility = if (failure == null) View.VISIBLE else View.GONE
+        connectionHelpView?.apply {
+            visibility = if (failure == null) View.GONE else View.VISIBLE
+            if (failure != null) {
+                text = getString(
+                    ConnectionFailureGuidance.message(failure, wirelessEnabled, wirelessHotspotMode),
+                )
+            }
+        }
+    }
+
     private fun updateDebugOverlays() {
         statusScrollView?.visibility = View.GONE
         val waitingVisible = activeScreenStreamTypes.isEmpty()
@@ -5733,6 +5764,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         // main 8a8a6ffa：iOS 12/15 拒绝 CarPlay USB 模式请求时，提示解锁重连或转无线，而非"连接中断"。
         message.contains("CarPlay configuration request", true) -> getString(R.string.iphone_usb_mode_rejected)
         message.contains("Turn on Wi-Fi", true) -> getString(R.string.turn_on_wi_fi_in_the_head_unit_s_settings_to_connect)
+        // 波次十一批次A/B（main #677）：蓝牙无线电关闭的提示关键词，走可操作文案。
+        message.contains(BluetoothRadioCheck.RADIO_OFF_MARK, true) ->
+            getString(R.string.turn_on_bluetooth_in_the_head_unit_s_settings_to_connect)
         message.contains("Allow precise Location", true) -> getString(R.string.allow_precise_location_for_diplay_in_the_head_unit_s_app_p)
         message.contains("Allow Nearby devices", true) -> getString(R.string.allow_nearby_devices_for_diplay_in_the_head_unit_s_app_per)
         message.contains("createGroup failed", true) -> getString(R.string.the_head_unit_couldn_t_start_carplay_wi_fi_check_wi_fi_and)
