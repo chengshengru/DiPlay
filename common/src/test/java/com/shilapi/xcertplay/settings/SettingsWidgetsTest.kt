@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.RadioButton
 import android.widget.TextView
+import com.shilapi.xcertplay.DiPlayPalette
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.orchestration.MfiTarget
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
@@ -101,6 +102,38 @@ class SettingsWidgetsTest {
                 Math.abs(Color.green(enabledOn) - Color.green(enabledOff)) +
                 Math.abs(Color.blue(enabledOn) - Color.blue(enabledOff)) >= 60)
         }
+    }
+
+    // 亮色主题回归：CARD 设置页开关必须跟随设备亮/暗 palette——传入 LIGHT 后关闭态用
+    // 浅灰轨道、开启态用亮蓝轨道、标签用深色文字，而不是 SettingsTheme.CARD 写死的
+    // 暗色值（否则亮色模式下开关与文字都还是暗色样式）。
+    @Test fun cardSwitchAdoptsTheAdaptivePaletteTrackColorsInLightMode() {
+        val darkSwitch = SettingsWidgets.createSwitchRow(
+            context, "Title", "Details", false, SettingsTheme.CARD, onChanged = {}).switch
+        val lightRow = SettingsWidgets.createSwitchRow(
+            context, "Title", "Details", false, SettingsTheme.CARD,
+            palette = DiPlayPalette.LIGHT, onChanged = {})
+        val lightSwitch = lightRow.switch
+        val darkTrack = darkSwitch.trackDrawable as SettingsWidgets.PillTrackDrawable
+        val lightTrack = lightSwitch.trackDrawable as SettingsWidgets.PillTrackDrawable
+        // 默认（不传 palette）仍用 SettingsTheme 写死的深蓝灰关闭轨道。
+        assertEquals(SettingsTheme.CARD.trackOff,
+            darkTrack.colors.getColorForState(intArrayOf(android.R.attr.state_enabled), 0))
+        // 传入 LIGHT palette 后用浅灰关闭轨道，且与深蓝灰明显不同。
+        val lightOff = lightTrack.colors.getColorForState(intArrayOf(android.R.attr.state_enabled), 0)
+        assertEquals(DiPlayPalette.LIGHT.trackOff, lightOff)
+        assertNotEquals(SettingsTheme.CARD.trackOff, lightOff)
+        assertTrue(Math.abs(Color.red(lightOff) - Color.red(SettingsTheme.CARD.trackOff)) +
+            Math.abs(Color.green(lightOff) - Color.green(SettingsTheme.CARD.trackOff)) +
+            Math.abs(Color.blue(lightOff) - Color.blue(SettingsTheme.CARD.trackOff)) >= 40)
+        // 开启态也跟随：亮色下用亮蓝而不是深蓝。
+        val lightOn = lightTrack.colors.getColorForState(
+            intArrayOf(android.R.attr.state_enabled, android.R.attr.state_checked), 0)
+        assertEquals(DiPlayPalette.LIGHT.accentTrack, lightOn)
+        // 行文字跟随亮色 palette：标签深色、说明中灰，而不是 CARD 写死的近白。
+        val texts = views(lightRow.rowView).filterIsInstance<TextView>().toList()
+        assertEquals(DiPlayPalette.LIGHT.primaryText, texts[0].currentTextColor)
+        assertEquals(DiPlayPalette.LIGHT.secondaryText, texts[1].currentTextColor)
     }
 
     // 滑块回归：拇指必须是正圆 Drawable 且直径固定，视图被拉高也不会变椭圆。

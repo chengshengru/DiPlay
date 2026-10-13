@@ -179,7 +179,8 @@ object SettingsWidgets {
         applyTextStyle(context, theme, bold = true)
     }
 
-    fun createSwitchRow(
+    // internal：palette 参数类型 DiPlayPalette 是模块内类型；所有调用方都在 :common 内。
+    internal fun createSwitchRow(
         context: Context,
         label: String,
         description: String,
@@ -188,8 +189,19 @@ object SettingsWidgets {
         contentDescription: String = label,
         enabled: Boolean = true,
         labelSizeSp: Float = 18f,
+        // 传入设备亮/暗 palette 后，轨道与文字色跟随主题（CARD 用 accentTrack/trackOff +
+        // primaryText/secondaryText；OVERLAY 用 overlay* 系列）。不传则回落到 SettingsTheme
+        // 写死的深色值——只适合永远暗背景的表面（车载覆盖层）。
+        palette: com.shilapi.xcertplay.DiPlayPalette? = null,
         onChanged: (Boolean) -> Unit,
     ): SwitchRowResult {
+        val trackOn = palette?.let { if (theme.isOverlay) it.overlayAccentTrack else it.accentTrack }
+            ?: theme.accentTrack
+        val trackOff = palette?.let { if (theme.isOverlay) it.overlayTrackOff else it.trackOff }
+            ?: theme.trackOff
+        val labelColor = if (theme.isOverlay) theme.textSecondary
+            else palette?.primaryText ?: theme.textPrimary
+        val descriptionColor = palette?.secondaryText ?: theme.textSecondary
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -201,7 +213,7 @@ object SettingsWidgets {
             // main 9c7fda97：全部开关统一用 60x34dp 大开关样式，远距离可读（作者：TRAE AI）。
             // 拇指统一白色：开/关状态由轨道颜色（accentTrack vs trackOff）+ 拇指位置区分，
             // 白色拇指在两种轨道上都清晰可见。
-            applyLargeSwitchStyle(this, Color.WHITE, Color.WHITE, theme.accentTrack, theme.trackOff)
+            applyLargeSwitchStyle(this, Color.WHITE, Color.WHITE, trackOn, trackOff)
             // SwitchCompat 会把 Drawable 拉伸到视图高度，minHeight 会把拇指拉成椭圆；
             // 56dp 触控目标高度改由 padding 承担，视图高度仍由 34dp Drawable 决定。
             if (!theme.isOverlay) setPadding(0, theme.dp(context, 11), 0, theme.dp(context, 11))
@@ -225,13 +237,13 @@ object SettingsWidgets {
             val labelView = TextView(context).apply {
                 text = label
                 textSize = labelSizeSp
-                setTextColor(theme.textPrimary)
+                setTextColor(labelColor)
                 applyTextStyle(context, theme, bold = true)
             }
             val descView = TextView(context).apply {
                 text = description
                 textSize = 14f
-                setTextColor(theme.textSecondary)
+                setTextColor(descriptionColor)
                 setPadding(0, theme.dp(context, 6), theme.dp(context, 16), 0)
                 applyTextStyle(context, theme)
             }

@@ -5912,6 +5912,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             theme = SettingsTheme.CARD,
             contentDescription = title,
             enabled = enabled,
+            // 跟随设备亮/暗 palette：亮色主题下用浅色轨道与深色文字，
+            // 否则开关/文字仍停留在暗色样式（SettingsTheme.CARD 是写死的暗色值）。
+            palette = palette,
             onChanged = save,
         )
         parent.addView(result.rowView)
