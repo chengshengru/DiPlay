@@ -2,10 +2,14 @@ package com.shilapi.xcertplay.settings
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.graphics.RectF
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.InsetDrawable
+import android.graphics.drawable.Drawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -27,37 +31,26 @@ object SettingsWidgets {
      * 把平台 Switch（约 36x14dp 轨道）替换为 60x34dp 轨道 + 28dp 圆形拇指，
      * 保证车载远距离可读（对应 main #420 大开关样式）。
      *
-     * 用 SwitchCompat 替代框架 Switch：showText / thumbTintList / trackTintList
-     * 由 AppCompat 下放到 API 7+，C140A（API17）上既能染色、又无 SDK_INT>=21 的
-     * 崩溃风险，外观与本机 AppCompat 一致（main 在 API21+ 上即为此外观）。
+     * SwitchCompat 会把拇指/轨道拉伸到整个视图高度：设置页里 Switch 曾带 56dp
+     * minHeight、画中画面板里容器强制 48dp，拇指因此被拉成椭圆、轨道圆角走形。
+     * 改用自绘 Drawable：拇指恒取 bounds 短边画正圆并居中，轨道 radius 恒取
+     * 高度一半画胶囊，任意容器高度下形状都不变。
+     *
+     * 颜色直接在 Drawable 内按 view state 解析（禁用/选中/默认三态），不依赖
+     * tint list；state 直接向 SwitchCompat 取，因为 SwitchCompat 只对 isStateful()
+     * 的 drawable 下传 state，一旦漏传就会整只开关都画成禁用色。
      */
     fun applyLargeSwitchStyle(switch: SwitchCompat, thumbOn: Int, thumbOff: Int, trackOn: Int, trackOff: Int) {
         val density = switch.resources.displayMetrics.density
         fun px(value: Int) = (value * density).roundToInt()
-        // SwitchCompat 会把拇指拉伸到轨道全高，用 InsetDrawable 留出边距。
-        val thumbInset = px(3)
-        switch.thumbDrawable = InsetDrawable(
-            GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setSize(px(28), px(28))
-                setColor(Color.WHITE)
-            },
-            thumbInset,
-        )
-        switch.trackDrawable = GradientDrawable().apply {
-            cornerRadius = px(17).toFloat()
-            setSize(px(60), px(34))
-            setColor(Color.WHITE)
-            // 与平台开关一致的 30% 透明轨道，保证染色后观感一致。
-            alpha = (0.3f * 255).roundToInt()
-        }
+        val state = { switch.drawableState }
+        switch.thumbDrawable = CircleThumbDrawable(px(28), switchColorStates(thumbOn, thumbOff), state)
+        switch.trackDrawable = PillTrackDrawable(px(60), px(34), switchColorStates(trackOn, trackOff), state)
         switch.switchMinWidth = px(60)
         switch.showText = false
-        switch.thumbTintList = switchColorStates(thumbOn, thumbOff)
-        switch.trackTintList = switchColorStates(trackOn, trackOff)
     }
 
-    /** 开关拇指/轨道的三态颜色：禁用（30% 透明）、选中、默认。 */
+    /** 开关拇指/轨道的三态颜色：禁用（38% 透明）、选中、默认。 */
     private fun switchColorStates(on: Int, off: Int) = ColorStateList(
         arrayOf(
             intArrayOf(-android.R.attr.state_enabled),
@@ -66,6 +59,87 @@ object SettingsWidgets {
         ),
         intArrayOf(ColorUtils.setAlphaComponent(off, 0x61), on, off),
     )
+
+    /** 拇指：恒为正圆（直径取 bounds 短边、居中绘制），容器拉高也不会变成椭圆。 */
+    internal class CircleThumbDrawable(
+        val size: Int,
+        val colors: ColorStateList,
+        private val stateProvider: () -> IntArray,
+    ) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        override fun draw(canvas: Canvas) {
+            val bounds = getBounds()
+            if (bounds.isEmpty) return
+            paint.color = colors.getColorForState(stateProvider(), colors.defaultColor)
+            val radius = minOf(bounds.width(), bounds.height()) / 2f
+            canvas.drawCircle(bounds.exactCenterX(), bounds.exactCenterY(), radius, paint)
+        }
+
+        override fun onStateChange(state: IntArray): Boolean {
+            invalidateSelf()
+            return true
+        }
+
+        override fun isStateful(): Boolean = true
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = alpha
+        }
+
+        override fun setColorFilter(filter: ColorFilter?) {
+            paint.colorFilter = filter
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+        override fun getIntrinsicWidth(): Int = size
+
+        override fun getIntrinsicHeight(): Int = size
+    }
+
+    /** 轨道：radius 恒取高度一半画全圆角胶囊，容器拉高也不会变成圆角矩形。 */
+    internal class PillTrackDrawable(
+        val width: Int,
+        val height: Int,
+        val colors: ColorStateList,
+        private val stateProvider: () -> IntArray,
+    ) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val rect = RectF()
+
+        override fun draw(canvas: Canvas) {
+            val bounds = getBounds()
+            if (bounds.isEmpty) return
+            paint.color = colors.getColorForState(stateProvider(), colors.defaultColor)
+            rect.set(bounds)
+            val radius = bounds.height() / 2f
+            canvas.drawRoundRect(rect, radius, radius, paint)
+        }
+
+        override fun onStateChange(state: IntArray): Boolean {
+            invalidateSelf()
+            return true
+        }
+
+        override fun isStateful(): Boolean = true
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = alpha
+        }
+
+        override fun setColorFilter(filter: ColorFilter?) {
+            paint.colorFilter = filter
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+        override fun getIntrinsicWidth(): Int = width
+
+        override fun getIntrinsicHeight(): Int = height
+    }
 
     private fun TextView.applyTextStyle(context: Context, theme: SettingsTheme, bold: Boolean = false) {
         if (theme.isOverlay) {
@@ -125,8 +199,12 @@ object SettingsWidgets {
             this.contentDescription = contentDescription
             isEnabled = enabled
             // main 9c7fda97：全部开关统一用 60x34dp 大开关样式，远距离可读（作者：TRAE AI）。
-            applyLargeSwitchStyle(this, theme.accent, theme.textSecondary, theme.accentTrack, theme.trackOff)
-            if (!theme.isOverlay) minHeight = theme.dp(context, 56)
+            // 拇指统一白色：开/关状态由轨道颜色（accentTrack vs trackOff）+ 拇指位置区分，
+            // 白色拇指在两种轨道上都清晰可见。
+            applyLargeSwitchStyle(this, Color.WHITE, Color.WHITE, theme.accentTrack, theme.trackOff)
+            // SwitchCompat 会把 Drawable 拉伸到视图高度，minHeight 会把拇指拉成椭圆；
+            // 56dp 触控目标高度改由 padding 承担，视图高度仍由 34dp Drawable 决定。
+            if (!theme.isOverlay) setPadding(0, theme.dp(context, 11), 0, theme.dp(context, 11))
             setOnCheckedChangeListener { _, isChecked -> onChanged(isChecked) }
         }
 

@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay
 
 import android.content.Context
+import android.graphics.Color
 import android.view.View
 import android.widget.*
 import androidx.appcompat.widget.SwitchCompat
@@ -65,8 +66,8 @@ internal class CarPlayPicturePanel(
             setTextColor(palette.overlayPrimaryText)
             SettingsWidgets.applyLargeSwitchStyle(
                 this,
-                palette.overlayAccent,
-                palette.overlaySecondaryText,
+                Color.WHITE,
+                Color.WHITE,
                 palette.overlayAccentTrack,
                 palette.overlayTrackOff,
             )
@@ -108,8 +109,8 @@ internal class CarPlayPicturePanel(
                     view.setTextColor(palette.overlayPrimaryText)
                     SettingsWidgets.applyLargeSwitchStyle(
                         view,
-                        palette.overlayAccent,
-                        palette.overlaySecondaryText,
+                        Color.WHITE,
+                        Color.WHITE,
                         palette.overlayAccentTrack,
                         palette.overlayTrackOff,
                     )

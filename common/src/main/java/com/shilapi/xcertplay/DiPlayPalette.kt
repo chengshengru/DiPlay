@@ -91,7 +91,9 @@ internal data class DiPlayPalette(
             overlayAccent = Color.rgb(35, 100, 58),
             overlayOnAccent = Color.WHITE,
             overlayAccentTrack = Color.rgb(35, 100, 58),
-            overlayTrackOff = Color.rgb(168, 180, 190),
+            // 亮色覆盖层关闭态轨道：原 (168,180,190) 过浅，白拇指与近白背景都难分辨；
+            // 提到中性深灰，保证白拇指清晰、且与开启态深绿轨道一眼可辨。
+            overlayTrackOff = Color.rgb(122, 134, 148),
             overlayDanger = Color.rgb(155, 48, 48),
         )
     }

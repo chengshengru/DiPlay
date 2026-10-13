@@ -8,6 +8,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -61,11 +62,19 @@ class DiPlayPaletteTest {
             assertContrastAtLeast(palette.overlayDanger, palette.overlayBackground, 3.0)
         }
         assertContrastAtLeast(DiPlayPalette.LIGHT.accentTrack, DiPlayPalette.LIGHT.trackOff, 3.0)
-        assertContrastAtLeast(
-            DiPlayPalette.LIGHT.overlayAccentTrack,
-            DiPlayPalette.LIGHT.overlayTrackOff,
-            3.0,
+        // 亮色覆盖层开关两态：关闭态轨道必须是中深灰（白拇指在其上清晰可辨），
+        // 与开启态深绿轨道靠色相差异（绿 vs 中性灰）+ 拇指位置区分——
+        // 两者都是实色填充块，WCAG 亮度比（为正文文本设计）不适用，
+        // 这里沿用 SettingsWidgetsTest 的通道距离口径（>= 60）断言可辨识度。
+        assertTrue(
+            "overlay on/off track channels too close: " +
+                "%08X vs %08X".format(DiPlayPalette.LIGHT.overlayAccentTrack, DiPlayPalette.LIGHT.overlayTrackOff),
+            channelDistance(DiPlayPalette.LIGHT.overlayAccentTrack, DiPlayPalette.LIGHT.overlayTrackOff) >= 60,
         )
+        // 白拇指在亮色关闭态轨道上必须清晰（亮度比 >= 3）。
+        assertContrastAtLeast(Color.WHITE, DiPlayPalette.LIGHT.overlayTrackOff, 3.0)
+        // 白拇指在开启态轨道上同样必须清晰。
+        assertContrastAtLeast(Color.WHITE, DiPlayPalette.LIGHT.overlayAccentTrack, 3.0)
         assertTrue(DiPlayPalette.LIGHT.systemBarIconsAreDark)
     }
 
@@ -76,6 +85,11 @@ class DiPlayPaletteTest {
             (min(foregroundLuminance, backgroundLuminance) + 0.05)
         assertTrue("Expected contrast >= $minimum, was $ratio", ratio >= minimum)
     }
+
+    /** 通道距离口径：与 SettingsWidgetsTest 的开关两态断言一致（R/G/B 差值之和）。 */
+    private fun channelDistance(a: Int, b: Int): Int =
+        abs(Color.red(a) - Color.red(b)) + abs(Color.green(a) - Color.green(b)) +
+            abs(Color.blue(a) - Color.blue(b))
 
     private fun luminance(color: Int): Double {
         fun channel(value: Int): Double {

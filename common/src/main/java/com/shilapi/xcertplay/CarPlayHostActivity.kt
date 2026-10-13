@@ -3170,7 +3170,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 isChecked = locationReportingEnabled
                 contentDescription = getString(R.string.report_android_location_to_the_iphone)
                 // main 9c7fda97：覆盖层开关统一用大开关样式（内部已做 API 17 适配）（作者：TRAE AI）。
-                SettingsWidgets.applyLargeSwitchStyle(this, MENU_ACCENT, MENU_SECONDARY, MENU_ACCENT_TRACK, MENU_TRACK_OFF)
+                SettingsWidgets.applyLargeSwitchStyle(this, Color.WHITE, Color.WHITE, MENU_ACCENT_TRACK, MENU_TRACK_OFF)
                 setOnCheckedChangeListener { _, checked ->
                     onLocationReportingChanged(checked)
                 }

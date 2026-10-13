@@ -18,7 +18,8 @@ enum class SettingsTheme(
         textSecondary = Color.rgb(168, 182, 202),
         accent = Color.rgb(166, 200, 255),
         accentTrack = Color.rgb(0x32, 0x58, 0x8c),
-        trackOff = Color.rgb(42, 56, 75),
+        // 关闭态轨道提亮为中性蓝灰：与开启态深蓝轨道一眼可辨（实色，无透明度）。
+        trackOff = Color.rgb(90, 104, 124),
         buttonText = Color.rgb(12, 17, 27),
     ),
     OVERLAY(
