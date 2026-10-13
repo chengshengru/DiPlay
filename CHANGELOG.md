@@ -1,3 +1,20 @@
+# DiPlay 0.2.19-api17 — 2026-10-13
+
+Android 4.2.2 (API 17) port of DiPlay 0.2.19 (`main` @ `9aa9c549`). Wave 11 ports the post-0.2.18 increment (57 commits, 38 non-merge; 99 files, +3481/−455) on top of wave 10; see the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for per-feature details and API 17 guards:
+
+- Wireless CarPlay is refused before it starts when the car radio is really off and DiPlay is not the one holding it, so a single-radio head unit is not pulled off its Wi-Fi for a session that cannot work (#677, #641, #671).
+- A failed connection now says what the driver can do about it — reset Wi-Fi, turn Bluetooth on in the head unit's settings, join the car hotspot with Auto-Join, check permissions, or save a report (#673).
+- A CarPlay session survives the reversing camera taking over the status bar: the canvas is kept instead of being rebuilt at the taller window (#643, #674).
+- Returning to the CarPlay screen shows the last frame until the decoder draws a new one, capped at 30 s with keyframe retries — guarded to API 24+ because it needs `PixelCopy` (#669).
+- The in-car settings drawer is rebuilt as a glass shell: a header with a close button, scrolling content and a footer holding Save alone, with Exit application moved to the end of the list away from it (#642).
+- The DiLink 4 cluster launch gate is ported as well: CarPlay start is held until this window has taken focus and the cluster route settles, so the first session already carries the cluster stream (#663, #536). The report marked it optional; it is included by request.
+- Diagnostics can be fetched on a phone — the QR page offers a report download, and a typed address plus a six-digit code reaches the same page from a computer (#686, #687, #685).
+- The head unit now records why its hotspot refused to start: unreadable AP state, no start command in the firmware, or a rejected command (#667).
+- Traditional Chinese key coverage is complete again, enforced by a new gate over every user-facing string, and Arabic and Japanese fill their remaining gaps (#691, #682, #681).
+- Skipped on API 17: granting USB over ADB when a head unit has no system permission page (#689 — the probe is API 25–28 only); the first-setup BYD navigation-audio default (#656 — DiLink only); `HeadUnitCapabilities`/`ConnectionStateMachine` (not wired into any flow).
+
+See the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for skipped-item reasons; full-release vehicle acceptance is not claimed.
+
 # DiPlay 0.2.18-api17 — 2026-10-12
 
 Android 4.2.2 (API 17) port of DiPlay 0.2.18 (`main` @ `d9881b4a`). Wave 10 ports the post-0.2.18 increment (22 commits) on top of wave 9; see the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for per-feature details and API 17 guards:

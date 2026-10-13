@@ -34,7 +34,7 @@
 
 | 锚点 | Commit（完整哈希） | 时间 | 说明 |
 |------|--------------------|------|------|
-| **main 基线** | `24ae1fa52edbe27392a668d4c9e71a32d5691986` | 2026-10-11 14:47 +0400 | Merge PR #628（release/0.2.18）；增量轮（波次九，批次A–H）已迁移完成，上一基线 `4314bbe133599b21f40d23d3bf3de3f0d45353b4`（Merge PR #584，release/0.2.17） |
+| **main 基线** | `9aa9c549ee2726770ad55ec997beeeff642990fe` | 2026-10-13 | `Prepare DiPlay 0.2.19 public preview release`（v0.2.19 / versionCode 38）；**波次十一（0.2.19 增量轮，批次 A–I）已迁移完成**。上一基线与历史：`d9881b4a`（Merge PR #660，release/0.2.18；波次十批次 A–H 已迁移）→ `24ae1fa5`（Merge PR #628，release/0.2.18；波次九批次 A–H）→ `4314bbe1`（Merge PR #584，release/0.2.17；波次八） |
 | **分叉点** | `7887bb7bf2b52258e663a2a4ea1332382ed80ad8` | 2026-10-07 15:24 +0400 | v0.2.14 发布合并点，两分支共同祖先 |
 | **android-4.2.2 起点** | `6a08b07d2ee41f002d9f8b5151c94d7ed26d5fea` | 2026-10-09 20:42 +0800 | 分支已有 4 个移植提交（API 17 下移、legacy-mdns、热点恢复） |
 
@@ -141,6 +141,23 @@ flowchart LR
 | 九 | 批次F 车辆/HUD | #622d/#600/#622e/#626/#599/#607/#587 | ✅ 已完成 | 2026-10-12 | 分支提交 `8f4091b3`（44 文件 +2112/-18）；来电方向盘键、窗口媒体键（API 28/33 双档测试）、WheelKeyService 恢复重试+诊断报告、Geely/Lynk 方向盘键（aidl + buildTools 34.0.0）、FCE 集群引导、测速表悬浮、BYD SOME/IP HUD 可用性前置检查 |
 | 九 | 批次G 新功能块 | #594/#598/#593 | ✅ 已完成 | 2026-10-12 | 分支提交 `bbcd16fc`（26 文件 +1362/-105）；DiPlayButton（ripple/stateListAnimator/foreground 全走 UiCompat）+ 等待屏/菜单 12 处 + 画面调节面板补齐基线 palette 化、设置备份（zxing 3.5.3 纯 Java 库 + settings-backup.html + backup 字符串 ×7）、安装器选择（公开副本哈希校验 + 多安装器选择器；manifest `<queries>` 保持注释，targetSdk 28 无包可见性过滤）；测试 sdk 35→33（Robolectric 4.9 上限） |
 | 九 | 批次H 守卫 | #595 | ⏭️ 跳过/守卫 | 2026-10-12 | Telecom 自管理通话整体跳过（API 26+）：分支无 telecom/ 文件、无 `phoneAudioRoute*` 引用、`WheelKeyService.wanted()` 未追加、shared/AndroidManifest 未声明 `MANAGE_OWN_CALLS`/`PhoneAudioConnectionService`；`:shared:assembleDebug` 验证无残留 |
+| 十 | 批次A 传输/USB 小项 | #618 系列 | ✅ 已完成 | 2026-10-13 | 分支提交 `6bd2f503`（12 文件 +319/-35）；NCM 短超时、USB 配置状态机、USB 自动确认类名、方向盘键崩溃重置、5 GHz companion |
+| 十 | 批次B 音频/通话 | — | ✅ 已完成 | 2026-10-13 | 分支提交 `19f2de2a`（8 文件 +130/-7）；通话 RTP 时钟速率、音频解码 100 ms 等待、麦克风电平诊断与首读失败重启、CALL 通道名 |
+| 十 | 批次C 窗口/集群显示 | — | ✅ 已完成 | 2026-10-13 | 分支提交 `e1398747`（7 文件 +105/-10）；窗口/对话框背景改资源引用（Android 9 及以下）、集群导航卡片 5 秒隐藏 |
+| 十 | 批次D 日志节流 | — | ✅ 已完成 | 2026-10-13 | 分支提交 `e468aa9a`（5 文件 +58/-3）；iAP2 周期消息接收日志节流、usbmux 接收帧日志限 50 帧 |
+| 十 | 批次E 设置搜索两态重构 | — | ✅ 已完成 | 2026-10-13 | 分支提交 `a0791ed9`（2 文件 +381/-39）；设置搜索按钮展开/收起两态、弹层定位重构、API 23 调用守卫改写；AdaptiveSettingsUiTest 同步 |
+| 十 | 批次F 本地化补缺 | — | ✅ 已完成 | 2026-10-13 | 分支提交 `7cd38617`（11 文件 +1141/-4）；阿拉伯语翻译补缺、日文完整本地化 |
+| 十 | 批次G 集群音乐卡片 | — | ✅ 已完成 | 2026-10-13 | 分支提交 `7934a01a`（17 文件 +614）；实验性默认关闭；`StaticLayout` 改 API 17 废弃构造器；ClusterMusicTest + docs/CLUSTER_MUSIC_CARD.md |
+| 十 | 批次H 文档同步与测试修复 | — | ✅ 已完成 | 2026-10-13 | 分支提交 `869816e9`（7 文件 +41/-8）；CHANGELOG/指南/README/INSTALL + `common` unitTests maxHeapSize 1g→2g + 2 测试修复 |
+| 十一 | 批次A 无线启动前蓝牙检查 | #671 | ✅ 已完成 | 2026-10-13 | 分支提交 `6390a3e4`；新增 `BluetoothRadioCheck`（NO_ADAPTER / RADIO_OFF 常量）；CarPlayController 启动前检查；DiPlayBluetooth 改用 `BluetoothCompat.getAdapter`；shared manifest 移除 BLUETOOTH `maxSdkVersion=30` |
+| 十一 | 批次B 连接失败可操作提示 | #673 | ✅ 已完成 | 2026-10-13 | 分支提交 `08516a68`；新增 `ConnectionFailureGuidance`（失败态 → `connection_help_*`）；HostActivity connectionHelpView；字符串 ×8 语系 |
+| 十一 | 批次C 倒车隐藏状态栏保持会话 | #643/#674 | ✅ 已完成 | 2026-10-13 | 分支提交 `88bbc3cc`；`CarPlaySessionDisplay.statusBarShown` + `statusBarHiddenByAnotherWindow`；StatusBarHiddenByAnotherWindowTest |
+| 十一 | 批次D 返回后叠显最后一帧 | #669 | ✅ 已完成 | 2026-10-13 | 分支提交 `9a0dca9b`；`PixelCopy` 拷贝半尺寸末帧（**API 24 守卫**，API 17 走原行为）；`CarPlayVideoSurface.lastPictureDone` + 测试 |
+| 十一 | 批次E DiLink 集群启动门 | #663/#536 | ✅ 已完成 | 2026-10-13 | 分支提交 `f1fcd25f`；新增 `ClusterLaunchGate`（+6 测试）；`ClusterActivityOutput.routeSettling()`；HostActivity 暂扣启动接线。原报告标注为可选，按用户决定一并移植 |
+| 十一 | 批次F 设置抽屉玻璃壳 | #642 | ✅ 已完成 | 2026-10-13 | 分支提交 `9868f393`；`swipeMenuChrome` 玻璃壳（`ColorUtils.blendARGB`）；`DiPlayButtonKind.TONAL_DANGER`；`clipToOutline`/`elevation` **API 21 守卫**；CarPlayHostSettingsTest 丢弃确认断言 |
+| 十一 | 批次G 手机页诊断报告 | #686/#671 | ✅ 已完成 | 2026-10-13 | 分支提交 `ac4034c5`；SettingsBackupServer `/report` + 6 位验证码 + 每连接线程池 + TLS 首字节直退 + typedAddress/8888；`settings-code.html` ×8 语系；DiPlayActivity forReport 分支。**K1 适配**：构造器 val 智能转换改局部变量后判断 |
+| 十一 | 批次H 热点 ADB 兜底失败日志 | #667 | ✅ 已完成 | 2026-10-13 | 分支提交 `92532978`；无法观测 AP / 无热点启动命令 / 固件拒绝 三种失败分别记录原因（拒绝时截断回显） |
+| 十一 | 批次I 本地化补缺与发布收尾 | 各批次随附 | ✅ 已完成 | 2026-10-13 | 本批次；zh-rTW 移除 4 条孤键 `fps_counter_*`，新增 TraditionalChineseTranslationsTest（API 17 适配：只校验确实存在默认语系的模块）；版本同步 `versionCode 38` / `0.2.19-api17` + CHANGELOG 首段 + 本指南 + 0.2.19 迁移报告归档 |
 
 ### 0.5 每轮迁移的文档更新义务
 
@@ -683,6 +700,11 @@ main 在两批发布中为 7 个语言目录新增了数百条字符串。**移�
 | `site/` 网站与 `docs/` 发布说明 | 非代码 | 按需同步，不影响构建 |
 | `.github/workflows` 变更 | 分支 CI 需匹配 AGP 7.4.2 | 不覆盖分支 workflow |
 | `4be0fa39` 初始外观声明（#346 一部分） | 依赖 Compose 主题 | 并入波次六 View 重写 |
+| `PixelCopy`（波次十一批次D，#669 返回后最后一帧） | API 24+ | 守卫分支：API 17 不拷贝、保持原行为（返回瞬间黑屏） |
+| `clipToOutline` / `elevation`（波次十一批次F，#642 设置抽屉玻璃壳） | API 21+ | 走 `UiCompat` 分支守卫，低版本不加圆角裁剪/阴影 |
+| `getSystemService(BluetoothManager::class.java)` | 实为 API 23+ | 分支统一走 `BluetoothCompat.getAdapter`（波次十一批次A 复核） |
+| Kotlin 1.9.22（K1）不对**构造器 val 属性**做智能转换 | 工具链差异：main 用 Kotlin 2.2.10（K2） | 移植时提取局部变量后再判断（波次十一批次G `SettingsBackupServer.respond`） |
+| `View.LAYOUT_DIRECTION_*` / `Configuration.layoutDirection` | 恰为 API 17 起始 | 可直接使用，无需守卫 |
 
 ---
 
