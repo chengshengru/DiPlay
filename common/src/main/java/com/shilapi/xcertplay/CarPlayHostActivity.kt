@@ -286,6 +286,41 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var videoView: View? = null
     private var fallbackVideoView: SurfaceView? = null
     private var fallbackVideoBounds: CarPlaySurfaceBounds? = null
+    // 波次十一批次D（main #669）：SurfaceView 视频输出的最后一帧。它的 surface 消失时（DiPlay 离开屏幕）
+    // 保留该帧，并叠在新 surface 上直到新帧渲染到那里——静止的 CarPlay 画面不发送帧，新 surface 会一直
+    // 黑到下一次变化（一次触摸）为止。
+    private var lastPicture: Bitmap? = null
+    private var pictureHold: ImageView? = null
+    private var pictureHoldBaseline = -1L
+    private var pictureHoldStartMillis = 0L
+    private var pictureCopyThreadStarted = false
+    private val pictureCopyThread by lazy {
+        pictureCopyThreadStarted = true
+        android.os.HandlerThread("diplay-picture-copy").apply { start() }
+    }
+    private val pictureHoldTick = object : Runnable {
+        override fun run() {
+            val hold = pictureHold ?: return
+            val rendered = sink?.liveVideoCounters()?.rendered ?: -1L
+            val elapsed = SystemClock.uptimeMillis() - pictureHoldStartMillis
+            if (lastPictureDone(rendered, pictureHoldBaseline, elapsed, PICTURE_HOLD_MAX_MILLIS)) {
+                appendLog("Last picture hidden after ${elapsed} ms (${if (elapsed > PICTURE_HOLD_MAX_MILLIS) "timeout" else "new frame"})")
+                hold.animate().alpha(0f).setDuration(150L).withEndAction {
+                    hold.visibility = View.GONE
+                    hold.setImageDrawable(null)
+                }.start()
+                return
+            }
+            mainHandler.postDelayed(this, 50L)
+        }
+    }
+    // 新 surface 尚未显示任何帧时，再次向 iPhone 请求一张关键帧。
+    private val pictureRetry = Runnable {
+        if (pictureHold?.visibility == View.VISIBLE) {
+            appendLog("No frame yet after returning; asking for a keyframe again")
+            sink?.refreshPicture(SCREEN_TYPE_MAIN)
+        }
+    }
     // Smooth video (a setting): SurfaceView output with frames released at the iPhone's frame time.
     private var smoothVideo = false
     // 直接视频输出（设置项，main #496）：帧绕过应用绘制，直接交给系统合成器。
@@ -603,9 +638,14 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             videoSurfaceOwner.replace(surface, releaseOnDetach = false)
             appendLog("SurfaceView video surface created valid=${surface.isValid}")
             attachSurface(surface)
-            // A still CarPlay screen sends no frames, so ask for one instead of showing the parked gap.
-            if (smoothVideo) sink?.refreshPicture(SCREEN_TYPE_MAIN)
             videoView?.let { updateVideoLayout(it.width, it.height) }
+            // 波次十一批次D（main #669）：先叠上最后一帧，再向 iPhone 请求关键帧（所有 SurfaceView 输出，
+            // 不止 smooth video），并在仍无帧时重试。
+            showLastPicture()
+            sink?.refreshPicture(SCREEN_TYPE_MAIN)
+            mainHandler.removeCallbacks(pictureRetry)
+            mainHandler.postDelayed(pictureRetry, 1_000L)
+            mainHandler.postDelayed(pictureRetry, 2_000L)
         }
 
         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -616,6 +656,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
 
         override fun surfaceDestroyed(holder: SurfaceHolder) {
             val surface = holder.surface
+            // 波次十一批次D（main #669）：surface 消失前拷下当前画面，供返回时叠显。
+            captureLastPicture()
             // The SurfaceHolder contract: nothing may render to the surface once this returns. Every decoder
             // is asked at once, then waited for against one deadline; each confirms once it has moved,
             // parked or released its codec, and closing decoders count once their workers exit. With
@@ -1485,6 +1527,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     override fun onDestroy() {
+        // 波次十一批次D（main #669）：销毁时丢弃最后一帧并关闭其拷贝线程。
+        discardLastPicture()
+        if (pictureCopyThreadStarted) pictureCopyThread.quitSafely()
         resetSidePanel()
         releaseSidePanelEffects()
         // main B7：销毁时释放外观归属权（作者：TRAE AI）。
@@ -5325,6 +5370,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         oldSink?.let(retiringSinks::add)
         sink = null
         sessionDisplay = null
+        discardLastPicture()
         val diagnosticLog = sessionLog
         teardownExecutor.execute {
             val started = System.nanoTime()
@@ -5517,6 +5563,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         oldSink?.let(retiringSinks::add)
         sink = null
         sessionDisplay = null
+        discardLastPicture()
         Log.i(TAG, "shutdown reason=$reason terminateProcess=$terminateProcess")
         teardownExecutor.execute {
             oldController?.close()
@@ -5600,6 +5647,69 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private fun systemDimension(name: String): Int {
         val id = resources.getIdentifier(name, "dimen", "android")
         return if (id != 0) runCatching { resources.getDimensionPixelSize(id) }.getOrDefault(0) else 0
+    }
+
+    // 波次十一批次D（main #669）：把 SurfaceView 的当前画面（半尺寸）在其 surface 消失前拷下，短暂等待。
+    // 🔴 PixelCopy 是 API 24 新增；API 17 直接调用会 NoSuchMethodError，故必须守卫：低版本不做最后一帧。
+    private fun captureLastPicture() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        val surfaceView = fallbackVideoView ?: return
+        val bounds = fallbackVideoBounds ?: return
+        if (!surfaceView.holder.surface.isValid) return
+        val picture = Bitmap.createBitmap(
+            (bounds.width / 2).coerceAtLeast(1), (bounds.height / 2).coerceAtLeast(1),
+            Bitmap.Config.ARGB_8888,
+        )
+        val done = java.util.concurrent.CountDownLatch(1)
+        val copied = java.util.concurrent.atomic.AtomicBoolean(false)
+        val requested = runCatching {
+            android.view.PixelCopy.request(surfaceView, picture, { result ->
+                copied.set(result == android.view.PixelCopy.SUCCESS)
+                done.countDown()
+            }, Handler(pictureCopyThread.looper))
+        }.isSuccess
+        if (requested) done.await(PICTURE_COPY_WAIT_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS)
+        // 不手动 recycle：最后显示的那张图在 DiPlay 再次离开时可能仍在屏上。
+        if (copied.get()) lastPicture = picture
+        appendLog("Last picture kept=${copied.get()}")
+    }
+
+    private fun showLastPicture() {
+        if (sink == null) return
+        val picture = lastPicture ?: return
+        val surfaceView = fallbackVideoView ?: return
+        val viewport = surfaceView.parent as? FrameLayout ?: return
+        val hold = pictureHold?.takeIf { it.parent === viewport } ?: ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_XY
+            isClickable = false
+            isFocusable = false
+        }.also {
+            pictureHold?.let { old -> (old.parent as? ViewGroup)?.removeView(old) }
+            pictureHold = it
+            viewport.addView(it)
+        }
+        (surfaceView.layoutParams as? FrameLayout.LayoutParams)?.let { hold.layoutParams = FrameLayout.LayoutParams(it) }
+        hold.animate().cancel()
+        hold.setImageBitmap(picture)
+        hold.alpha = 1f
+        hold.visibility = View.VISIBLE
+        pictureHoldBaseline = sink?.liveVideoCounters()?.rendered ?: -1L
+        pictureHoldStartMillis = SystemClock.uptimeMillis()
+        mainHandler.removeCallbacks(pictureHoldTick)
+        mainHandler.postDelayed(pictureHoldTick, 50L)
+        appendLog("Last picture shown until a new frame")
+    }
+
+    // 随会话忘掉最后一帧：停止显示、停止请求。
+    private fun discardLastPicture() {
+        mainHandler.removeCallbacks(pictureHoldTick)
+        mainHandler.removeCallbacks(pictureRetry)
+        pictureHold?.let { hold ->
+            hold.animate().cancel()
+            hold.visibility = View.GONE
+            hold.setImageDrawable(null)
+        }
+        lastPicture = null
     }
 
     private fun attachSurface(surface: Surface) {
@@ -5921,6 +6031,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         const val SIDE_PANEL_CLOSE_SHARE = 5f / 6f
         /** 侧栏把手药丸（及面板把手）出现或被轻点后的显示时长。 */
         const val SIDE_PANEL_TAB_HINT_MILLIS = 10_000L
+        /** 波次十一批次D（main #669）：返回后最后一帧最长顶替视频的时长，以及拷贝它的等待上限。 */
+        const val PICTURE_HOLD_MAX_MILLIS = 30_000L
+        const val PICTURE_COPY_WAIT_MILLIS = 150L
         const val TAG = "xcertplay-usb"
         const val SCREEN_TYPE_MAIN = 110
         const val SCREEN_TYPE_ALT = 111

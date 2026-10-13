@@ -41,6 +41,13 @@ internal data class CarPlaySurfaceBounds(val left: Int, val top: Int, val width:
 internal fun smoothVideoDelayMillis(fps: Int): Int = 40 + 3_000 / fps.coerceIn(30, 60)
 
 /**
+ * 波次十一批次D（main #669）：叠在返回后的 SurfaceView 上的最后一帧是否可以撤下——自它返回后已有帧渲染
+ * （[rendered] 从 [baseline] 前移，新解码器从 0 起也算），或已超过 [maxMillis]。
+ */
+internal fun lastPictureDone(rendered: Long, baseline: Long, elapsedMillis: Long, maxMillis: Long): Boolean =
+    (rendered > 0 && rendered != baseline) || elapsedMillis > maxMillis
+
+/**
  * A retained background session can be adopted only when its sink's pacing matches the video view this
  * host built: the sink fixes pacing at creation and the host picks its view once.
  */
