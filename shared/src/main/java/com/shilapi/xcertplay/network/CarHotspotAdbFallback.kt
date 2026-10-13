@@ -15,7 +15,8 @@ internal object CarHotspotAdbFallback {
         fun read(command: String): String? = if (stopped()) null else shell(command, remaining().coerceAtLeast(1))
         fun observed(): Boolean? = state() ?: apState(read("dumpsys wifi"))
         if (stopped()) return false
-        val initial = observed() ?: return false // No blind mutation when no AP state can be observed.
+        // 波次十一批次H（main #667）：无法观测到 AP 状态时不做盲改，并记录原因。
+        val initial = observed() ?: return false.also { log("car hotspot: ADB cannot read the AP state; not starting it") }
         if (stopped()) return false
         if (initial) return true
         var command: String? = null
@@ -23,9 +24,20 @@ internal object CarHotspotAdbFallback {
             command = advertisedCommand(service, read("cmd $service help"))
             if (command != null) break
         }
-        if (command == null || stopped()) return false
+        if (stopped()) return false
+        if (command == null) {
+            // 波次十一批次H（main #667）：固件未在 cmd connectivity/tethering help 中列出热点启动命令。
+            log("car hotspot: firmware lists no hotspot start command in cmd connectivity/tethering help")
+            return false
+        }
         val output = read("$command 2>&1; printf '\\n$EXIT%s\\n' \"\$?\"")
-        if (!accepted(output) || stopped()) return false
+        if (stopped()) return false
+        if (!accepted(output)) {
+            // 波次十一批次H（main #667）：固件拒绝命令，截断回显便于诊断。
+            log("car hotspot: firmware rejected '$command': " +
+                output.orEmpty().lineSequence().map(String::trim).firstOrNull { it.isNotEmpty() }.orEmpty().take(120))
+            return false
+        }
         log("car hotspot: firmware ADB start request accepted; waiting for AP enabled state")
         while (!stopped()) {
             if (observed() == true && !stopped()) {
