@@ -65,6 +65,7 @@ import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -2421,28 +2422,51 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         }
     }
 
+    private fun settingsMenuWidth(availableWidth: Int): Int =
+        minOf(MAX_SETTINGS_MENU_WIDTH_PX, (availableWidth - dp(SWIPE_PANEL_MARGIN_DP * 2)).coerceAtLeast(1))
+
+    /** 波次十一批次F（main #642）：车机内设置抽屉的"玻璃壳"背景（上/下圆角可控 + 描边）。 */
+    private fun swipeMenuChrome(
+        topCornersOnly: Boolean = false,
+        bottomCornersOnly: Boolean = false,
+    ): GradientDrawable {
+        val base = ColorUtils.blendARGB(MENU_BACKGROUND, overlayPalette.surface, if (darkMode) 0.48f else 0.38f)
+        val highlight = ColorUtils.blendARGB(base, Color.WHITE, if (darkMode) 0.10f else 0.28f)
+        val radius = dp(SWIPE_PANEL_RADIUS_DP).toFloat()
+        val top = if (bottomCornersOnly) 0f else radius
+        val bottom = if (topCornersOnly) 0f else radius
+        return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(highlight, base)).apply {
+            cornerRadii = floatArrayOf(top, top, top, top, bottom, bottom, bottom, bottom)
+            setStroke(
+                dp(SWIPE_BORDER_WIDTH_DP),
+                ColorUtils.blendARGB(overlayPalette.outline, Color.WHITE, if (darkMode) 0.12f else 0.30f),
+            )
+        }
+    }
+
     private fun buildSettingsMenu(): View {
         val overlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
+            // 波次十一批次F（main #642）：抽屉背后的遮罩（半透明黑），而非全黑。
+            setBackgroundColor(SWIPE_SCRIM_COLOR)
             isClickable = true
+            layoutDirection = resources.configuration.layoutDirection
         }
         val panel = FrameLayout(this).apply {
-            setBackgroundColor(MENU_BACKGROUND)
+            background = swipeMenuChrome()
+            // clipToOutline / elevation 均为 API 21+；API 17 经 UiCompat/守卫降级为无裁剪、无阴影。
+            UiCompat.setClipToOutline(this, true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                elevation = dp(SWIPE_PANEL_ELEVATION_DP).toFloat()
+            }
         }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(48), dp(36), dp(48), dp(36))
+            setPadding(
+                dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CONTENT_TOP_PADDING_DP),
+                dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CONTENT_BOTTOM_PADDING_DP),
+            )
         }
-        content.addView(
-            menuText(getString(R.string.carplay_settings), 32f, Color.WHITE, bold = true).apply {
-                setPadding(dp(56), 0, 0, 0)
-            },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ),
-        )
         if (sessionDisplay?.viewAreas?.sidePanel() != null) {
             content.addView(DiPlayButton(this).apply {
                 text = getString(if (sidePanelShown) R.string.side_panel_full_screen else R.string.side_panel_show)
@@ -2819,32 +2843,19 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         val save = DiPlayButton(this).apply {
             text = getString(R.string.save_and_reconnect)
             textSize = 17f
-            minHeight = dp(52)
+            minHeight = dp(SWIPE_ACTION_HEIGHT_DP)
             style(DiPlayButtonKind.PRIMARY, overlayPalette, overlay = true)
             setOnClickListener { saveSettingsAndReconnect() }
         }
-        content.addView(
-            save,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(46) },
-        )
 
         val exitApplicationButton = DiPlayButton(this).apply {
             text = getString(R.string.exit_application)
             textSize = 17f
-            minHeight = dp(52)
-            style(DiPlayButtonKind.DANGER, overlayPalette, overlay = true)
+            minHeight = dp(SWIPE_ACTION_HEIGHT_DP)
+            // 波次十一批次F（main #642）：退出改为柔和危险色调（TONAL_DANGER），并移出"紧邻保存"的位置。
+            style(DiPlayButtonKind.TONAL_DANGER, overlayPalette, overlay = true)
             setOnClickListener { exitApplication() }
         }
-        content.addView(
-            exitApplicationButton,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(12) },
-        )
 
         content.addView(DiPlayButton(this).apply {
             text = getString(R.string.language_app_language)
@@ -2885,8 +2896,18 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             ).apply { topMargin = dp(12) },
         )
 
+        // 退出会结束 CarPlay，故留在列表末尾而非紧邻"保存"——避免驾驶员伸手点"保存"时误触。
+        content.addView(
+            exitApplicationButton,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(30) },
+        )
+
         val scroll = ScrollView(this).apply {
             isFillViewport = true
+            clipToPadding = false
             addView(
                 content,
                 ViewGroup.LayoutParams(
@@ -2895,45 +2916,89 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 ),
             )
         }
+        // 波次十一批次F（main #642）：标题栏（标题 + 关闭）与底栏（保存）各带"玻璃壳"的上/下圆角。
+        val headerTitle = menuText(getString(R.string.carplay_settings), 20f, Color.WHITE, bold = true).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            layoutDirection = resources.configuration.layoutDirection
+        }
+        val closeButton = DiPlayButton(this).apply {
+            text = getString(R.string.close)
+            textSize = 16f
+            style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
+            contentDescription = getString(R.string.discard_changes_and_exit_settings)
+            minHeight = dp(SWIPE_ACTION_HEIGHT_DP)
+            setOnClickListener { cancelSettingsEdits() }
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_LTR
+            background = swipeMenuChrome(topCornersOnly = true)
+            setPadding(
+                dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CHROME_PADDING_DP),
+                dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CHROME_PADDING_DP),
+            )
+            val titleParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            val buttonParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            if (resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL) {
+                buttonParams.marginEnd = dp(SWIPE_ACTION_GAP_DP)
+                addView(closeButton, buttonParams)
+                addView(headerTitle, titleParams)
+            } else {
+                buttonParams.marginStart = dp(SWIPE_ACTION_GAP_DP)
+                addView(headerTitle, titleParams)
+                addView(closeButton, buttonParams)
+            }
+        }
+        val footer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = swipeMenuChrome(bottomCornersOnly = true)
+            setPadding(
+                dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CHROME_PADDING_DP),
+                dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CHROME_PADDING_DP),
+            )
+            addView(
+                save,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
         panel.addView(
-            scroll,
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(
+                    header,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+                addView(
+                    scroll,
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+                )
+                addView(
+                    footer,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+            },
             FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
             ),
-        )
-        panel.addView(
-            DiPlayButton(this).apply {
-                text = "X"
-                textSize = 22f
-                style(DiPlayButtonKind.SECONDARY, overlayPalette, overlay = true)
-                contentDescription = getString(R.string.discard_changes_and_exit_settings)
-                minWidth = 0
-                minHeight = 0
-                setPadding(0, 0, 0, 0)
-                setOnClickListener { cancelSettingsEdits() }
-            },
-            FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START).apply {
-                leftMargin = dp(16)
-                topMargin = dp(16)
-            },
         )
         overlay.addView(
             panel,
             FrameLayout.LayoutParams(
-                minOf(resources.displayMetrics.widthPixels, MAX_SETTINGS_MENU_WIDTH_PX),
-                FrameLayout.LayoutParams.MATCH_PARENT,
+                settingsMenuWidth(resources.displayMetrics.widthPixels),
+                (resources.displayMetrics.heightPixels * SWIPE_PANEL_HEIGHT_PERCENT) / 100,
                 Gravity.CENTER,
             ),
         )
-        overlay.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
-            val desiredWidth = minOf(view.width, MAX_SETTINGS_MENU_WIDTH_PX)
-            val params = panel.layoutParams
-            if (params.width != desiredWidth) {
-                params.width = desiredWidth
-                panel.layoutParams = params
-            }
-        }
 
         resolutionValueView = resolutionValue
         resolutionPreviewView = preview
@@ -6102,6 +6167,18 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         const val SETTINGS_SWIPE_DIRECTION_RATIO = 1.15f
         const val MAX_SETTINGS_MENU_WIDTH_PX = 1200
         val MENU_BACKGROUND = Color.rgb(12, 16, 19)
+        // 波次十一批次F（main #642）：车机内设置抽屉"玻璃壳"布局常量。
+        const val SWIPE_PANEL_MARGIN_DP = 16
+        const val SWIPE_PANEL_RADIUS_DP = 28
+        const val SWIPE_PANEL_ELEVATION_DP = 24
+        const val SWIPE_PANEL_HEIGHT_PERCENT = 94
+        const val SWIPE_BORDER_WIDTH_DP = 1
+        const val SWIPE_CHROME_PADDING_DP = 16
+        const val SWIPE_CONTENT_TOP_PADDING_DP = 16
+        const val SWIPE_CONTENT_BOTTOM_PADDING_DP = 36
+        const val SWIPE_ACTION_HEIGHT_DP = 52
+        const val SWIPE_ACTION_GAP_DP = 8
+        const val SWIPE_SCRIM_COLOR = 0xB3000000.toInt()
         val MENU_SECONDARY = Color.rgb(170, 180, 190)
         val MENU_ACCENT = Color.rgb(127, 205, 154)
         val MENU_ACCENT_TRACK = Color.rgb(78, 143, 102)

@@ -7,9 +7,11 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.widget.Button
+import androidx.core.graphics.ColorUtils
 
 // main #594：按钮种类；PRIMARY 主操作、SECONDARY 次要、DANGER 危险操作（作者：TRAE AI）。
-internal enum class DiPlayButtonKind { PRIMARY, SECONDARY, DANGER }
+// 波次十一批次F（main #642）新增 TONAL_DANGER：柔和的危险色调（用于设置抽屉里靠后的"退出应用"）。
+internal enum class DiPlayButtonKind { PRIMARY, SECONDARY, DANGER, TONAL_DANGER }
 
 /**
  * Button for views built in code outside `DiPlayActivity`, whose own `button()` stays private.
@@ -63,6 +65,16 @@ internal class DiPlayButton(context: Context) : Button(context) {
                 fill = palette.overlayDanger
                 text = Color.WHITE
                 stroke = fill
+            }
+            DiPlayButtonKind.TONAL_DANGER -> {
+                val surface = if (overlay) palette.overlayBackground else palette.surface
+                fill = ColorUtils.blendARGB(surface, palette.overlayDanger, 0.16f)
+                text = if (ColorUtils.calculateLuminance(surface) < 0.5) {
+                    ColorUtils.blendARGB(palette.overlayDanger, Color.WHITE, 0.40f)
+                } else {
+                    palette.overlayDanger
+                }
+                stroke = ColorUtils.blendARGB(surface, palette.overlayDanger, 0.48f)
             }
         }
         val radius = minOf(24f * density, (if (height > 0) height else minHeight) * 20f / 56)

@@ -1,9 +1,11 @@
 package com.shilapi.xcertplay
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Handler
+import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -32,6 +34,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
 import org.robolectric.android.util.concurrent.PausedExecutorService
+import org.robolectric.shadows.ShadowAlertDialog
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29])
@@ -117,6 +120,11 @@ class CarPlayHostSettingsTest {
         val original = AirPlayPersistence.loadDisplayScalePercent(activity)
         resolutionSlider().progress = 0
         fullSettingsButton().performClick()
+        // 存量同步（本分支此前缺 main 的 #500 后续修复，此断言一直红灯）：有待保存编辑时先询问，
+        // 此刻尚未丢弃任何东西，也未跳转。
+        assertTrue(field("menuOpen") as Boolean)
+        assertNull(shadowOf(activity).nextStartedActivity)
+        discardPendingEdits()
         assertFalse(field("menuOpen") as Boolean)
         assertNull(field("settingsBaseline"))
         assertEquals(original, field("displayScalePercent"))
@@ -126,6 +134,19 @@ class CarPlayHostSettingsTest {
         val intent = shadowOf(activity).nextStartedActivity
         assertEquals(DiPlayActivity::class.java.name, intent.component!!.className)
         assertEquals("settings", intent.getStringExtra("page"))
+    }
+
+    @Test fun closeButtonDiscardsEditsWithoutRestartingCarPlay() {
+        // main #642：抽屉顶栏的关闭键负责丢弃编辑并回到 CarPlay（旧「完整设置」入口仍走确认弹窗）。
+        val controller = attachController()
+        invoke("openSettingsMenu")
+        resolutionSlider().progress = 0
+        val close = views(menu()).filterIsInstance<Button>()
+            .first { it.text == activity.getString(R.string.close) }
+        close.performClick()
+        assertFalse(field("menuOpen") as Boolean)
+        assertSame(controller, field("controller"))
+        assertEquals(0, field("restartGeneration"))
     }
 
     @Test fun returningFromFullSettingsReloadsSavedConnectionPreferences() {
@@ -490,6 +511,13 @@ class CarPlayHostSettingsTest {
         .first { it.text == activity.getString(R.string.settings_gesture_fingers, field("gestureFingerCount")) }
     private fun fullSettingsButton() = views(menu()).filterIsInstance<Button>()
         .first { it.text == activity.getString(R.string.app_name) + " " + activity.getString(R.string.settings) }
+    /** Answers the "Discard your changes?" dialog that an exit with staged edits now shows. */
+    private fun discardPendingEdits() {
+        val dialog = ShadowAlertDialog.getLatestAlertDialog()
+            ?: error("leaving the menu with a pending edit should ask before discarding")
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
     private fun views(view: View): Sequence<View> = sequence {
         yield(view)
         if (view is ViewGroup) for (index in 0 until view.childCount) yieldAll(views(view.getChildAt(index)))
