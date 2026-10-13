@@ -57,6 +57,9 @@ internal object UsbDescriptorCompat {
     private const val DESCRIPTOR_TYPE_CONFIGURATION = 0x02
     private const val CONFIGURATION_DESCRIPTOR_LENGTH = 9
     private const val CONFIGURATION_VALUE_OFFSET = 5
+    private const val DESCRIPTOR_TYPE_INTERFACE = 0x04
+    private const val INTERFACE_DESCRIPTOR_LENGTH = 9
+    private const val INTERFACE_NUMBER_OFFSET = 2
 
     private const val REQUEST_TYPE_STANDARD_DEVICE_OUT = 0x00
     private const val REQUEST_TYPE_STANDARD_INTERFACE_OUT = 0x01
@@ -64,16 +67,24 @@ internal object UsbDescriptorCompat {
     private const val SET_INTERFACE_REQUEST = 0x0b
     private const val CONTROL_TRANSFER_TIMEOUT_MILLIS = 1_000
 
+    /** One configuration of the raw descriptor chain: its bConfigurationValue and interface numbers. */
+    internal data class DescriptorConfiguration(val value: Int, val interfaceIds: List<Int>)
+
     /**
      * Every configuration the device exposes, each with its interfaces and alternate settings.
      *
      * API 21+ enumerates the real configurations. API 17-20 has no `UsbConfiguration`, and the
      * framework's JNI hands every interface descriptor of the whole device to the app as one flat
      * list (`UsbDevice.getInterfaceCount()`), so the list is cut back into configurations here.
+     *
+     * @param rawDescriptors `UsbDeviceConnection.getRawDescriptors()` when the caller holds an open
+     *   connection. With it the split is exact and carries the real configuration values; without
+     *   it the split falls back to the interface-number heuristic and [UsbConfigurationView.id]
+     *   stays [UNKNOWN].
      */
-    fun configurations(device: UsbDevice): List<UsbConfigurationView> =
+    fun configurations(device: UsbDevice, rawDescriptors: ByteArray? = null): List<UsbConfigurationView> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) lollipopConfigurations(device)
-        else legacyConfigurations(device)
+        else legacyConfigurations(device, rawDescriptors)
 
     /**
      * [UsbDeviceConnection.setConfiguration] is API 21+. API 17-20 sends the standard
@@ -160,8 +171,8 @@ internal object UsbDescriptorCompat {
         }
 
     /** Every configuration of the device with its descriptor summary, for USB diagnostics. */
-    fun describeAll(device: UsbDevice): List<String> =
-        configurations(device).map { "${it.label}[${describe(it)}]" }
+    fun describeAll(device: UsbDevice, rawDescriptors: ByteArray? = null): List<String> =
+        configurations(device, rawDescriptors).map { "${it.label}[${describe(it)}]" }
 
     private fun lollipopConfigurations(device: UsbDevice): List<UsbConfigurationView> {
         val count = device.configurationCount
@@ -174,14 +185,67 @@ internal object UsbDescriptorCompat {
         return configurations
     }
 
-    private fun legacyConfigurations(device: UsbDevice): List<UsbConfigurationView> {
+    /**
+     * API 17-20 的配置切分：优先用 raw descriptors（配置值 + 每个配置的接口号顺序都可读），
+     * 拿不到或与框架的平铺接口列表不一致时，回退到"接口号回落"启发式并放弃配置值。
+     *
+     * 只靠接口号回落会漏切：接口号在配置之间重新从 0 开始，**单接口配置**（接口号只有 0）接在
+     * 上一个以 0 结尾的配置后面时不会回落，两个配置会被并成一个；而配置值只能按序号去猜
+     * （`configurationValues` 的第 N 项）。真机上因此把 iPhone 切到了错误的配置值（5，而非
+     * LIVI 的 CarPlay 配置 6），随后 claim 的接口在该配置里并不存在，`claimInterface` 失败。
+     */
+    private fun legacyConfigurations(device: UsbDevice, rawDescriptors: ByteArray?): List<UsbConfigurationView> {
         val interfaces = (0 until device.interfaceCount).map(device::getInterface)
+        val parsed = descriptorConfigurations(rawDescriptors)
+        if (parsed.isNotEmpty() && parsed.sumOf { it.interfaceIds.size } == interfaces.size) {
+            var cursor = 0
+            val configurations = ArrayList<UsbConfigurationView>(parsed.size)
+            var consistent = true
+            parsed.forEachIndexed { ordinal, configuration ->
+                val slice = interfaces.subList(cursor, cursor + configuration.interfaceIds.size).toList()
+                cursor += configuration.interfaceIds.size
+                if (slice.map { it.id } != configuration.interfaceIds) consistent = false
+                configurations.add(UsbConfigurationView(ordinal, configuration.value, slice))
+            }
+            if (consistent) return configurations
+        }
         val ids = interfaces.map { it.id }
         val starts = configurationStarts(ids)
         return starts.mapIndexed { ordinal, start ->
             val end = starts.getOrElse(ordinal + 1) { interfaces.size }
             UsbConfigurationView(ordinal, UNKNOWN, interfaces.subList(start, end).toList())
         }
+    }
+
+    /**
+     * 按描述符顺序解析配置骨架：每个配置的 bConfigurationValue 与接口号（含备选设置，
+     * 与框架平铺列表一一对应）。不认识的描述符按自身长度跳过；长度非法或越界即整体放弃
+     * （宁可回退到启发式，也不给出半截结果）。
+     */
+    internal fun descriptorConfigurations(rawDescriptors: ByteArray?): List<DescriptorConfiguration> {
+        val raw = rawDescriptors ?: return emptyList()
+        val configurations = ArrayList<DescriptorConfiguration>()
+        var interfaceIds: MutableList<Int>? = null
+        var value = 0
+        var offset = 0
+        while (offset + 2 <= raw.size) {
+            val length = raw[offset].toInt() and 0xff
+            val type = raw[offset + 1].toInt() and 0xff
+            if (length < 2 || offset + length > raw.size) return emptyList()
+            when {
+                type == DESCRIPTOR_TYPE_CONFIGURATION && length >= CONFIGURATION_DESCRIPTOR_LENGTH -> {
+                    interfaceIds?.let { configurations.add(DescriptorConfiguration(value, it)) }
+                    value = raw[offset + CONFIGURATION_VALUE_OFFSET].toInt() and 0xff
+                    interfaceIds = ArrayList()
+                }
+                type == DESCRIPTOR_TYPE_INTERFACE && length >= INTERFACE_DESCRIPTOR_LENGTH -> {
+                    interfaceIds?.add(raw[offset + INTERFACE_NUMBER_OFFSET].toInt() and 0xff)
+                }
+            }
+            offset += length
+        }
+        interfaceIds?.let { configurations.add(DescriptorConfiguration(value, it)) }
+        return configurations
     }
 
     /**

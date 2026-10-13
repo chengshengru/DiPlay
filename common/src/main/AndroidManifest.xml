@@ -4,6 +4,11 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- API 17：写公共外部崩溃日志（/sdcard/DiPlay/）所需；4.2.2 上为安装期自动授予的普通权限 -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- 经典蓝牙（API 17-30 为安装期自动授予）：bondedDevices / device.name / isConnected 反射
+         与 ACL 广播都必需。缺失时全部抛 SecurityException，此前被 runCatching 静默吞掉，
+         表现为"配对列表恒为空"，误以为车机蓝牙不可用。 -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <!-- Optional, user-authorized startup of the car's own hotspot. -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
 

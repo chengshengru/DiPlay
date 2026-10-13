@@ -75,6 +75,9 @@ class IphoneUsbHost(
 ) {
     private val appContext = context.applicationContext
 
+    /** claim 失败时的接口探针只做一次：强制 claim 会分离内核驱动，不能每次重试都跑。 */
+    private val claimProbeDone = AtomicBoolean(false)
+
     sealed class PermissionRequest {
         data class AlreadyGranted(val device: UsbDevice) : PermissionRequest()
         data class Requested(val device: UsbDevice) : PermissionRequest()
@@ -254,50 +257,38 @@ class IphoneUsbHost(
             ?: throw IphoneUsbException.DeviceUnavailable("UsbManager could not open the iPhone")
         var claimedInterface: UsbInterface? = null
         try {
-            val configuration = IphoneCarPlayConfiguration.find(device)
+            val configuration = IphoneCarPlayConfiguration.find(device, connection.rawDescriptors)
                 ?: throw IphoneUsbException.Protocol(
                     "Re-enumerated iPhone exposes no USBMUX CarPlay configuration",
                 )
             selectConfiguration(connection, device, configuration)
-            val usbMux = IphoneCarPlayConfiguration.usbMuxInterface(configuration)
-                ?: throw IphoneUsbException.Protocol("CarPlay configuration exposes no USBMUX interface")
-            val endpoints = IphoneCarPlayConfiguration.usbMuxEndpoints(usbMux)
-                ?: throw IphoneUsbException.Protocol("USBMUX interface exposes no bulk endpoint pair")
-            Log.i(
-                IphoneCarPlayConfiguration.TAG,
-                "usbmux config=${configuration.label} iface=${usbMux.id}" +
-                    " alt=${UsbDescriptorCompat.alternateSetting(usbMux)} " +
-                    "class=${usbMux.interfaceClass}/${usbMux.interfaceSubclass}/${usbMux.interfaceProtocol} " +
-                    "endpoints=${usbMux.endpointCount} " +
-                    "out=${describeUsbEndpoint(endpoints.first)} " +
-                    "in=${describeUsbEndpoint(endpoints.second)}",
-            )
-            // 真机复验：claim 失败时唯一能解释的现场就是"配置未真正切换"或"内核驱动重新绑定"。
-            // 把切换目标值、切换后内核报告的活动配置(标准 GET_CONFIGURATION)、原始描述符里的所有配置值、
-            // USBMUX 接口详情、设备全部接口一起抛到屏幕诊断，一次复验即可区分二者。
+            val candidates = IphoneCarPlayConfiguration.usbMuxCandidates(device, configuration)
+            if (candidates.isEmpty()) {
+                throw IphoneUsbException.Protocol("CarPlay configuration exposes no USBMUX interface")
+            }
+            // 复验需要的现场：切换目标、内核报告的活动配置(标准 GET_CONFIGURATION)、描述符里的
+            // 配置值、全部 USBMUX 候选、设备全部接口。API 17-20 没有框架 setConfiguration，
+            // 切配置只能靠原始控制传输，内核 actconfig 未必跟着刷新，所以候选里可能只有一部分
+            // 能 claim 成功——这也正是要把两边都打出来的原因。
             onDiagnostic(
                 "usbmux pre-claim config=${configuration.label} id=${configuration.id} " +
                     "index=${configuration.index} active=${activeConfiguration(connection)} " +
-                    "rawConfigs=${UsbDescriptorCompat.configurationValues(connection.rawDescriptors)} " +
-                    "iface=${usbMux.id} alt=${UsbDescriptorCompat.alternateSetting(usbMux)} " +
-                    "class=${usbMux.interfaceClass}/${usbMux.interfaceSubclass}/${usbMux.interfaceProtocol} " +
-                    "endpoints=${usbMux.endpointCount} " +
-                    "out=${describeUsbEndpoint(endpoints.first)} in=${describeUsbEndpoint(endpoints.second)} " +
+                    "rawValues=${UsbDescriptorCompat.configurationValues(connection.rawDescriptors)} " +
+                    "candidates=${candidates.map { it.id }} " +
                     "deviceIfaces=[${describeDeviceInterfaces(device)}]",
             )
             // #518：厂商内核可能在配置切换后、claim 之前重新绑定驱动，单次 claim 会失败。
-            // NCM 路径早已用 5 次 /100ms 重试兜底，USBMUX 这一路此前只 claim 一次，故在此补齐。
-            val claimAttempt = claimWithRetry(connection, usbMux)
-            if (claimAttempt == null) {
-                throw IphoneUsbException.DeviceUnavailable(
-                    "Android could not claim USBMUX interface ${usbMux.id} " +
-                        "(active=${activeConfiguration(connection)} " +
+            // NCM 路径早已用 5 次 /100ms 重试兜底，USBMUX 这一路在此对齐。
+            val claim = claimUsbMuxInterface(connection, candidates)
+                ?: throw IphoneUsbException.DeviceUnavailable(
+                    "Android could not claim any USBMUX interface " +
+                        "(candidates=${candidates.map { it.id }} " +
+                        "active=${activeConfiguration(connection)} " +
+                        "claimProbe=[${probeClaimableInterfaces(connection, device)}] " +
                         "deviceIfaces=[${describeDeviceInterfaces(device)}])",
                 )
-            }
-            onDiagnostic("usbmux claimed iface=${usbMux.id} attempts=$claimAttempt")
-            claimedInterface = usbMux
-            return Iap2UsbSession(connection, endpoints.first, endpoints.second, onDiagnostic)
+            claimedInterface = claim.usbInterface
+            return Iap2UsbSession(connection, claim.endpoints.first, claim.endpoints.second, onDiagnostic)
         } catch (error: Throwable) {
             if (claimedInterface != null) connection.releaseInterface(claimedInterface)
             connection.close()
@@ -312,7 +303,12 @@ class IphoneUsbHost(
         val target = configuration.id.takeIf { it > 0 }
             ?: UsbDescriptorCompat.configurationValues(connection.rawDescriptors).getOrNull(configuration.index)
         if (target == null) {
-            if (!UsbDescriptorCompat.selectConfiguration(connection, device, configuration)) {
+            val selected = UsbDescriptorCompat.selectConfiguration(connection, device, configuration)
+            onDiagnostic(
+                "usb config select target=unknown label=${configuration.label} ok=$selected " +
+                    "active=${activeConfiguration(connection)}",
+            )
+            if (!selected) {
                 Log.w(
                     IphoneCarPlayConfiguration.TAG,
                     "setConfiguration ${configuration.label} reported failure; claiming anyway",
@@ -320,7 +316,7 @@ class IphoneUsbHost(
             }
             return
         }
-        val interfaces = UsbDescriptorCompat.configurations(device)
+        val interfaces = UsbDescriptorCompat.configurations(device, connection.rawDescriptors)
             .flatMap { it.interfaces }
             .associateBy { it.id }
         val outcome = UsbConfigurationSelection.select(
@@ -333,7 +329,15 @@ class IphoneUsbHost(
                 val usbInterface = interfaces.getValue(id)
                 connection.claimInterface(usbInterface, true).also { if (it) connection.releaseInterface(usbInterface) }
             },
-        ) ?: return
+        ) ?: run {
+            // select() 只在首次 SET_CONFIGURATION 就成功时返回 null，这里补一条屏幕诊断，
+            // 否则切换过程在屏幕上完全不可见（真机复验只能靠它判断切到了哪个配置）。
+            onDiagnostic(
+                "usb config select target=$target ok=true detached=none " +
+                    "active=${activeConfiguration(connection)}",
+            )
+            return
+        }
         runCatching { onDiagnostic(outcome.diagnostic()) }
         if (outcome.wrongConfiguration) {
             throw IphoneUsbException.DeviceUnavailable(
@@ -365,6 +369,59 @@ class IphoneUsbHost(
             if (attempt < USB_CLAIM_ATTEMPTS) Thread.sleep(USB_CLAIM_RETRY_MILLIS)
         }
         return null
+    }
+
+    /** 一次成功的 USBMUX claim：接口本体 + 它的 bulk 端点对。 */
+    private class UsbMuxClaim(
+        val usbInterface: UsbInterface,
+        val endpoints: Pair<UsbEndpoint, UsbEndpoint>,
+    )
+
+    /**
+     * 依次尝试 [candidates]，返回第一个 claim 成功且带 bulk 端点对的 USBMUX 接口。
+     *
+     * 单个候选被拒通常意味着它不属于内核当前认识的配置（API 17-20 只能用原始 SET_CONFIGURATION
+     * 控制传输切换，内核 actconfig 不一定跟着刷新），所以跨配置继续试同族接口；端点缺失的候选
+     * 直接跳过，避免"claim 成功却没有管道"。
+     */
+    private fun claimUsbMuxInterface(
+        connection: UsbDeviceConnection,
+        candidates: List<UsbInterface>,
+    ): UsbMuxClaim? {
+        for (candidate in candidates) {
+            val endpoints = IphoneCarPlayConfiguration.usbMuxEndpoints(candidate) ?: continue
+            val attempts = claimWithRetry(connection, candidate)
+            if (attempts == null) {
+                onDiagnostic("usbmux claim refused iface=${candidate.id} endpoints=${candidate.endpointCount}")
+                continue
+            }
+            onDiagnostic(
+                "usbmux claimed iface=${candidate.id} attempts=$attempts " +
+                    "out=${describeUsbEndpoint(endpoints.first)} in=${describeUsbEndpoint(endpoints.second)}",
+            )
+            return UsbMuxClaim(candidate, endpoints)
+        }
+        return null
+    }
+
+    /**
+     * claim 全部失败后的现场探针：逐个接口号强制 claim 再立刻释放，报告哪些能拿到。
+     *
+     * 这一步区分两种根因：只有 0 号能拿到 → 内核 actconfig 里只有 1 个接口（配置没真正切过去）；
+     * 若干号能拿到、只有目标号被拒 → 该接口被驱动或另一个 usbfs 持有者占着。
+     * 只做一次（强制 claim 会分离内核驱动）。
+     */
+    private fun probeClaimableInterfaces(connection: UsbDeviceConnection, device: UsbDevice): String {
+        if (!claimProbeDone.compareAndSet(false, true)) return "skipped(already-probed)"
+        return (0 until device.interfaceCount)
+            .map(device::getInterface)
+            .distinctBy { it.id }
+            .sortedBy { it.id }
+            .joinToString(",") { candidate ->
+                val claimed = connection.claimInterface(candidate, true)
+                if (claimed) connection.releaseInterface(candidate)
+                "${candidate.id}=${if (claimed) "ok" else "fail"}"
+            }
     }
 
     /** 设备暴露的全部接口 `id/alt:class.subclass.protocol x endpoints`，用于诊断 claim 失败现场。 */
@@ -420,7 +477,7 @@ class IphoneUsbHost(
             USB_VENDOR_DEVICE_IN, GET_USB_MODE_REQUEST, 0, 0, mode, mode.size, CONTROL_TRANSFER_TIMEOUT_MILLIS,
         )
         return usbModeDiagnostic(read, mode, UsbDescriptorCompat.deviceVersion(device),
-            IphoneCarPlayConfiguration.describeAll(device))
+            IphoneCarPlayConfiguration.describeAll(device, connection.rawDescriptors))
     }
 
     companion object {

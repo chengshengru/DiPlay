@@ -5348,7 +5348,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         // Plan A 列表优先：先读已配对列表与已连接探针，只要能给出候选设备就放行进入选择；
         // "打开蓝牙"弹窗只留给"无适配器 / 一个候选都拿不到且 isEnabled 关闭"的场景。
         // 旧栈常出现 device.name=null，严格按名称的探针会全部滤空，因此不能让探针结果单独决定拦截。
-        val devices = runCatching { adapter.bondedDevices.sortedBy { it.name ?: "" } }.getOrDefault(emptyList())
+        // 保留读取异常：logcat 不可用，SecurityException 等失败必须能在 UI 诊断中看到，
+        // 否则"权限缺失导致的空列表"与"真空列表"无法区分（本轮 Bluetooth 权限缺失即此症状）。
+        val bondedResult = runCatching { adapter.bondedDevices.sortedBy { it.name ?: "" } }
+        val devices = bondedResult.getOrDefault(emptyList())
         val connectedIphone = BluetoothCompat.findConnectedIphone(adapter)
         android.util.Log.i(
             "DiPlay-BT",
@@ -5373,7 +5376,21 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 showTurnOnBluetoothDialog(adapter); return
             }
             AlertDialog.Builder(this).setTitle(getString(R.string.pair_your_iphone))
-                .setMessage(getString(R.string.on_your_iphone_open_settings_bluetooth_and_pair_with_the_c))
+                .setMessage(
+                    buildString {
+                        append(getString(R.string.on_your_iphone_open_settings_bluetooth_and_pair_with_the_c))
+                        append("\n\n———— 诊断信息（请截图反馈）————\n")
+                        append("开关状态(isEnabled): ${adapter.isEnabled}\n")
+                        append("已配对设备数: ${devices.size}\n")
+                        bondedResult.exceptionOrNull()?.let {
+                            append("配对列表读取失败: ${it.javaClass.simpleName}\n")
+                        }
+                        append("已连接 iPhone: ${connectedIphone?.address ?: "未探测到"}\n")
+                        if (bondedResult.isFailure) {
+                            append("→ 读取失败通常是缺少 android.permission.BLUETOOTH 权限")
+                        }
+                    },
+                )
                 .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ -> openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
                 .setNegativeButton(getString(R.string.got_it), null).show(); return
         }

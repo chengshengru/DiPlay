@@ -31,8 +31,8 @@ object IphoneCarPlayConfiguration {
     private const val PREFERRED_USBMUX_OUT = 0x04
     private const val PREFERRED_USBMUX_IN = 0x85
 
-    fun find(device: UsbDevice): UsbConfigurationView? {
-        val configurations = UsbDescriptorCompat.configurations(device)
+    fun find(device: UsbDevice, rawDescriptors: ByteArray? = null): UsbConfigurationView? {
+        val configurations = UsbDescriptorCompat.configurations(device, rawDescriptors)
         val chosen = configurations.firstOrNull { usbMuxInterface(it) != null && hasCdcNcm(it) && hasAppleEthernet(it) }
             ?: configurations.firstOrNull { usbMuxInterface(it) != null && hasCdcNcm(it) }
         Log.i(
@@ -45,7 +45,8 @@ object IphoneCarPlayConfiguration {
     }
 
     /** Every configuration of the device with its descriptor summary, for USB diagnostics. */
-    fun describeAll(device: UsbDevice): List<String> = UsbDescriptorCompat.describeAll(device)
+    fun describeAll(device: UsbDevice, rawDescriptors: ByteArray? = null): List<String> =
+        UsbDescriptorCompat.describeAll(device, rawDescriptors)
 
     /**
      * 波次十 #634：只有 CarPlay 模式才带 Apple Ethernet；iOS 17+ 在非 CarPlay 模式下也会
@@ -55,11 +56,28 @@ object IphoneCarPlayConfiguration {
         usbMuxInterface(configuration) != null && hasCdcNcm(configuration) && hasAppleEthernet(configuration)
 
     fun usbMuxInterface(configuration: UsbConfigurationView): UsbInterface? =
-        configuration.interfaces.firstOrNull {
-            it.interfaceClass == USBMUX_CLASS &&
-                it.interfaceSubclass == USBMUX_SUBCLASS &&
-                it.interfaceProtocol == USBMUX_PROTOCOL
-        }
+        configuration.interfaces.firstOrNull(::isUsbMuxInterface)
+
+    /**
+     * 设备上全部 USBMUX 同族接口（跨配置），[configuration] 里的那个排在最前，按 `接口号:端点数`
+     * 去重。
+     *
+     * API 17-20 切配置只能靠原始 SET_CONFIGURATION 控制传输，内核 actconfig 不一定跟着刷新，
+     * 于是"描述符里属于 CarPlay 配置的接口号"可能不是内核当前认识的接口号。逐个候选尝试，
+     * 让真正处于活动配置里的那个接口被选中。
+     */
+    fun usbMuxCandidates(device: UsbDevice, configuration: UsbConfigurationView): List<UsbInterface> {
+        val preferred = usbMuxInterface(configuration)
+        val everyInterface = (0 until device.interfaceCount)
+            .map(device::getInterface)
+            .filter(::isUsbMuxInterface)
+        return (listOfNotNull(preferred) + everyInterface).distinctBy { it.id to it.endpointCount }
+    }
+
+    private fun isUsbMuxInterface(usbInterface: UsbInterface): Boolean =
+        usbInterface.interfaceClass == USBMUX_CLASS &&
+            usbInterface.interfaceSubclass == USBMUX_SUBCLASS &&
+            usbInterface.interfaceProtocol == USBMUX_PROTOCOL
 
     fun usbMuxEndpoints(usbInterface: UsbInterface): Pair<UsbEndpoint, UsbEndpoint>? {
         val endpoints = (0 until usbInterface.endpointCount).map(usbInterface::getEndpoint)
