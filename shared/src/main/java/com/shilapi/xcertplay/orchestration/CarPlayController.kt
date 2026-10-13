@@ -64,6 +64,7 @@ import com.shilapi.xcertplay.network.WirelessStartupFailure
 import com.shilapi.xcertplay.network.WirelessStartupDiagnostics
 import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
 import com.shilapi.xcertplay.transport.BluetoothLinkCheck
+import com.shilapi.xcertplay.transport.BluetoothRadioCheck
 import com.shilapi.xcertplay.transport.BluetoothRfcommDuplexStream
 import com.shilapi.xcertplay.transport.Ch341DeviceMatcher
 import com.shilapi.xcertplay.transport.Ch341I2cTransport
@@ -1243,6 +1244,23 @@ class CarPlayController(
             firstTcpWatchdog = watchdog
             val mfi = mfiSession?.client
                 ?: throw IOException("MFi coprocessor client is unavailable")
+            // main #677 / 波次十一批次A：无线 CarPlay 经蓝牙起链。无线电实际关闭（且非本应用暂停）时，
+            // 先不动 Wi-Fi——这次尝试注定失败，单射频车机还可能因此离开原有 Wi-Fi，且每次重试都会重演。
+            // 分支 Plan A：若已有真实 ACL 连接的 iPhone 佐证无线电可用，则放行，避免 isEnabled 误报被误杀。
+            val preflightAdapter = bluetoothAdapter
+            val bluetoothPausedByUs = BydBluetoothSuspend.isSuspendedByUs(appContext)
+            if (preflightAdapter == null ||
+                (!preflightAdapter.isEnabled && !bluetoothPausedByUs &&
+                    probeConnectedWirelessIphone(preflightAdapter) == null)
+            ) {
+                throw IOException(
+                    BluetoothRadioCheck.blocker(
+                        adapterPresent = preflightAdapter != null,
+                        enabled = preflightAdapter?.isEnabled == true,
+                        pausedByDiPlay = bluetoothPausedByUs,
+                    ) ?: BluetoothRadioCheck.RADIO_OFF,
+                )
+            }
             val hotspotInfo = startWirelessHotspot(generation)
             if (isStaleWirelessRun(generation)) {
                 return
@@ -1333,7 +1351,7 @@ class CarPlayController(
             onStatus(CarPlayStatus.WaitingForPairedIphone)
 
             val adapter = bluetoothAdapter
-                ?: throw IOException("Bluetooth adapter is unavailable")
+                ?: throw IOException(BluetoothRadioCheck.NO_ADAPTER)
             // main #307：无线握手前有界恢复被我们暂停的车机蓝牙；不恢复本就关闭的无线电。
             val bluetoothRecoveryComplete = BydBluetoothSuspend.resumeAndWait(appContext, adapter)
             // Plan A：先探测真实 ACL 已连接的 iPhone。它是无线电（含 iAP2 RFCOMM 引导）可用的铁证，
@@ -1346,7 +1364,7 @@ class CarPlayController(
                     "bypassGate=${!adapter.isEnabled && wirelessLinkDevice != null}",
             )
             if (!adapter.isEnabled && wirelessLinkDevice == null) {
-                throw IOException("Bluetooth is not enabled")
+                throw IOException(BluetoothRadioCheck.RADIO_OFF)
             }
             if (!bluetoothRecoveryComplete && wirelessLinkDevice == null) {
                 throw IOException("Bluetooth recovery did not complete before the handshake")

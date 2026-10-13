@@ -18,12 +18,10 @@
     <!-- main #439：蓝牙唤醒 iPhone 重连在 API 31+ 需要 BLUETOOTH_CONNECT 运行时权限；
          低版本系统忽略未知权限，对 API 17 无害。 -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission
-        android:name="android.permission.BLUETOOTH"
-        android:maxSdkVersion="30" />
-    <uses-permission
-        android:name="android.permission.BLUETOOTH_ADMIN"
-        android:maxSdkVersion="30" />
+    <!-- main #671：去掉 maxSdkVersion（原 30）——MIUI 13（Android 12）仍会用 BLUETOOTH 校验 RFCOMM
+         连接。对 API 17 为 no-op：targetSdk 17 时这两个权限本就按安装期授予、不受 maxSdkVersion 影响。 -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
 
     <uses-feature
         android:name="android.hardware.usb.host"
