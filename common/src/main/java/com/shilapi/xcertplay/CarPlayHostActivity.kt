@@ -4926,6 +4926,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             airPlayConfig.main.widthPixels, airPlayConfig.main.heightPixels,
             displayRotation(), hideTopBar, hideBottomBar, effectiveSize.width, effectiveSize.height,
             viewAreas = pendingViewAreas,
+            statusBarShown = statusBarShown(),
         )
         sessionDisplay = display
         videoView?.let { updateVideoLayout(it.width, it.height) }
@@ -5027,6 +5028,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
 
+    /** 波次十一批次C（main #643）：当前状态栏是否可见，未知返回 null。 */
+    private fun statusBarShown(): Boolean? =
+        ViewCompat.getRootWindowInsets(window.decorView)?.isVisible(WindowInsetsCompat.Type.statusBars())
+
     private fun applyDisplaySize(size: DisplaySize) {
         val display = sessionDisplay
         if (display != null && applyViewArea(size, display)) return
@@ -5055,6 +5060,16 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                     "${previous.width}x${previous.height} -> ${size.width}x${size.height}",
             )
             maybeStartCarPlay()
+        } else if (display != null && !layoutChanged &&
+            statusBarHiddenByAnotherWindow(display, size.width, size.height, statusBarShown())
+        ) {
+            // 波次十一批次C（main #643）：另一个窗口（倒车摄像头）隐藏了状态栏，窗口只是临时增高了一个
+            // 状态栏的高度；保持原会话画布，避免返回状态栏后新建会话一直缩小显示。
+            val message = "Display changed ${previous.width}x${previous.height} -> ${size.width}x${size.height} " +
+                "while another window hides the status bar; keeping CarPlay session canvas=${display.width}x${display.height}"
+            appendLog(message)
+            Log.i(TAG, message)
+            videoView?.let { updateVideoLayout(it.width, it.height) }
         } else if (display != null && !layoutChanged &&
             size.width <= display.windowWidth && size.height <= display.windowHeight) {
             // Keep camera shrink/restore cycles within the original window connected. If the
@@ -5957,7 +5972,22 @@ internal data class CarPlaySessionDisplay(
     val windowHeight: Int,
     /** The view areas this session declared, or null for the whole screen as one area. */
     val viewAreas: CarPlayViewAreas? = null,
+    /** 波次十一批次C（main #643）：会话启动时状态栏是否在屏，null 表示未知。 */
+    val statusBarShown: Boolean? = null,
 )
+
+/**
+ * 波次十一批次C（main #643/#674）：驾驶者保留了状态栏，而另一个窗口（车机的倒车摄像头）把它隐藏了：
+ * 窗口只是临时增高了一个状态栏的高度。在返回状态栏之后以该尺寸新建会话会一直缩小显示。
+ */
+internal fun statusBarHiddenByAnotherWindow(
+    display: CarPlaySessionDisplay,
+    width: Int,
+    height: Int,
+    statusBarShown: Boolean?,
+): Boolean =
+    !display.hideTopBar && display.statusBarShown == true && statusBarShown == false &&
+        width == display.windowWidth && height > display.windowHeight
 
 /** Process-local hand-off for keeping the CarPlay session alive while no Activity is visible. */
 internal object CarPlayBackgroundSession {
