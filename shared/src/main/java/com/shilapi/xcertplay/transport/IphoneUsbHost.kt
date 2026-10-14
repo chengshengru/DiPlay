@@ -61,10 +61,11 @@ class IphoneUsbMatcher private constructor(
  * Android USB Host bring-up boundary for a configured iPhone identity.
  *
  * LIVI's fixed commit uses Apple vendor request `0x52`, value `0`, index `4`, and then selects
- * configuration `6`. The vendor request can make the iPhone re-enumerate. Android does not offer
- * Linux sysfs configuration control or a synchronous re-enumeration primitive, so this class
- * closes the first connection and requires the caller to receive, re-authorize, and pass the new
- * [UsbDevice] to [selectCarPlayConfigurationAsync]. All opens run on the supplied executor.
+ * configuration `6`. Android has neither LIVI's sysfs configuration control nor a synchronous
+ * re-enumeration primitive, so the configuration switch goes through the `USBDEVFS_SETCONFIGURATION`
+ * ioctl (API 17-20 has no framework `setConfiguration`) and this class closes the first connection,
+ * requiring the caller to receive, re-authorize, and pass the new [UsbDevice] back for the data-path
+ * open. All opens run on the supplied executor.
  */
 class IphoneUsbHost(
     context: Context,
@@ -322,7 +323,7 @@ class IphoneUsbHost(
         val outcome = UsbConfigurationSelection.select(
             target = target,
             interfaceIds = interfaces.keys.toList(),
-            setConfiguration = { UsbDescriptorCompat.selectConfiguration(connection, device, configuration) },
+            setConfiguration = { switchConfiguration(connection, device, configuration, target) },
             activeConfiguration = { activeConfiguration(connection) },
             // 强制 claim 会分离内核驱动;release 之后接口保持未绑定
             detach = { id ->
@@ -348,6 +349,37 @@ class IphoneUsbHost(
         if (!outcome.selected) {
             Log.w(IphoneCarPlayConfiguration.TAG, "setConfiguration ${configuration.label} reported failure; claiming anyway")
         }
+    }
+
+    /**
+     * 切换到 [target] 配置。
+     *
+     * API 17-20 没有框架 `setConfiguration`,默认走内核级 `USBDEVFS_SETCONFIGURATION` ioctl:内核会
+     * 重新读取配置、重建 `dev->actconfig`,之后 `claimInterface` 才能看到新配置里的接口(这正是
+     * "iPhone 切到 6、内核仍认为只有 0 号接口、claim 全部失败"那个卡点的解)。等价于 LIVI 写 sysfs
+     * bConfigurationValue。只有 ioctl 失败或拿不到文件描述符时才退回原始 SET_CONFIGURATION 控制传输
+     * ——后者只切设备、不刷新内核,仅作兜底。
+     */
+    private fun switchConfiguration(
+        connection: UsbDeviceConnection,
+        device: UsbDevice,
+        configuration: UsbConfigurationView,
+        target: Int,
+    ): Boolean {
+        val fileDescriptor = runCatching { connection.fileDescriptor }.getOrDefault(-1)
+        val outcome = UsbConfigurationSwitch.switch(
+            fileDescriptor = fileDescriptor,
+            target = target,
+            kernelDetach = { descriptor ->
+                runCatching { NativeUsbConfigurationKernel.detachKernelDrivers(descriptor) }.getOrDefault(-1)
+            },
+            kernelSet = { descriptor, value ->
+                runCatching { NativeUsbConfigurationKernel.setConfiguration(descriptor, value) }.getOrDefault(-1)
+            },
+            controlSet = { UsbDescriptorCompat.selectConfiguration(connection, device, configuration) },
+        )
+        runCatching { onDiagnostic(outcome.diagnostic(target, fileDescriptor, activeConfiguration(connection))) }
+        return outcome.selected
     }
 
     /** iPhone 当前配置值(标准 GET_CONFIGURATION),读不到时为 null。 */

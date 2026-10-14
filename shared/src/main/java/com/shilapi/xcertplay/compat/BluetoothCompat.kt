@@ -174,6 +174,28 @@ object BluetoothCompat {
     }
 
     /**
+     * 直接尝试打开蓝牙（诊断第五轮：应用层主动开启，替代单纯跳转系统设置）。
+     *
+     * `enable()` 在 SDK 中为隐藏方法，需反射调用；需要 `android.permission.BLUETOOTH_ADMIN`
+     * （API <=30 为安装期普通权限，common/AndroidManifest.xml 已声明）。
+     * 返回 true 仅表示系统已受理开启请求，实际开启需稍后复查 [BluetoothAdapter.isEnabled]。
+     *
+     * catch 仅列举 API 1 既有的具体异常，避免 API 17 验证器拒绝整类（同 isDeviceConnected）。
+     */
+    fun tryEnable(adapter: BluetoothAdapter): Boolean = try {
+        val method = BluetoothAdapter::class.java.getMethod("enable")
+        method.invoke(adapter) as? Boolean == true
+    } catch (_: NoSuchMethodException) {
+        false
+    } catch (_: IllegalAccessException) {
+        false
+    } catch (_: InvocationTargetException) {
+        false
+    } catch (_: RuntimeException) {
+        false
+    }
+
+    /**
      * Plan A：在已配对设备中查找真实 ACL 已连接的 iPhone。
      *
      * 返回唯一已连接的 iPhone；无可判定为已连接的 iPhone（无、或存在歧义多个）时返回 null，不抛异常。

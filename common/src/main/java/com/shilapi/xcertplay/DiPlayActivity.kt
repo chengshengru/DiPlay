@@ -5410,12 +5410,26 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                             append("配对列表读取失败: ${it.javaClass.simpleName}\n")
                         }
                         append("已连接 iPhone: ${connectedIphone?.address ?: "未探测到"}\n")
+                        // 双蓝牙鉴别：应用层适配器的名称/地址。若与车机系统蓝牙设置里
+                        // 显示的名字（如 "MyLink Captive"）不同，说明 iPhone 配对的是
+                        // 原厂蓝牙模块，而非 DiPlay 可控的这块适配器。
+                        append("适配器名称: ${runCatching { adapter.name }.getOrNull() ?: "读取失败"}\n")
+                        append("适配器地址: ${runCatching { adapter.address }.getOrNull() ?: "读取失败"}\n")
                         if (bondedResult.isFailure) {
                             append("→ 读取失败通常是缺少 android.permission.BLUETOOTH 权限")
                         }
                     },
                 )
-                .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ -> openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
+                .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ ->
+                    // 先尝试应用层直接开启（enable() 为隐藏 API，反射 + BLUETOOTH_ADMIN），
+                    // 成功受理后自动重试设备选择；失败（如系统拒绝）再退回跳转系统蓝牙设置。
+                    if (BluetoothCompat.tryEnable(adapter)) {
+                        toast("已发送开启蓝牙请求，稍候自动重试")
+                        window.decorView.postDelayed({ choosePhone() }, 2000)
+                    } else {
+                        openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                    }
+                }
                 .setNegativeButton(getString(R.string.got_it), null).show(); return
         }
         AlertDialog.Builder(this).setTitle(getString(R.string.choose_your_iphone))
@@ -5452,6 +5466,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 append("已配对设备数: ${bonded?.size ?: "读取失败"}\n")
                 val conn = BluetoothCompat.findConnectedIphone(adapter)
                 append("已连接 iPhone: ${conn?.address ?: "未探测到"}\n")
+                // 双蓝牙鉴别：与系统蓝牙设置里显示的车机名比对。
+                append("适配器名称: ${runCatching { adapter.name }.getOrNull() ?: "读取失败"}\n")
+                append("适配器地址: ${runCatching { adapter.address }.getOrNull() ?: "读取失败"}\n")
                 if (bonded.isNullOrEmpty() && !adapter.isEnabled) {
                     append("→ 应用层既拿不到配对列表、开关又误报关闭，疑似系统未向应用开放蓝牙数据")
                 }
@@ -5459,7 +5476,14 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
         AlertDialog.Builder(this).setTitle(getString(R.string.turn_on_bluetooth))
             .setMessage(diag)
-            .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ -> openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
+            .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ ->
+                if (adapter != null && BluetoothCompat.tryEnable(adapter)) {
+                    toast("已发送开启蓝牙请求，稍候自动重试")
+                    window.decorView.postDelayed({ choosePhone() }, 2000)
+                } else {
+                    openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                }
+            }
             .setNegativeButton(getString(R.string.later), null).show()
     }
 

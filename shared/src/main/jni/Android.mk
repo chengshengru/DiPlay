@@ -12,6 +12,12 @@ LOCAL_CFLAGS := -Wall -Wextra -Werror
 include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
+LOCAL_MODULE := xcertplay_usbconfig
+LOCAL_SRC_FILES := usb_config_jni.c
+LOCAL_CFLAGS := -Wall -Wextra
+include $(BUILD_SHARED_LIBRARY)
+
+include $(CLEAR_VARS)
 LOCAL_MODULE := speex_echo
 LOCAL_SRC_FILES := speex_echo_jni.c \
     speexdsp/mdf.c speexdsp/preprocess.c speexdsp/fftwrap.c \
