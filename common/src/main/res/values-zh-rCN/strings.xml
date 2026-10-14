@@ -203,6 +203,8 @@
     <string name="settings_usb_realtime_log_description">通过 USB 连接时，在 CarPlay 屏幕上显示最新的 xcertplay-usb 诊断行，无需电脑即可看到卡在哪一步。</string>
     <string name="settings_wireless_skip_bluetooth_config">无线连接跳过蓝牙提示（实验性）</string>
     <string name="settings_wireless_skip_bluetooth_config_description">发起无线连接时跳过“打开蓝牙”弹框，直接以车机已通过蓝牙连接的 iPhone 继续后续流程。</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap">无线连接（无蓝牙引导）（实验性）</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap_description">跳过蓝牙 iAP2 引导，仅依靠车机 Wi-Fi 与 Bonjour 让 iPhone 自行发起 CarPlay。需先完成过一次常规蓝牙配对或连过车机 Wi-Fi；若 iPhone 从未连过，请关闭本开关先配对一次。</string>
     <string name="rect_fill_disable_safe_area">中控直角铺满显示，禁用安全区域</string>
     <string name="rect_fill_disable_safe_area_description">不在中控 AirPlay 声明中包含 safeArea，避免与 cornerMasks 冲突</string>
     <string name="safe_area_disabled_rect_fill_summary">中控安全区域：已禁用（直角铺满显示）</string>

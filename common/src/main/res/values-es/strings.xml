@@ -202,6 +202,8 @@
     <string name="settings_usb_realtime_log_description">Muestra las últimas líneas de diagnóstico xcertplay-usb en la pantalla de CarPlay durante la conexión por USB, para ver dónde se detiene sin un ordenador.</string>
     <string name="settings_wireless_skip_bluetooth_config">Omitir aviso de Bluetooth en conexión inalámbrica (experimental)</string>
     <string name="settings_wireless_skip_bluetooth_config_description">Al conectar de forma inalámbrica, omite el aviso “Activar Bluetooth” y continúa con el iPhone que el coche ya tiene conectado por Bluetooth.</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap">Conexión inalámbrica (sin arranque por Bluetooth) (experimental)</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap_description">Omite el arranque iAP2 por Bluetooth y se basa en el Wi-Fi del coche + Bonjour para que el iPhone inicie CarPlay por sí solo. Requiere un emparejamiento previo o haber unido el Wi-Fi del coche; si el iPhone nunca se ha conectado, desactiva esto y empareja una vez.</string>
     <string name="rect_fill_disable_safe_area">Llenado rectangular de pantalla central, desactivar zona segura</string>
     <string name="rect_fill_disable_safe_area_description">No declarar safeArea en AirPlay info de la pantalla central para evitar conflicto con cornerMasks</string>
     <string name="safe_area_disabled_rect_fill_summary">Zona segura de pantalla central: desactivada (pantalla rectangular completa)</string>

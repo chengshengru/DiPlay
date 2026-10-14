@@ -1242,6 +1242,11 @@ class CarPlayController(
                 log = { debugLog("wireless startup generation=$generation listener=${listenerIdentity.id} $it") },
             )
             firstTcpWatchdog = watchdog
+            // 实验性③（无蓝牙引导无线）：彻底绕开蓝牙。早返回，避免预检门禁(:1250)/中部门禁(:1353)/RFCOMM(:1447) 误杀。
+            // 双蓝牙架构下 Android 适配器无配对，常规蓝牙引导走不通，无蓝牙引导无线是首选路径。
+            if (config.wirelessNoBluetoothBootstrap) {
+                startWirelessNoBluetoothBootstrap(generation); return
+            }
             val mfi = mfiSession?.client
                 ?: throw IOException("MFi coprocessor client is unavailable")
             // main #677 / 波次十一批次A：无线 CarPlay 经蓝牙起链。无线电实际关闭（且非本应用暂停）时，
@@ -1614,6 +1619,142 @@ class CarPlayController(
                 closeWirelessStack(generation = generation)
             }
         }
+    }
+
+    /**
+     * 实验性③（无蓝牙引导无线）：无线连接彻底绕开蓝牙引导。
+     *
+     * 复用 runWireless 的启动骨架，但跳过预检门禁(:1250)、中部门禁(:1353) 与 RFCOMM 引导段(:1447)；
+     * 仅执行「热点 → 选地址 → attach AirPlay listener → Bonjour 广播 → 挂 iAP2-over-Wi-Fi 隧道处理器 → RunningWireless」，
+     * 由已就绪的 wirelessSessionListener + FirstTcpWatchdog 等待 iPhone 在已连的同一 Wi-Fi 上自主发起 CarPlay。
+     * 双蓝牙架构下 Android 适配器无配对、蓝牙引导走不通时，这是让无线 CarPlay 跑通的首选路径。
+     */
+    private fun startWirelessNoBluetoothBootstrap(generation: Int) {
+        val hotspotInfo = startWirelessHotspot(generation)
+        if (isStaleWirelessRun(generation)) return
+        pauseWifiScans(hotspotInfo.backend)
+        val startedHotspot = hotspot
+        wirelessConnectionProof.begin(generation) {
+            if (!isStaleWirelessRun(generation)) startedHotspot?.onCarPlayConfirmed()
+        }
+        // main #474：读取上次交替出的地址族偏好（与 runWireless 同逻辑）。
+        val storedFamily = HotspotAddressPolicy.parseFamily(
+            appContext.getSharedPreferences(WIRELESS_PREFS, Context.MODE_PRIVATE)
+                .getString(HOTSPOT_FAMILY_PREFERENCE_KEY, null),
+        )
+        val preferredFamily = if (ApiLevel.isBelow(21)) {
+            if (storedFamily != null) {
+                appContext.getSharedPreferences(WIRELESS_PREFS, Context.MODE_PRIVATE)
+                    .edit().remove(HOTSPOT_FAMILY_PREFERENCE_KEY).apply()
+            }
+            null
+        } else {
+            storedFamily
+        }
+        val addressRecovery = HotspotAddressRecovery(
+            sample = { hotspotCandidates(hotspotInfo, fallbackToSnapshot = false) },
+            cancelled = { isStaleWirelessRun(generation) },
+            pause = Thread::sleep,
+            log = { if (!isStaleWirelessRun(generation)) debugLog(it) },
+        )
+        val candidates = addressRecovery.awaitCandidates(hotspotCandidates(hotspotInfo), preferredFamily)
+        val hostAddress = HotspotAddressPolicy.select(candidates, preferredFamily)
+            ?: hotspotInfo.hostAddress
+            ?: throw IOException("Wireless hotspot did not provide a usable host address")
+        synchronized(wirelessResourceLock) {
+            if (isStaleWirelessRun(generation)) return
+            wirelessPublishedAddress = hostAddress
+            wirelessAlternateAddress = HotspotAddressPolicy.alternateFamilyCandidate(candidates, hostAddress)
+            wirelessAddressRecovery = addressRecovery
+        }
+        if (hostAddress is Inet6Address &&
+            (!hostAddress.isLinkLocalAddress || hostAddress.scopeId == 0)
+        ) {
+            throw IOException("Wireless hotspot link-local IPv6 address is not scoped")
+        }
+        val hostAddressText = hostAddressText(hostAddress)
+        // 无蓝牙 MAC 可用：用 deviceIdentifier（热点 bssid 或已存 deviceId）替代 btMac 供 iPhone 信任校验。
+        val deviceIdentifier = hotspotInfo.bssid
+            ?.takeUnless { it.equals(ADAPTER_ADDRESS_PLACEHOLDER, ignoreCase = true) }
+            ?: airPlayConfig.deviceId
+        val wirelessAirPlayConfig = airPlayConfig.copy(deviceId = deviceIdentifier, btMac = deviceIdentifier)
+        onStatus(CarPlayStatus.HotspotReady(
+            ssid = hotspotInfo.ssid,
+            band = hotspotInfo.bandLabel,
+            channel = hotspotInfo.channel,
+            bssid = deviceIdentifier,
+            address = hostAddressText,
+            backend = hotspotInfo.backend.label,
+        ))
+        onStatus(CarPlayStatus.WaitingForPairedIphone)
+        val mfi = mfiSession?.client
+            ?: throw IOException("MFi coprocessor client is unavailable")
+        val service = awaitVpnService()
+            ?: throw IOException("Could not bind the CarPlay AirPlay service")
+        synchronized(wirelessResourceLock) {
+            if (isStaleWirelessRun(generation)) return
+            startedHotspot?.validateReady()
+            when (val result = service.attachWireless(
+                bindAddress = hostAddress,
+                config = wirelessAirPlayConfig,
+                identity = identity,
+                pairings = pairings,
+                mfi = mfi,
+                listener = wirelessSessionListener(
+                    generation,
+                    firstTcpWatchdog ?: throw IOException("FirstTcpWatchdog not started"),
+                ),
+                listenerIdentity = firstTcpWatchdog!!.listener,
+                media = media,
+                additionalBindAddresses = hotspotInfo.hostAddresses.filter { it != hostAddress },
+            )) {
+                CarPlayVpnService.AttachResult.Started -> Unit
+                CarPlayVpnService.AttachResult.AlreadyStarted ->
+                    throw IOException("Wireless AirPlay transport is already attached")
+                is CarPlayVpnService.AttachResult.Failed ->
+                    throw IOException(result.message)
+            }
+        }
+        val listenerPort = service.boundPort() ?: wirelessAirPlayConfig.port
+        val advertisedAirPlayConfig = wirelessAirPlayConfig.copy(port = listenerPort)
+        val bonjourClient = CarPlayBonjour(
+            context = appContext,
+            config = advertisedAirPlayConfig,
+            identity = identity,
+            advertisedHost = hostAddress.hostAddress,
+            useInterfaceMdns = true,
+            onEvent = { event -> debugLog("wireless no-bluetooth-bootstrap bonjour: ${event.diagnosticSummary()}") },
+            additionalAddresses = hotspotInfo.hostAddresses.filter { it != hostAddress },
+        )
+        synchronized(wirelessResourceLock) {
+            if (isStaleWirelessRun(generation)) return
+            bonjour = bonjourClient
+            startedHotspot?.validateReady()
+            bonjourClient.start()
+        }
+        debugLog(
+            "wireless no-bluetooth-bootstrap: AirPlay listener + Bonjour ready; awaiting iPhone over Wi-Fi " +
+                "(no BT bootstrap) host=$hostAddressText bssid=$deviceIdentifier",
+        )
+        // 手动挂上 iAP2-over-Wi-Fi 隧道处理器（正常流程在 RFCOMM 段 :1539 挂，无蓝牙引导无线跳过该段故此处补）。
+        val wirelessIdentification = Iap2WirelessIdentification(deviceIdentifier, hotspotInfo.ssid)
+        wirelessRuntimeIdentification = config.identification.forWirelessLink(
+            Iap2WirelessLinkRole.RUNTIME_TUNNEL, wirelessIdentification)
+        wirelessAirPlayEndpoint = Iap2WirelessCarPlayEndpoint(
+            ssid = hotspotInfo.ssid,
+            passphrase = hotspotInfo.passphrase,
+            channel = hotspotInfo.channel,
+            security = hotspotInfo.security,
+            ipAddresses = listOf(hostAddressText),
+            airPlayPort = advertisedAirPlayConfig.port,
+            deviceIdentifier = deviceIdentifier,
+            publicKey = identity.publicKeyHex,
+            sourceVersion = airPlayConfig.sourceVersion,
+            accessPointBssid = hotspotInfo.accessPointBssid,
+        )
+        media.setIapTunnelHandler(::startWirelessTunnelControl)
+        onStatus(CarPlayStatus.RunningWireless)
+        startedHotspot?.validateReady()
     }
 
     private fun startWirelessTunnelControl(stream: BlockingDuplexByteStream): Boolean {

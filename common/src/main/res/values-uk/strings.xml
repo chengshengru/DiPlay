@@ -207,6 +207,8 @@
     <string name="settings_usb_realtime_log_description">Показує останні рядки діагностики xcertplay-usb на екрані CarPlay при USB-підключенні, щоб бачити, де зависло, без комп’ютера.</string>
     <string name="settings_wireless_skip_bluetooth_config">Пропуск запиту Bluetooth для бездротового режиму (експериментально)</string>
     <string name="settings_wireless_skip_bluetooth_config_description">При бездротовому підключенні пропускає вікно “Увімкніть Bluetooth” і продовжує з iPhone, уже підключеним до авто по Bluetooth.</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap">Бездротове підключення (без запуску через Bluetooth) (експериментально)</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap_description">Пропускає запуск iAP2 через Bluetooth і покладається на Wi-Fi авто + Bonjour, щоб iPhone сам почав CarPlay. Потрібне попереднє сопряження або підключення до Wi-Fi авто; якщо iPhone ніколи не підключався, вимкніть це та виконайте сопряження один раз.</string>
     <string name="rect_fill_disable_safe_area">Заповнення центрального екрана, вимкнути безпечну область</string>
     <string name="rect_fill_disable_safe_area_description">Не оголошувати safeArea в AirPlay info центрального екрана для уникнення конфлікту з cornerMasks</string>
     <string name="safe_area_disabled_rect_fill_summary">Безпечна область центр. екрана: вимкнена (прямокутне заповнення)</string>

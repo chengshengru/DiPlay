@@ -209,6 +209,8 @@
     <string name="settings_usb_realtime_log_description">Show the latest xcertplay-usb diagnostic lines on the CarPlay screen while connected over USB, so you can see where it stalls without a computer.</string>
     <string name="settings_wireless_skip_bluetooth_config">Skip Bluetooth prompt for wireless (experimental)</string>
     <string name="settings_wireless_skip_bluetooth_config_description">When connecting wirelessly, skip the “Turn on Bluetooth” dialog and continue with the iPhone the car already has connected over Bluetooth.</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap">Wireless connection (no Bluetooth bootstrap) (experimental)</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap_description">Skip the Bluetooth iAP2 bootstrap and rely on the car Wi-Fi + Bonjour for the iPhone to start CarPlay on its own. Requires a prior pairing or car Wi-Fi join; turn this off and pair once if the iPhone has never connected.</string>
     <string name="rect_fill_disable_safe_area">Center display rectangular fill, disable safe area</string>
     <string name="rect_fill_disable_safe_area_description">Do not declare safeArea in center display AirPlay info to avoid conflict with cornerMasks</string>
     <string name="safe_area_disabled_rect_fill_summary">Center display safe area: disabled (rectangular full display)</string>

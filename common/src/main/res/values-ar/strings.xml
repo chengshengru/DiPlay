@@ -202,6 +202,8 @@
     <string name="settings_usb_realtime_log_description">اعرض أحدث أسطر تشخيص xcertplay-usb على شاشة CarPlay أثناء الاتصال عبر USB لرؤية مكان التعثر دون حاسوب.</string>
     <string name="settings_wireless_skip_bluetooth_config">تخطي مطالبة Bluetooth للاتصال اللاسلكي (تجريبي)</string>
     <string name="settings_wireless_skip_bluetooth_config_description">عند الاتصال اللاسلكي، تخطّ مربع “تشغيل Bluetooth” وتابع مع iPhone المتصل بالفعل عبر Bluetooth في السيارة.</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap">اتصال لاسلكي (بدون إقلاع Bluetooth) (تجريبي)</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap_description">تخطّ إقلاع iAP2 عبر Bluetooth واعتمد على Wi-Fi السيارة + Bonjour لكي يبدأ iPhone تشغيل CarPlay من تلقاء نفسه. يتطلب إقراناً سابقاً أو الانضمام إلى Wi-Fi السيارة؛ إذا لم يتصل iPhone من قبل، أوقف هذا الإعداد وتطابق مرة واحدة.</string>
     <string name="rect_fill_disable_safe_area">ملء مستطيل للشاشة المركزية، تعطيل المنطقة الآمنة</string>
     <string name="rect_fill_disable_safe_area_description">عدم التصريح عن safeArea في معلومات AirPlay للشاشة المركزية لتجنب التعارض مع cornerMasks</string>
     <string name="safe_area_disabled_rect_fill_summary">المنطقة الآمنة للشاشة المركزية: معطلة (عرض مستطيل كامل)</string>

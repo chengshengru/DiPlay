@@ -200,6 +200,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         manualHotspotSecurity = manualHotspotSecurity,
         existingWifiSsid = existingWifiSsid,
         existingWifiPassphrase = existingWifiPassphrase,
+        wirelessNoBluetoothBootstrap = AirPlayPersistence.loadWirelessNoBluetoothBootstrap(this),
         locationReportingEnabled = locationReportingEnabled,
         availableCurrentMilliAmps = AirPlayPersistence.loadUsbChargingCurrent(this).milliAmps,
     )

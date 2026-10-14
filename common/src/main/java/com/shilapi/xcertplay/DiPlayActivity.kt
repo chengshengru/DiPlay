@@ -2363,6 +2363,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 AirPlayPersistence.loadWirelessSkipBluetoothConfig(this)) {
                 AirPlayPersistence.saveWirelessSkipBluetoothConfig(this, it)
             }
+            // 实验性③（无蓝牙引导无线）：无线连接彻底绕开蓝牙引导（两道蓝牙门禁 + RFCOMM 引导段），
+            // 仅依赖车机 Wi-Fi + Bonjour 让 iPhone 主动发起 CarPlay。无需重连；适用双蓝牙架构。
+            toggle(card, getString(R.string.settings_wireless_no_bluetooth_bootstrap),
+                getString(R.string.settings_wireless_no_bluetooth_bootstrap_description),
+                AirPlayPersistence.loadWirelessNoBluetoothBootstrap(this)) {
+                AirPlayPersistence.saveWirelessNoBluetoothBootstrap(this, it)
+            }
             if (CarPlayRotation.enabled(this)) {
                 val pictures = CarPlayRotation.Picture.entries
                 choice(card, getString(R.string.carplay_rotation_picture), listOf(
@@ -5340,7 +5347,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
         if (wireless && carHotspotOff()) { carHotspotOffDialog(); return }
         if (wireless && DiPlayPreferences.phoneAddress(this) == null) {
-            pendingWireless = true; choosePhone(); return
+            // 无蓝牙引导无线（实验性③）：双蓝牙架构下 Android 适配器无配对，蓝牙选设备无意义；
+            // 放宽入口，不再强制 choosePhone，直接放行由 runWireless 的无蓝牙引导分支绕开蓝牙。
+            if (AirPlayPersistence.loadWirelessNoBluetoothBootstrap(this)) {
+                pendingWireless = true
+            } else {
+                pendingWireless = true; choosePhone(); return
+            }
         }
         val preferences = getSharedPreferences("diplay", MODE_PRIVATE)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && !preferences.getBoolean("notification_asked", false)) {
@@ -5362,6 +5375,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private fun choosePhone() {
         if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT); return
+        }
+        // 无蓝牙引导无线（实验性③）：双蓝牙架构下 Android 适配器无配对，蓝牙选设备无意义。
+        // 若开关已开且从未选过设备，直接返回，避免弹出无用的诊断框（无线流程由 connect(wireless) 入口放宽发起）。
+        if (AirPlayPersistence.loadWirelessNoBluetoothBootstrap(this) && DiPlayPreferences.phoneAddress(this) == null) {
+            return
         }
         // API 17 适配：BluetoothManager 为 API 18+，本车机（Android 4.2.2）上恒为 null 会无条件
         // 误弹"打开蓝牙"；统一走 BluetoothCompat.getAdapter（API 17 回退 getDefaultAdapter）。

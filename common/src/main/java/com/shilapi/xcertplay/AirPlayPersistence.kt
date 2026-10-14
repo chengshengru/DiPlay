@@ -64,6 +64,8 @@ object AirPlayPersistence {
     private const val KEY_USB_REALTIME_LOG = "usb_realtime_log"
     // 实验性：无线连接绕过"打开蓝牙"弹框，直接使用车机已连接 iPhone（默认关）。
     private const val KEY_WIRELESS_SKIP_BT_CONFIG = "wireless_skip_bluetooth_config"
+    // 实验性③（无蓝牙引导无线）：无线连接彻底绕开蓝牙引导，仅用 Wi-Fi + Bonjour（默认关）。
+    private const val KEY_WIRELESS_NO_BLUETOOTH_BOOTSTRAP = "wireless_no_bluetooth_bootstrap"
     private const val KEY_MANUFACTURER = "manufacturer"
     private const val KEY_MODEL = "model"
     private const val KEY_OEM_LABEL = "oem_label"
@@ -474,6 +476,22 @@ object AirPlayPersistence {
     fun saveWirelessSkipBluetoothConfig(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_WIRELESS_SKIP_BT_CONFIG, enabled)
+            .apply()
+    }
+
+    /**
+     * 实验性③（无蓝牙引导无线）：无线连接彻底绕开蓝牙引导（两道蓝牙门禁 + RFCOMM 引导段），
+     * 仅依赖车机 Wi-Fi + Bonjour 让 iPhone 主动发起 CarPlay。默认关。
+     * 适用双蓝牙架构：应用层 Android 适配器无配对、蓝牙引导走不通时作为首选路径。
+     * 需先完成过一次常规蓝牙配对或连过车机 Wi-Fi，否则 iPhone 不会自主发起。
+     */
+    fun loadWirelessNoBluetoothBootstrap(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_WIRELESS_NO_BLUETOOTH_BOOTSTRAP, false)
+
+    fun saveWirelessNoBluetoothBootstrap(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_WIRELESS_NO_BLUETOOTH_BOOTSTRAP, enabled)
             .apply()
     }
 

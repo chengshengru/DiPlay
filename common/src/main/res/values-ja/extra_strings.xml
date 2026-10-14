@@ -99,6 +99,8 @@
     <string name="settings_usb_realtime_log_description">USB接続中に最新のxcertplay-usb診断ログをCarPlay画面に表示し、パソコンなしでもどこで止まっているかを確認できるようにします。</string>
     <string name="settings_wireless_skip_bluetooth_config">ワイヤレス接続時のBluetooth確認をスキップ（実験的機能）</string>
     <string name="settings_wireless_skip_bluetooth_config_description">ワイヤレス接続時に「Bluetoothをオンにする」ダイアログをスキップし、車がすでにBluetoothで接続しているiPhoneのまま続行します。</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap">ワイヤレス接続（Bluetoothブートストラップなし）（実験的機能）</string>
+    <string name="settings_wireless_no_bluetooth_bootstrap_description">Bluetooth iAP2ブートストラップをスキップし、車のWi-Fi + Bonjourに依存してiPhone自身がCarPlayを開始するようにします。事前のペアリングまたは車のWi-Fiへの接続が必要です。iPhoneが過去に接続したことがない場合は、これをオフにして一度ペアリングしてください。</string>
     <string name="settings_external_wifi_band_unknown">帯域: --</string>
     <string name="settings_external_wifi_connect">接続</string>
     <string name="settings_external_wifi_connected">%1$sに接続しました</string>

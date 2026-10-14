@@ -54,6 +54,19 @@ class ExperimentalTogglesSettingsTest {
         assertTrue(AirPlayPersistence.loadWirelessSkipBluetoothConfig(context))
     }
 
+    // 实验性③（无蓝牙引导无线）：无线连接（无蓝牙引导），默认关、位于高级/实验性卡、切换即持久化。
+    @Test fun wirelessNoBluetoothBootstrapIsOptInAndInAdvanced() {
+        AirPlayPersistence.saveWirelessNoBluetoothBootstrap(context, false)
+        openAdvanced()
+        val sw = switches().single { it.contentDescription == activity.getString(R.string.settings_wireless_no_bluetooth_bootstrap) }
+
+        assertFalse(sw.isChecked)
+        sw.performClick()
+
+        assertTrue(sw.isChecked)
+        assertTrue(AirPlayPersistence.loadWirelessNoBluetoothBootstrap(context))
+    }
+
     // 复用 SystemBarSettingsTest.harmanFullscreenIsOptInAndInAdvancedSettings 的导航：
     // 进入设置→点开 Display 子分类→返回分类列表→展开 Advanced（先进入子分类，onBackPressed 才回到列表而非退出）。
     private fun openAdvanced() {
