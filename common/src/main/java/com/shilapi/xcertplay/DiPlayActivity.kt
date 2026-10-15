@@ -4090,6 +4090,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             (zoomAvailable && WheelZoomSettings.enabled(this))
         if (WheelZoomSettings.siriKey(this) || vehicleKeysOn) wheelKeyServiceControls(card)
         siriKeyControls(card)
+        // main #750/#752（作者：TRAE AI）：该开关只作用于 BYD 的短语音键（327、304），其他车机从不发送。
+        // 与下方控件一致：一旦开启就保持可见，防止包名检测漏判车机后无法关闭。
+        if (byd || WheelZoomSettings.siriLongPressOnly(this)) {
+            toggle(card, getString(R.string.wheel_siri_long_press_only), getString(R.string.wheel_siri_long_press_only_description),
+                WheelZoomSettings.siriLongPressOnly(this)) { WheelZoomSettings.setSiriLongPressOnly(this, it) }
+        }
         // main #549：任意车机——配对的键盘/遥控器/旋钮控制器与触屏并行工作（作者：TRAE AI）。
         toggle(card, getString(R.string.settings_external_controller), getString(R.string.settings_external_controller_description),
             AirPlayPersistence.loadExternalController(this)) { AirPlayPersistence.saveExternalController(this, it) }

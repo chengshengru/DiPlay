@@ -1476,6 +1476,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         }
 
         // Keep DiPlay's existing steering-wheel/voice-key Siri handling intact.
+        // main #750：开启"仅长按"后，短按语音键在 DiPlay 内被消费、不请求 Siri（作者：TRAE AI）。
+        if (CarPlayMediaButton.isShortVoiceKey(event.keyCode) && WheelZoomSettings.siriLongPressOnly(this)) return true
         if (!CarPlayMediaButton.opensSiri(event.keyCode)) return super.dispatchKeyEvent(event)
         if (event.action == KeyEvent.ACTION_DOWN) legacySiriPresses.add(physicalKey)
         if (event.action == KeyEvent.ACTION_UP) {
@@ -1485,7 +1487,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun requestLegacySiri(keyCode: Int) {
-        val sent = controller?.requestSiri() == true
+        // main #751：一次按下的 CarPlay 键与通用键只放行第一个，避免第二次请求结束 Siri 会话（作者：TRAE AI）。
+        val sent = VoiceKeyPair.shared.allowGenericKey(android.os.SystemClock.uptimeMillis()) && controller?.requestSiri() == true
         appendLog("Siri: voice key $keyCode sent=$sent")
     }
 

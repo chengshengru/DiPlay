@@ -44,6 +44,10 @@ object CarPlayMediaButton {
     fun opensSiriWhileCarPlay(keyCode: Int): Boolean =
         keyCode == KEYCODE_BYD_CARPLAY_VOICE || keyCode == KEYCODE_BYD_CARPLAY_VOICE_LONG
 
+    /** main #750：方向盘语音键"短按"发出的两个键码（327/304），长按为 328/312（作者：TRAE AI）。 */
+    fun isShortVoiceKey(keyCode: Int): Boolean =
+        keyCode == KEYCODE_BYD_CARPLAY_VOICE || keyCode == KEYCODE_BYD_AUTO_MEDIA_VOICE
+
     /** The CarPlay press for [keyCode], or null when the key is not a media key CarPlay handles. */
     fun forKeyCode(keyCode: Int, experimentalDiLink3Keys: Boolean = false): Int? = when (keyCode) {
         KeyEvent.KEYCODE_MEDIA_NEXT -> NEXT
