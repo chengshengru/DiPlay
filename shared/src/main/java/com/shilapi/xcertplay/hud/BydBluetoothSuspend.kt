@@ -53,27 +53,40 @@ object BydBluetoothSuspend {
      * [stillActive] 与 [resume] 在同一把锁下检查：在暂停真正开始前就已关闭的控制器或结束的会话，
      * 不会留下无人释放的租约。
      */
-    fun suspend(context: Context, owner: Any, delayMillis: Long = 10_000L, stillActive: () -> Boolean = { true }) {
+    fun suspend(
+        context: Context,
+        owner: Any,
+        delayMillis: Long = 10_000L,
+        log: (String) -> Unit = {},
+        stillActive: () -> Boolean = { true },
+    ) {
         synchronized(gate) {
             if (!stillActive()) return
             val state = lease(context)
             val ticket = state.begin(owner) ?: return
             pending?.cancel(false)
+            // main #18：暂停的每一步（排队、结果、恢复）都写入诊断报告，不再只进 logcat（作者：TRAE AI）。
+            val delay = delayMillis.coerceAtLeast(0)
+            log("car Bluetooth pause in ${TimeUnit.MILLISECONDS.toSeconds(delay)} s")
             pending = worker.schedule({
-                if (state.suspend(ticket)) Log.i(TAG, "car Bluetooth pause verified")
-                else Log.w(TAG, "car Bluetooth pause cancelled or unavailable; recovery retained if needed")
-            }, delayMillis.coerceAtLeast(0), TimeUnit.MILLISECONDS)
+                val radioBefore = state.radioEnabled()
+                val paused = state.suspend(ticket)
+                val outcome = BluetoothPauseOutcome.describe(paused, radioBefore, paused || state.isCurrent(ticket),
+                    shell.lastAccess?.name)
+                if (paused) Log.i(TAG, outcome) else Log.w(TAG, "$outcome; recovery retained if needed")
+                log(outcome)
+            }, delay, TimeUnit.MILLISECONDS)
         }
     }
 
     /** 只作废本控制器的工作；迟到的旧控制器关闭不会释放新会话的租约。 */
-    fun resume(context: Context, owner: Any) {
+    fun resume(context: Context, owner: Any, log: (String) -> Unit = {}) {
         synchronized(gate) {
             val state = lease(context)
             val ticket = state.end(owner) ?: state.recoveryOnAppOpen() ?: return
             pending?.cancel(false)
             pending = null
-            worker.execute { restore(state, ticket) }
+            worker.execute { restore(state, ticket, log) }
         }
     }
 
@@ -107,8 +120,15 @@ object BydBluetoothSuspend {
             .getBoolean(KEY_RESTORE_ENABLED, false) && radioEnabled(app) == false
     }
 
-    private fun restore(state: BluetoothSuspendLease, ticket: Long) {
-        if (!state.restore(ticket)) Log.w(TAG, "Bluetooth recovery incomplete or superseded")
+    private fun restore(state: BluetoothSuspendLease, ticket: Long, log: (String) -> Unit = {}) {
+        // main #18：恢复结果也入报告（作者：TRAE AI）。
+        val wasPaused = state.isSuspended()
+        if (!state.restore(ticket)) {
+            Log.w(TAG, "Bluetooth recovery incomplete or superseded")
+            if (wasPaused) log("car Bluetooth recovery incomplete; DiPlay retries when it opens again")
+        } else if (wasPaused) {
+            log("car Bluetooth back on")
+        }
     }
 
     private fun radioEnabled(context: Context): Boolean? = runCatching {

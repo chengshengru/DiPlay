@@ -53,6 +53,11 @@ internal class BluetoothSuspendLease(
 
     fun isSuspended(): Boolean = pending() == true && enabled() == false
 
+    // main #18：入报告的暂停起点无线电状态与票号归属（作者：TRAE AI）。
+    /** For the report: the radio state the pause starts from, and whether [ticket] still owns it. */
+    fun radioEnabled(): Boolean? = enabled()
+    fun isCurrent(ticket: Long): Boolean = current(ticket)
+
     fun suspend(ticket: Long): Boolean = synchronized(commandLock) {
         if (!current(ticket)) return false
         // 先调和被中断的旧租约，再观察本会话的原始状态。
@@ -102,5 +107,20 @@ internal class BluetoothSuspendLease(
             null -> return false // 状态未知时不得擅自打开用户的无线电。
         }
         return runCatching { journal.write(false) }.getOrDefault(false)
+    }
+}
+
+/**
+ * main #18：每次暂停尝试写一行报告，报告能说明来电为何仍响在车机上（作者：TRAE AI）。
+ * One report line for each pause attempt, so a report shows why calls still ring on the car (#18).
+ */
+internal object BluetoothPauseOutcome {
+    fun describe(paused: Boolean, radioBefore: Boolean?, stillCurrent: Boolean, adbAccess: String?): String = when {
+        paused -> "car Bluetooth paused: Android Bluetooth is off until CarPlay ends"
+        !stillCurrent -> "car Bluetooth pause cancelled: CarPlay ended first"
+        radioBefore == false -> "car Bluetooth pause skipped: Android Bluetooth was already off"
+        radioBefore == null -> "car Bluetooth pause skipped: Android Bluetooth state unknown"
+        adbAccess != null && adbAccess != "READY" -> "car Bluetooth pause failed: ADB access $adbAccess"
+        else -> "car Bluetooth pause failed: Android Bluetooth stayed on"
     }
 }

@@ -362,4 +362,23 @@ class P2pStartupRecoveryTest {
     ).apply {
         stackTrace = arrayOf(StackTraceElement("android.net.wifi.p2p.WifiP2pConfig\$Builder", "build", null, 1))
     }
+
+    // main #582（波次十三批次H，作者：TRAE AI）：无 5GHz 射频的 Auto 计划跳过 5GHz。
+    @Test fun autoSkipsFiveGhzOnAChipWithoutIt() {
+        // #582: an i.MX8 head unit (Android 8.1, fiveGhzSupported=false, no station) was asked for 5180 first.
+        assertEquals(listOf(
+            P2pCreationRequest(P2pCreationMode.FIXED_2_GHZ, 2437),
+            P2pCreationRequest(P2pCreationMode.FIXED_2_GHZ, 2412),
+            P2pCreationRequest(P2pCreationMode.FIXED_2_GHZ, 2462),
+            P2pCreationRequest(P2pCreationMode.SYSTEM_DEFAULT),
+        ), P2pStartupRecovery.plan(null, bandRequests = false, fiveGhz = false))
+        val remembered = P2pCreationRequest(P2pCreationMode.FIXED_5_GHZ, 5745)
+        assertTrue(P2pStartupRecovery.plan(null, remembered, fiveGhz = false).none { (it.frequencyMHz ?: 0) > 5000 })
+        assertEquals(P2pCreationRequest(P2pCreationMode.FIXED_5_GHZ, 5180), P2pStartupRecovery.plan(null).first())
+    }
+
+    @Test fun aManualChannelIsStillTheDriversChoiceWithoutFiveGhz() {
+        assertEquals(listOf(P2pCreationRequest(P2pCreationMode.PREFERRED_CHANNEL, 5180)),
+            P2pStartupRecovery.plan(null, preferredChannel = 36, fiveGhz = false))
+    }
 }

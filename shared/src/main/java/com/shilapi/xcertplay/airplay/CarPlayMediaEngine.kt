@@ -202,7 +202,10 @@ class CarPlayMediaEngine(
             session.logDebug(
                 "Audio: setup type=$type audioType=$audioType input=${stream["input"] ?: "none"} " +
                     "micPort=${if ((stream["dataPort"] as? Number)?.toInt()?.let { it > 0 } == true) "yes" else "no"} " +
-                    "microphone=${if (microphone != null) "on" else "off"} keys=${stream.keys.sorted().joinToString(",")}",
+                    "microphone=${if (microphone != null) "on" else "off"} keys=${stream.keys.sorted().joinToString(",")}" +
+                    // main #718：微信通话带过 vocoderInfo，报告此前只显示它的名字（作者：TRAE AI）。
+                    // An app call (WeChat, #718) carried vocoderInfo; the report showed only its name.
+                    (stream["vocoderInfo"]?.let { " vocoderInfo=${it.toString().take(200)}" } ?: ""),
             )
         }
 

@@ -340,7 +340,8 @@ class CarPlayController(
             if (btPrefs.getBoolean("bt_suspend_during_carplay", false)) {
                 // close() 会标记 [closed]，正在关闭的会话在 onSessionEnded 清除 activeSession 前
                 // 也会先自我标记；resume 的锁下三重校验三者。
-                BydBluetoothSuspend.suspend(appContext, this@CarPlayController, btSuspendDelayMs(btPrefs)) {
+                BydBluetoothSuspend.suspend(appContext, this@CarPlayController, btSuspendDelayMs(btPrefs),
+                    log = { debugLog(it) }) {
                     !closed && activeSession === session && !session.isClosed
                 }
             }
@@ -358,7 +359,7 @@ class CarPlayController(
                 synchronized(albumReplayLock) { initialArtworkReplay = null }
                 BydNavigationOutputs.endNow(preserveTurnOverlay = !closed && config.transport == CarPlayTransport.WIRELESS)
                 // main #307：会话结束即恢复车机蓝牙。
-                BydBluetoothSuspend.resume(appContext, this@CarPlayController)
+                BydBluetoothSuspend.resume(appContext, this@CarPlayController) { debugLog(it) }
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
                 videoListener?.onVideoSessionEnded()
                 synchronized(playbackStatus) {
@@ -641,7 +642,7 @@ class CarPlayController(
         }
         firstTcpWatchdog?.terminate()
         // main #307：控制器关闭时恢复车机蓝牙租约。
-        BydBluetoothSuspend.resume(appContext, this)
+        BydBluetoothSuspend.resume(appContext, this) { debugLog(it) }
         startupTimer.shutdownNow()
         (hotspot as? ManualHotspotManager)?.close()
         val teardownStarted = System.nanoTime()

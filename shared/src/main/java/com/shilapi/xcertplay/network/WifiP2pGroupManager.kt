@@ -128,7 +128,11 @@ class WifiP2pGroupManager(
         try {
             val station = readStation()
             val stationFrequency = station.alignmentFrequency
-            checkPrerequisites(station)
+            // main #582：Wi-Fi 开着且射频自报无 5GHz 时，Auto 计划跳过 5GHz（作者：TRAE AI）。
+            val fiveGhz = checkPrerequisites(station)
+            if (!fiveGhz && preferredChannel == WifiP2pChannels.AUTO) {
+                diagnostic("Wi-Fi P2P 5 GHz skipped: the Wi-Fi chip reports no 5 GHz band")
+            }
             val remembered = configurationMemory.read()
             val preferred = remembered?.takeIf {
                 preferredChannel == WifiP2pChannels.AUTO && it.stationMHz == stationFrequency
@@ -185,6 +189,7 @@ class WifiP2pGroupManager(
                 preferredChannel = preferredChannel,
                 // 仅指定频段的请求需要 API 29 的 WifiP2pConfig；legacy 路径只固定信道（main #432）。
                 bandRequests = !legacyChannels,
+                fiveGhz = fiveGhz,
                 beforeRetry = {
                     ensureStartActive(attempt)
                     // Do not cancel discovery, toggle Wi-Fi, or remove a newly observed group.
@@ -763,7 +768,8 @@ class WifiP2pGroupManager(
         Station(info?.supplicantState, info?.frequency?.takeIf { it > 0 })
     }.getOrDefault(Station(null, null))
 
-    private fun checkPrerequisites(station: Station) {
+    /** Returns false only when Wi-Fi is on and reports no 5 GHz band; it also reads false while Wi-Fi is off. */
+    private fun checkPrerequisites(station: Station): Boolean {
         val wifi = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         val fiveGhzSupported = runCatching { wifi?.is5GHzBandSupported }.getOrNull()
         val wifiEnabled = runCatching { wifi?.isWifiEnabled }.getOrNull()
@@ -784,6 +790,7 @@ class WifiP2pGroupManager(
         if (wifiEnabled == false) throw IOException("Turn on Wi-Fi in the head unit's settings, then reconnect")
         // Location mode is diagnostic only: AOSP createGroup does not require it to be on.
         // Do not block firmware where Wi-Fi Direct works with Location services disabled.
+        return !(wifiEnabled == true && fiveGhzSupported == false)
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)

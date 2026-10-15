@@ -38,6 +38,9 @@ class WifiP2pGroupManagerTest {
         shadowOf(context).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
         val wifi = context.getSystemService(WifiManager::class.java)
         wifi.isWifiEnabled = true
+        // A station on 5180 MHz implies a 5 GHz radio; Robolectric reports none by default.
+        // main #582（波次十三批次H，作者：TRAE AI）：显式声明支持 5GHz，避免计划被新逻辑裁剪。
+        shadowOf(wifi).setIs5GHzBandSupported(true)
         shadowOf(wifi.connectionInfo).setFrequency(5180)
         shadowOf(wifi.connectionInfo).setSupplicantState(SupplicantState.COMPLETED)
     }

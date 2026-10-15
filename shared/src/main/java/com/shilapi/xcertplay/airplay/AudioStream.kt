@@ -89,6 +89,9 @@ class AudioStream(
     }
 
     private fun runData(socket: DatagramSocket, listener: Listener) {
+        // main #737：车机打开 360° 全景影像时，默认优先级的音频线程被挤在后面（作者：TRAE AI）。
+        // When the head unit opens its 360° camera, default-priority audio threads wait behind it (#737).
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) }
         val stats = StreamReceiveStats("audio type=$streamType", onDiagnostic)
         val buffer = ByteArray(DATAGRAM_BYTES)
         try {
