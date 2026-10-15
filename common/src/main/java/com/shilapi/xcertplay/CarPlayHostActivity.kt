@@ -304,6 +304,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
 
     // The full-window viewport stays independent of the letterboxed SurfaceView dimensions.
     private var videoView: View? = null
+    private var blackCornerOverlay: CarPlayBlackCornerOverlay? = null
     private var fallbackVideoView: SurfaceView? = null
     private var fallbackVideoBounds: CarPlaySurfaceBounds? = null
     // 波次十一批次D（main #669）：SurfaceView 视频输出的最后一帧。它的 surface 消失时（DiPlay 离开屏幕）
@@ -476,7 +477,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var harmanFullscreenEnabled = false
     private var harmanFullscreenApplied = false
     private var safeAreaDrawOutside = true
+    // 分支波九移植 main #596 时显式保留默认 true（见 AirPlayPersistence L1261 注释）；
+    // main 10e53d9f 的 false 默认值变更在迁移范围外，不随批次 F 带入。
     private var mainDisplayDisableSafeArea = true
+    private var blackCornerRadiusDp = 0
     private var locationReportingEnabled = false
     private var locationPermissionAvailable = false
     private var microphoneAvailable = false
@@ -818,6 +822,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         harmanFullscreenEnabled = AirPlayPersistence.loadHarmanFullscreen(this)
         safeAreaDrawOutside = AirPlayPersistence.loadSafeAreaDrawOutside(this)
         mainDisplayDisableSafeArea = AirPlayPersistence.loadMainDisplayDisableSafeArea(this)
+        blackCornerRadiusDp = AirPlayPersistence.loadBlackCornerRadiusDp(this)
+        blackCornerOverlay?.radiusDp = blackCornerRadiusDp
         locationPermissionAvailable = hasFineLocationPermission()
         loadConnectionSettings()
         wirelessPermissionsReady = !wirelessEnabled || hasRequiredWirelessPermissions()
@@ -1710,6 +1716,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             setOnTouchListener { view, event -> onHostTouch(view, event) }
         }
         root.addView(video, FrameLayout.LayoutParams(-1, -1))
+        blackCornerOverlay = CarPlayBlackCornerOverlay(this).also { overlay ->
+            overlay.radiusDp = blackCornerRadiusDp
+            root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        }
         root.addView(gestureLayer, FrameLayout.LayoutParams(-1, -1))
         // Measure the preparation content naturally, then fit it inside the safe viewport.
         val viewport = object : FrameLayout(this) {
@@ -3233,6 +3243,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         AirPlayPersistence.saveTemporarySystemBars(this, temporarySystemBarsEnabled)
         AirPlayPersistence.saveSafeAreaDrawOutside(this, safeAreaDrawOutside)
         AirPlayPersistence.saveMainDisplayDisableSafeArea(this, mainDisplayDisableSafeArea)
+        AirPlayPersistence.saveBlackCornerRadiusDp(this, blackCornerRadiusDp)
     }
 
     /** main #500：镜像 [persistMenuSettings]——凡在那里暂存的字段都必须参与签名（作者：TRAE AI）。 */
@@ -3244,7 +3255,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         displayScalePercent, fps, widthPhysicalMm, physicalSizeBasis, hevcEnabled,
         hevcSoftwareDecoderEnabled, manufacturer, model, oemLabel, debugLogsEnabled, rightHandDrive,
         carPlayDock, hideTopBar, hideBottomBar, temporarySystemBarsEnabled,
-        safeAreaDrawOutside, mainDisplayDisableSafeArea,
+        safeAreaDrawOutside, mainDisplayDisableSafeArea, blackCornerRadiusDp,
     ).joinToString("|").hashCode()
 
     private fun captureSettingsBaseline(): SettingsBaseline {
@@ -3299,6 +3310,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         updateManualHotspotFields()
         updateAirPlayIconPreview()
         updateSafeAreaSummary()
+        blackCornerOverlay?.radiusDp = blackCornerRadiusDp
         updateHotspotStatusBlock()
         updateResolutionMenu()
         updateDebugOverlays()
@@ -3955,6 +3967,28 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) },
+        )
+        section.addView(
+            menuText(getString(R.string.black_corner_overlay_description), 15f, MENU_SECONDARY),
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = dp(12) },
+        )
+        section.addView(
+            buildStepSliderSection(
+                getString(R.string.black_corner_overlay),
+                CarPlayBlackCornerOverlay.RADII_DP,
+                blackCornerRadiusDp,
+                { value ->
+                    if (value == 0) getString(R.string.black_corner_overlay_off)
+                    else getString(R.string.black_corner_overlay_value, value)
+                },
+            ) { value ->
+                blackCornerRadiusDp = value
+                blackCornerOverlay?.radiusDp = value
+                appendLog("Local black corner radius preview=$value dp")
+            },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = dp(8) },
         )
         safeAreaSummaryView = summary
         updateSafeAreaSummary()
@@ -5556,6 +5590,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         val view = videoView ?: return
         if (viewWidth <= 0 || viewHeight <= 0) return
         val content = contentRect(viewWidth, viewHeight)
+        blackCornerOverlay?.setContentBounds(RectF(content.left, content.top,
+            content.left + content.width, content.top + content.height))
         val fallback = fallbackVideoView
         if (fallback != null) {
             val bounds = CarPlaySurfaceBounds.from(content)

@@ -937,4 +937,8 @@
     <string name="settings_call_speakerphone_description">適用於當作車機的 Android 手機或平板：CarPlay 通話從揚聲器播放而不是聽筒，並使用免持麥克風。車機上請保持關閉。從下一次通話開始生效。</string>
     <string name="temporary_system_bars">暫時顯示系統列（5 秒）</string>
     <string name="temporary_system_bars_description">開啟後，使用與 DiPlay 設定手勢相同數量的手指向上滑動，暫時顯示車機狀態列及導覽列 5 秒；向下滑動仍開啟 DiPlay 設定。如與車機手勢衝突，請關閉此功能。部分裝置可能無法顯示。</string>
+    <string name="black_corner_overlay">黑色圓角遮罩</string>
+    <string name="black_corner_overlay_description">在本機將 CarPlay 畫面四角遮成黑色。請選擇能遮住桌布的最小圓角半徑。預設關閉；並非 iPhone 提供的精確遮罩。可立即預覽，儲存後保留設定。</string>
+    <string name="black_corner_overlay_off">關閉</string>
+    <string name="black_corner_overlay_value">%1$d dp</string>
 </resources>
