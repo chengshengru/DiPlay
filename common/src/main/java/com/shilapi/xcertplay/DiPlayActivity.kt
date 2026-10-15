@@ -546,6 +546,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             return
         }
         handler.removeCallbacks(tick); handler.post(tick)
+        // main #748：从系统"修改系统设置"页返回且权限已授予时，重跑此前缺权限的热点启动（作者：TRAE AI）。
+        if (hotspotStartupResult == CarHotspotTethering.Result.PERMISSION_REQUIRED && CarHotspotTethering.permitted(this)) {
+            hotspotStartupResult = null
+            startupHotspotCancelled = false
+            startCarHotspotOnLaunch()
+        }
         // Back from the car settings: refresh the car hotspot reminder on the home page.
         if (!initialLaunch && !adbSwitchChangePending && !pausedForAdbSwitchChange &&
             (page == "home" || page == "settings" || page == "connection")) render()
@@ -1326,8 +1332,15 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(this) != true
         }
         if (startupProblem != null) {
-            card.addView(label(hotspotResultText(startupProblem), 15, WARNING))
-            card.addView(button(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() }, matchButton(10, 56))
+            // main #748：非 BYD 车机在 Android"修改系统设置"页即可放行热点启动权限，无需 ADB（作者：TRAE AI）。
+            val allowOnSystemScreen = startupProblem == CarHotspotTethering.Result.PERMISSION_REQUIRED &&
+                !CarHotspotSetup.isBydHeadUnit(this) && CarHotspotTethering.appStartSupported()
+            card.addView(label(if (allowOnSystemScreen) getString(R.string.settings_write_settings_missing)
+                else hotspotResultText(startupProblem), 15, WARNING))
+            card.addView(
+                if (allowOnSystemScreen) button(getString(R.string.settings_write_settings_allow), false) { openWriteSettingsAccess() }
+                else button(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() },
+                matchButton(10, 56))
         } else if (carHotspotOff()) {
             val name = AirPlayPersistence.loadManualHotspotSsid(this)
             val off = if (name.isBlank()) getString(R.string.hotspot_details_off) else getString(R.string.msg_car_hotspot_off, name)
@@ -3143,13 +3156,46 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     // An opted-in connection prepares the hotspot in the controller instead of stopping at this reminder.
     private fun carHotspotOff(): Boolean =
         AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL &&
-            com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(this) == false &&
+            CarHotspotSettings.reportedOff(this, com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(this)) &&
             !(CarHotspotSettings.enabled(this) && CarHotspotTethering.permitted(this))
+
+    /**
+     * main #748：非 BYD 车机启动热点只需 Android"修改系统设置"权限（WRITE_SETTINGS），
+     * 由司机在系统页放行，不涉及 ADB（作者：TRAE AI）。
+     */
+    private fun systemHotspotSettings(parent: LinearLayout) {
+        section(parent, getString(R.string.settings_car_hotspot_control), R.drawable.ic_dp_permissions) { card ->
+            toggle(card, getString(R.string.auto_car_hotspot_title),
+                getString(R.string.settings_auto_car_hotspot_system_description), CarHotspotSettings.enabled(this)) { enabled ->
+                CarHotspotSettings.setEnabled(this, enabled)
+                if (!enabled) startupHotspotCancelled = true
+                else if (!CarHotspotTethering.permitted(this)) openWriteSettingsAccess()
+            }
+            val permitted = CarHotspotTethering.permitted(this)
+            card.addView(label(getString(if (permitted) R.string.settings_write_settings_granted
+                else R.string.settings_write_settings_missing), 14, if (permitted) READY else MUTED).apply {
+                setPadding(0, dp(6), 0, dp(4))
+            })
+            if (!permitted) {
+                card.addView(button(getString(R.string.settings_write_settings_allow), false) { openWriteSettingsAccess() },
+                    matchButton(8, 54))
+            }
+        }
+    }
+
+    private fun openWriteSettingsAccess() =
+        openSystem(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
 
     private fun bydAdbSettings(parent: LinearLayout) {
         if (AirPlayPersistence.loadWirelessHotspotMode(this) != WirelessHotspotMode.MANUAL) return
         if (!CarHotspotSetup.isBydHeadUnit(this)) {
-            Log.i("DiPlay-Hotspot", "settings hidden: BYD head unit not detected")
+            // main #748：非 BYD 且系统允许应用自启热点时，改走"修改系统设置"控制（作者：TRAE AI）。
+            if (CarHotspotTethering.appStartSupported()) {
+                Log.i("DiPlay-Hotspot", "BYD head unit not detected: hotspot control through system settings access")
+                systemHotspotSettings(parent)
+            } else {
+                Log.i("DiPlay-Hotspot", "settings hidden: BYD head unit not detected; Android ${Build.VERSION.SDK_INT} does not let an app start tethering")
+            }
             return
         }
         if (searchIndexSink != null) {
@@ -3314,7 +3360,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         AlertDialog.Builder(this).setTitle(getString(R.string.car_hotspot_is_off))
             .setMessage(getString(R.string.msg_car_hotspot_connect, AirPlayPersistence.loadManualHotspotSsid(this)))
             .setPositiveButton(getString(R.string.open_car_settings)) { _, _ -> openCarWifiSettings() }
-            .setNeutralButton(getString(R.string.connect)) { _, _ -> connect(true) }
+            .setNeutralButton(getString(R.string.connect)) { _, _ ->
+                // main #789：司机看得见热点已开时，以司机的判断覆盖 Android 的"已关闭"上报，
+                // 否则每次点击都会重新弹出本对话框（#604）（作者：TRAE AI）。
+                CarHotspotSettings.setOffReportIgnored(this, true)
+                connect(true)
+            }
             .setNegativeButton(getString(R.string.cancel), null).show()
     }
 
@@ -5817,6 +5868,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine(StartupDiagnosticSnapshot.report(appContext))
         appendLine("Startup settings: openAfterBoot=${AirPlayPersistence.loadAutoStartOnBoot(appContext)} " +
             "connectWhenOpened=${DiPlayPreferences.autoConnect(appContext)}")
+        // main #748/#749：诊断报告加入热点控制状态（作者：TRAE AI）。
+        appendLine("Car hotspot control: autoEnable=${CarHotspotSettings.enabled(appContext)} " +
+            "writeSettings=${CarHotspotTethering.permitted(appContext)} " +
+            "bydHeadUnit=${runCatching { CarHotspotSetup.isBydHeadUnit(appContext) }.getOrNull()} " +
+            "hotspotOn=${runCatching { com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(appContext) }.getOrNull()}")
         appendLine(WheelKeyService.report(appContext))
         WheelKeyLog.report(WheelKeyService.connected()).forEach { appendLine(it) }
         appendLine()

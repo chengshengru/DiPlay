@@ -2532,11 +2532,14 @@ class CarPlayController(
                     "${result.diagnostic}. Open the car hotspot settings and connect again.")
             }
         }
-        if (hotspotMode == WirelessHotspotMode.MANUAL &&
-            com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(appContext) == false
-        ) {
-            throw WirelessStartupException(WirelessStartupFailure.HOTSPOT_CONFIGURATION,
-                "The car hotspot is off. Turn it on in the car settings and connect again.")
+        // main #789：司机在对话框点"连接"后信任其判断（reportedOff），不再因 Android 误报热点关闭而拒绝（#604）。
+        if (hotspotMode == WirelessHotspotMode.MANUAL) {
+            val state = com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(appContext)
+            if (com.shilapi.xcertplay.network.CarHotspotSettings.reportedOff(appContext, state)) {
+                throw WirelessStartupException(WirelessStartupFailure.HOTSPOT_CONFIGURATION,
+                    "The car hotspot is off. Turn it on in the car settings and connect again.")
+            }
+            if (state == false) debugLog("car hotspot: Android reports it off; connecting anyway, as the driver chose")
         }
         // android-4.2.2：ExistingWifiManager 依赖 ConnectivityManager.NetworkCallback（API 21）等
         // 一整套 API 21+ 网络 API；API 17-20 设备上匿名回调子类连类加载都无法完成

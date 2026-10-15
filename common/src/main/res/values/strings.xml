@@ -647,6 +647,11 @@
     <string name="settings_gesture_fingers_option">%1$d fingers</string>
     <string name="settings_gesture_fingers_hint">Pick a finger count your head unit does not already use. BYD takes three-finger swipe-down for its air-conditioning panel.</string>
     <string name="auto_car_hotspot_title">Automatically turn on the car hotspot</string>
+    <string name="settings_car_hotspot_control">Car hotspot</string>
+    <string name="settings_auto_car_hotspot_system_description">Turns on the saved car hotspot when DiPlay opens and before a wireless connection. DiPlay needs Android\'s “Modify system settings” access; ADB is not required. To have the hotspot after a full restart, also turn on opening DiPlay after the car starts. The hotspot is not turned off automatically.</string>
+    <string name="settings_write_settings_missing">“Modify system settings” access is not allowed yet. Allow it so DiPlay can turn on the hotspot.</string>
+    <string name="settings_write_settings_allow">Allow access</string>
+    <string name="settings_write_settings_granted">“Modify system settings” access: allowed</string>
     <string name="auto_car_hotspot_description">Starts the saved car hotspot when DiPlay opens. Turning this on automatically requests the required permissions through ADB; allow the prompt on the car screen. Enable “Open after the car starts” for boot startup. Keeps the hotspot name and password and never turns it off.</string>
     <string name="hotspot_control_missing">Hotspot control permission is missing. Set it up through ADB or open the hotspot in car settings.</string>
     <string name="hotspot_permission_granted">Permission granted.</string>
