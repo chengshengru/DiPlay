@@ -951,7 +951,8 @@
     <string name="temporary_system_bars">システムバーを5秒間だけ表示</string>
     <string name="temporary_system_bars_description">有効にすると、設定メニューで指定した本数の指で上にスワイプすると、隠した車載端末のステータスバー・ナビゲーションバーを5秒間表示します。下スワイプは従来どおりDiPlay設定を開きます。端末側のジェスチャーと競合する場合はオフにしてください。機種によっては表示できません。</string>
     <string name="black_corner_overlay">角を黒く丸める</string>
-    <string name="black_corner_overlay_description">CarPlay映像の四隅を端末側で黒く隠します。壁紙が見えなくなる最小の半径を選んでください。初期設定はオフです。iPhoneから送られる正確なマスクではありません。すぐにプレビューされ、保存で設定を保持します。</string>
+    <string name="black_corner_overlay_description">CarPlay映像の四隅を黒く隠します。オフ、手動の半径、iPhoneのマスク（実験的機能）を選択できます。iPhone方式は再接続が必要です。画像を取得できない場合は24dpの近似表示に戻ります。手動調整はすぐにプレビューでき、保存で設定を保持します。</string>
     <string name="black_corner_overlay_off">オフ</string>
     <string name="black_corner_overlay_value">%1$d dp</string>
+    <string name="iphone_corner_mask_mode">iPhoneのマスク（実験的機能）</string>
 </resources>

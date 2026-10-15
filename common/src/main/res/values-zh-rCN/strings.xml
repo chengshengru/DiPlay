@@ -939,7 +939,8 @@
     <string name="temporary_system_bars">临时显示系统栏（5 秒）</string>
     <string name="temporary_system_bars_description">开启后，使用与 DiPlay 设置手势相同数量的手指向上滑动，暂时显示车机状态栏和导航栏 5 秒；向下滑动仍打开 DiPlay 设置。如果与车机手势冲突，请关闭此功能。部分设备可能无法显示。</string>
     <string name="black_corner_overlay">黑色圆角遮罩</string>
-    <string name="black_corner_overlay_description">在本机将 CarPlay 画面四角遮成黑色。请选择能遮住壁纸的最小圆角半径。默认关闭；并非 iPhone 提供的精确遮罩。可立即预览，保存后保留设置。</string>
+    <string name="black_corner_overlay_description">将 CarPlay 画面四角遮成黑色。可选择关闭、手动圆角半径或 iPhone 遮罩（实验性）。iPhone 模式需要重新连接；若未收到有效遮罩，则使用 24 dp 近似值。手动调整可立即预览，保存后保留设置。</string>
     <string name="black_corner_overlay_off">关闭</string>
     <string name="black_corner_overlay_value">%1$d dp</string>
+    <string name="iphone_corner_mask_mode">iPhone 遮罩（实验性）</string>
 </resources>

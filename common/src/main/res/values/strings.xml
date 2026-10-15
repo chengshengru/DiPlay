@@ -978,7 +978,8 @@
     <string name="temporary_system_bars">Temporary system bars (5 seconds)</string>
     <string name="temporary_system_bars_description">Optional: swipe up with the configured settings gesture fingers to show hidden car status/navigation bars for five seconds; swipe down still opens DiPlay settings. Disable on head units with conflicting gestures. Some firmware may ignore the request.</string>
     <string name="black_corner_overlay">Black rounded corners</string>
-    <string name="black_corner_overlay_description">Cover the corners of the CarPlay picture with local black masks. Choose the smallest radius that hides the wallpaper. Off by default; not the iPhone’s exact corner shapes. Preview is immediate; Save keeps the choice.</string>
+    <string name="black_corner_overlay_description">Cover CarPlay picture corners in black. Choose Off, a manual radius, or the iPhone mask (experimental). The iPhone mode needs a new connection and falls back to 24 dp if no valid mask arrives. Manual changes preview immediately; Save preserves the selection.</string>
     <string name="black_corner_overlay_off">Off</string>
     <string name="black_corner_overlay_value">%1$d dp</string>
+    <string name="iphone_corner_mask_mode">iPhone mask (experimental)</string>
 </resources>
