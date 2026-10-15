@@ -1,7 +1,7 @@
 # DiPlay main 分支新功能迁移至 android-4.2.2 分支 — 详细迁移指南
 
 > **作者**: TRAE AI
-> **生成日期**: 2026-10-09 ｜ **最后更新**: 2026-10-14
+> **生成日期**: 2026-10-09 ｜ **最后更新**: 2026-10-15
 > **源分支基线**: `main` @ `ef4e3fe5c39fa49a532a9570ecb930618a06e106`（2026-10-09 16:00 +0400，Merge PR #528）
 > **目标分支**: `android-4.2.2` @ `6a08b07d`（2026-10-09 20:42 +0800，"迁移热点恢复"）
 > **分叉点**: `7887bb7b`（v0.2.14，2026-10-07）
@@ -34,7 +34,7 @@
 
 | 锚点 | Commit（完整哈希） | 时间 | 说明 |
 |------|--------------------|------|------|
-| **main 基线** | `c30d3f0df18dd132739d864a9e054c73b3d57d8c` | 2026-10-13 | `Merge pull request #734 from shihabal3amri/fix/reports-20261013b`（0.2.20 next，尚未打 tag）；**波次十二（0.2.20 增量轮，批次 A–H）已迁移**。上一基线与历史：`9aa9c549`（0.2.19；波次十一批次 A–I 已迁移）→ `d9881b4a`（release/0.2.18；波次十批次 A–H）→ `24ae1fa5`（波次九批次 A–H）→ `4314bbe1`（波次八） |
+| **main 基线** | `969f871433b76f6c59f3c93619f7cb5872fdd15d` | 2026-10-15 | `Merge pull request #799 from shihabal3amri/release/0.2.20`（0.2.20 正式版，`versionCode 39`/`0.2.20`）；**波次十三（0.2.20 正式增量轮，批次 A–H）已迁移**。上一基线与历史：`c30d3f0d`（0.2.20 next；波次十二批次 A–I 已迁移）→ `9aa9c549`（0.2.19；波次十一批次 A–I 已迁移）→ `d9881b4a`（release/0.2.18；波次十批次 A–H）→ `24ae1fa5`（波次九批次 A–H）→ `4314bbe1`（波次八） |
 | **分叉点** | `7887bb7bf2b52258e663a2a4ea1332382ed80ad8` | 2026-10-07 15:24 +0400 | v0.2.14 发布合并点，两分支共同祖先 |
 | **android-4.2.2 起点** | `6a08b07d2ee41f002d9f8b5151c94d7ed26d5fea` | 2026-10-09 20:42 +0800 | 分支已有 4 个移植提交（API 17 下移、legacy-mdns、热点恢复） |
 
@@ -167,6 +167,15 @@ flowchart LR
 | 十二 | 批次G 设置滑动菜单按目标分组 + 搜索不杀进程(Android9-) + mfi认证入设置 | #696 | ✅ 已完成 | 2026-10-14 | 本批次（高风险合并）；`CarPlayHostActivity.buildSettingsMenu` 按目标分组（connection/navigation/display/vehicle/diagnostics/advanced/more）合并既有玻璃壳，**仅替换内容区**、保留 `UiCompat` 守卫；`setLayoutInScreenEnabled` 反射 `runCatching`；`createMfiTargetChoice`（LOCAL/USB_CH341）入 Connection。测试 `CarPlayHostSettingsTest`/`AdaptiveSettingsUiTest`/`MfiTargetSettingsTest` 同步（⏭️ 分支无截图基建，跳过 `checkSwipeMenuScreenshot`） |
 | 十二 | 批次H 方向盘按键日志 + 崩溃记录进诊断报告 | #662/#463 | ✅ 已完成 | 2026-10-14 | 本批次；新增 `WheelKeyLog`（环形缓冲 40，`@Synchronized`）+ `CrashRecord`（`format/report/install`；provider `authorities=${applicationId}.crash-record`）；`DiPlayActivity` 诊断报告追加两段。测试 `WheelKeyLogTest`/`WheelKeyServiceReportTest`/`CrashRecordTest` 同步 |
 | 十二 | 批次I 本地化补缺与测试同步 | 各批次随附 | ✅ 已完成 | 2026-10-14 | 本批次；6 语系（ar/es/ru/uk/zh-rCN/zh-rTW）`strings_settings_layout.xml` 补 `settings_more`/`settings_swipe_advanced`（此前缺失会导致 `SettingsTranslationsTest`/`TraditionalChineseTranslationsTest` 红灯）；新增 11 个测试文件；按 main 增量同步 11 个既有测试（`NavigationWheelKeyPolicyTest` 分支已删，正确跳过）。版本同步 `versionCode 39`/`0.2.20-api17` + CHANGELOG 首段（依报告 §7；待 main 打 0.2.20 tag 若有出入以 main tag 为准） |
+| 十三 | 批次A 音频增强（通话听筒→扬声器、媒体时钟漂移补偿、导航音频衰减、独立音乐缓冲区、VOICE_RECOGNITION 麦克风源、上报事件上限 5） | #797/#788/#752/`7d991396`/#770/#789 | ✅ 已完成 | 2026-10-15 | 分支提交 `33887657`（28 文件 +2171/-19）；新增 `MediaClockTrim`（playbackRate **API 23+ 守卫**，低版本 no-op）/`NavigationAudioGain`；`AndroidMediaSink` 听筒→扬声器（`setCommunicationDevice` API 31 else `isSpeakerphoneOn`）、无线/有线独立缓冲区、rebuffer/queue-full 上报封顶 5；`MicrophoneUplink` 记 VOICE_RECOGNITION；测试 `CallEarpieceFallbackTest`/`MediaClockTrimTest`/`NavigationAudioGainTest`/`TelephonyMicrophoneTest` 同步 |
+| 十三 | 批次B 氛围灯重设计（31 色色块网格、0-6 亮度滑块、白话行为摘要、空闲行为三选） | #749/#772 | ✅ 已完成 | 2026-10-15 | 分支提交 `aa3f761b`（17 文件 +937/-81）；报告伪码"Compose→View 改写"不成立——main 本就是 View 体系，`AmbientBehaviorText`/`AmbientSwatchGrid`（自定义 ViewGroup 流式布局）直移；`showAmbientConfiguration()` 整体替换为 main 版，SeekBar tint 走 `UiCompat.setSeekBarTints`；空闲行为 `AmbientIdleBehavior`（STEADY 默认/CAR 15 秒回车机/OFF 最低档）+ `AmbientMusicActivityPolicy/Controller/Settings` checkout `8e26c618`；字符串 26 新 + 1 替换 + 3 删除 × 8 语系；`AmbientSettingsRedesignTest` 适配 `SwitchCompat` |
+| 十三 | 批次C 热点与连接（非 BYD 车机无 ADB 启动热点、热点关闭对话框"连接"按钮、Android 8.0+ 才提供自动切换、hidden API 豁免仅 tethering） | #748/#789/#775 | ✅ 已完成 | 2026-10-15 | 分支提交 `6ea2491e`（18 文件 +763/-19）；新增 `PlatformTetheringStart`（反射 TetheringManager，**Oreo+ 守卫**）；`CarHotspotSettings`/`CarPlayController` Connect 接线；`FakeConnectivityBinder` 测试基建同步 |
+| 十三 | 批次D Siri 与语音键（长按语音键开 Siri 默认关开关、仅 BYD 车机长按、方向盘语音键单次按下只触发一次） | #786/#774 | ✅ 已完成 | 2026-10-15 | 分支提交 `e8bfb9c9`（16 文件 +223/-2）；`DiPlayActivity` 长按开关持久化；`CarPlayHostActivity`/`CarPlayMediaButton` BYD 集合判定；`WheelKeyService` 防双击 |
+| 十三 | 批次E 蓝牙诊断（缺失适配器直接说明原因、开关留不住追加"无线 CarPlay 不可用"提示） | #780/#581 | ✅ 已完成 | 2026-10-15 | 分支提交 `3f6eed95`（15 文件 +207/-22）；`BluetoothRadioCheck` 扩展；iPhone 选择与连接路径直接说明不再重复询问；字符串 × 8 语系 |
+| 十三 | 批次F 媒体按键与报告（媒体按键与焦点变化上报、CH341 等待时 Android 设备列表） | #793/#787 | ✅ 已完成 | 2026-10-15 | 分支提交 `3064897e`（6 文件 +106/-2）；`CarPlayMediaKeys`/`WheelKeyLog` 上报；`Ch341UsbHost` 设备列表入诊断报告 |
+| 十三 | 批次G UI 与设置（等待屏跟随日/夜、Choose iPhone 未选择前不命名、Wi-Fi Direct 扫描暂停开关默认开、有线会话首页卡片标题 USB CarPlay、ADB 检查结果 toast） | #768/#778/#724/#742 | ✅ 已完成 | 2026-10-15 | 分支提交 `a00b25eb`（19 文件 +315/-8）；`CarPlayHostActivity` 主题联动；新增 `HomeCardTransport`（实际仅 6 行，报告伪码高估）+ 测试；`AirPlayPersistence` 扫描暂停开关 + `CarPlayController` 接线 |
+| 十三 | 批次H 协议与传输（VERSION 回复跟随前一回复可选尾随填充成帧、Auto 计划芯片无 5GHz 时跳过、蓝牙暂停租约诊断、vocoderInfo 入报告） | #744/#740/#18 | ✅ 已完成 | 2026-10-15 | 分支提交 `11eb8bcf`（13 文件 +181/-20）；`UsbMuxFrameBuffer` VERSION 尾随填充恢复（iOS 27 平板/24 字节传输）；`WifiP2pGroupManager`/`P2pStartupRecovery` 计划裁剪；`BluetoothSuspendLease`/`BydBluetoothSuspend` 暂停结果记录；`AudioStream`/`CarPlayMediaEngine` vocoderInfo；`THREAD_PRIORITY_AUDIO`。⏭️ `BluetoothSuspendLifecycleTest` 跳过（main 333 行脚手架依赖分支缺失的 controller/Journal；6 条 outcome 断言由 `BluetoothPauseOutcomeTest` 覆盖） |
+| 十三 | 批次Z 文档同步与发布登记 | 各批次随附 | ✅ 已完成 | 2026-10-15 | 本批次；docs 同步 `BYD_AMBIENT_LIGHTING.md`/`RELEASE-NOTES-0.2.20.md`/`RELEASE-NOTES-NEXT.md`（checkout `969f8714`；BYD_NAVIGATION/COMPATIBILITY/INSTALL/VALIDATION 分支有本地差异且报告未强制，本轮不合并）；CHANGELOG 首段 `# DiPlay 0.2.20-api17 (wave 13)`；本指南 0.1 基线推进 `969f8714` + 0.4 表登记波次十三批次 A–H；版本号复核：main `969f8714` 为 `39`/`0.2.20`，与分支预留值一致，**无需调整** |
 
 ### 0.5 每轮迁移的文档更新义务
 
@@ -220,7 +229,7 @@ mobile/build.gradle.kts → android.defaultConfig.versionCode / versionName
 | `mobile` `versionName` | `0.2.19` | **`0.2.20-api17`** |
 | `CHANGELOG.md` 首段标题 | — | **`# DiPlay 0.2.20-api17 — 2026-10-14`** |
 
-> ⚠️ main 当前 tip `c30d3f0d` 仍为 `versionCode 38` / `0.2.19`，**未递增**。分支按其即将发布的 0.2.20 预留了 `39`/`0.2.20-api17`；**当 main 正式打 0.2.20 tag 后须复核**，若 main 最终以其它整数/名称发版，以 main tag 为准（届时同步 `mobile/build.gradle.kts` 与本表）。
+> ✅ **波次十三复核（2026-10-15）**：main 正式发版 `969f8714`（release/0.2.20，PR #799）为 `versionCode 39` / `0.2.20`，与分支波次十二预留值**完全一致**，分支 `mobile/build.gradle.kts` 与本表**无需调整**。
 
 #### 0.6.3 不同步的模块（误改会破坏独立版本线）
 

@@ -1,3 +1,17 @@
+# DiPlay 0.2.20-api17 (wave 13) — 2026-10-15
+
+Android 4.2.2 (API 17) port of the 63-commit increment between `main` @ `c30d3f0d` (0.2.20 next, already ported by wave 12) and `main` @ `969f8714` (the tagged 0.2.20 release). Wave 13 ports that increment (batches A–H); see the [migration report](DiPlay-main分支增量差异迁移报告-0.2.20.md) for per-feature details, file-level diffs and API 17 guards:
+
+- A call Android routes to the earpiece is moved onto the loudspeaker (#797); music keeps playing when the head unit's audio clock drifts by trimming the playback rate (#788); navigation audio attenuates media instead of stealing focus (#752); each transport gets an independent music buffer (`7d991396`); calls record from `VOICE_RECOGNITION` on call-capable sources that do not clip, and rebuffer/queue-full report events are capped at 5 (#770, #789).
+- Ambient lighting settings are redesigned: the 31 car colors become a wrapping swatch grid (single color in fixed mode, several when following music, none while the album cover decides), brightness becomes a 0-6 slider, and a plain-language "What happens" summary says what the lamps do while playing, paused, disconnected or at level 0 (#749). Idle is now a choice — steady glow (default), the car's own lighting after 15 s, or the lowest level — because the lowest raw level switches the lamps fully off on a 2023 Han (#772).
+- Head units that are not BYD can start the car hotspot without ADB through the platform tethering call, the "Car hotspot is off" dialog offers a Connect action, and the automatic hotspot switch is offered from Android 8.0, not Android 7 (#748, #789, #775).
+- Siri opens on a long press of the voice key only on BYD head units, behind a default-off switch, and one press of the wheel's voice key opens Siri once instead of firing twice (#786, #774).
+- A head unit with no Bluetooth adapter is told so when choosing an iPhone and when connecting, and a switch that will not stay on adds that wireless CarPlay cannot work there (#780, #581).
+- The diagnostic report now includes media keys and media-key focus changes, what Android lists while waiting for the CH341, the vocoder info of the AirPlay SETUP stream, and the car Bluetooth pause/resume outcome during Wi-Fi Direct scanning (#793, #787, #18).
+- The waiting screen follows the in-app day/night mode, Choose iPhone names no iPhone before one is chosen, a default-on switch pauses the car's Wi-Fi searching during a Wi-Fi Direct session (Settings → Connection), a running wired session titles its home card "USB CarPlay", and checking ADB access toasts the result (#768, #778, #724, #742).
+- A VERSION reply that follows the previous reply's optional trailer is framed instead of rejected (iOS 27 tablets, 24-byte transfers), and an Auto Wi-Fi Direct plan skips 5 GHz when the chip reports no 5 GHz band instead of asking a 2.4 GHz-only head unit for channel 36 first (#744, #740).
+- Skipped on API 17: `BluetoothSuspendLifecycleTest` (main's 333-line lifecycle suite needs controller/Journal scaffolding the branch lacks; the six outcome lines are covered by `BluetoothPauseOutcomeTest` instead).
+
 # DiPlay 0.2.20-api17 — 2026-10-14
 
 Android 4.2.2 (API 17) port of the 18-commit increment between `main` @ `9aa9c549` (0.2.19, already ported) and `main` @ `c30d3f0d`. Wave 12 ports that increment (batches A–H) on top of 0.2.19-api17; see the [migration report](DiPlay-main分支增量差异迁移报告-0.2.19-next.md) for per-feature details, file-level diffs and API 17 guards:
