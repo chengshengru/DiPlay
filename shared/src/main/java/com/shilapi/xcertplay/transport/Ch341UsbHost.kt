@@ -48,6 +48,13 @@ class Ch341UsbHost(
     fun discover(): List<UsbDevice> =
         usbManager.deviceList.values.filter { matcher.matches(it.vendorId, it.productId) }
 
+    /**
+     * main #792（波次十三批次F）：Android 当前列出的全部 USB 设备，格式 `vid:pid 设备节点`，已排序。
+     * 当配置的 CH341 不在列表里时，这份清单能说明适配器是离开了总线，还是以另一个身份回来了。
+     */
+    fun listedDevices(): List<String> =
+        usbManager.deviceList.values.map(::describe).sorted()
+
     @Throws(I2cTransportException::class)
     fun requestPermission(device: UsbDevice): PermissionRequest {
         requireConfiguredDevice(device)
@@ -156,6 +163,12 @@ class Ch341UsbHost(
         val input: UsbEndpoint,
         val output: UsbEndpoint,
     )
+
+    companion object {
+        /** `1a86:5512 /dev/bus/usb/001/004`：只含 USB 身份与设备节点，不含序列号。 */
+        fun describe(device: UsbDevice): String =
+            "%04x:%04x %s".format(device.vendorId, device.productId, device.deviceName)
+    }
 }
 
 /** Claimed CH341 USB resources. All transfer methods are blocking and must run off the main thread. */
