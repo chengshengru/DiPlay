@@ -75,6 +75,8 @@ internal object CarPlayMediaKeys {
     private var focusOwner: Any? = null
     private var focusEventRevision = 0L
     private var focusHeld = false
+    /** Some car firmware never sends a gain callback after the phone call ends. */
+    private var transientFocusInterrupted = false
     private var appContext: Context? = null
     private var mediaAudioActive = false
     private var nowPlaying = CarPlayNowPlaying()
@@ -129,7 +131,7 @@ internal object CarPlayMediaKeys {
     private fun onIphonePlaying(expected: CarPlayController, playing: Boolean) {
         if (playing) mainHandler.post {
             synchronized(this) {
-                if (controller === expected) regainFocusLocked()
+                if (controller === expected) regainFocusLocked(onIphonePlaybackResume = true)
             }
         }
     }
@@ -274,8 +276,13 @@ internal object CarPlayMediaKeys {
     // Another car app (its own Spotify, the radio) took audio focus and with it the steering-wheel
     // keys. When CarPlay starts playing again it becomes the car's media source again, as any player
     // would; only the start counts, so a car source picked while the iPhone plays on is not undone.
-    private fun regainFocusLocked() {
-        if (focusHeld) return
+    private fun regainFocusLocked() = regainFocusLocked(onIphonePlaybackResume = false)
+
+    private fun regainFocusLocked(onIphonePlaybackResume: Boolean) {
+        // Do not compete with an ongoing call. Only a fresh iPhone play transition may
+        // retry a transient loss for which the head unit never sent AUDIOFOCUS_GAIN.
+        if (transientFocusInterrupted && !onIphonePlaybackResume) return
+        if (focusHeld && !transientFocusInterrupted) return
         val audio = appContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
         val request = focusRequest
         val granted = if (request != null) {
@@ -288,7 +295,10 @@ internal object CarPlayMediaKeys {
                 AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         }
         focusHeld = granted
-        if (focusHeld) forwardGrantedFocusLocked()
+        if (focusHeld) {
+            transientFocusInterrupted = false
+            forwardGrantedFocusLocked()
+        }
         Log.i(TAG, "audio focus regained=$focusHeld")
     }
 
@@ -306,8 +316,8 @@ internal object CarPlayMediaKeys {
         // 焦点禁用分支也不能没有控制器:没有 CarPlay 控制器时媒体会话无处发送按键(main 72f88054)。
         val expectedController = controller ?: return
         val focusDisabled = AirPlayPersistence.loadDisableMediaKeyAudioFocus(context)
-        val granted: Boolean
-        if (focusDisabled) {
+        transientFocusInterrupted = false
+        val granted = if (focusDisabled) {
             // 一些 OEM 把物理音量键路由给焦点拥有者。保留活跃 MediaSession 但不长期持有焦点,
             // 让这些按键保持归车机所有(main #615)。
             focusOwner = null
@@ -372,8 +382,17 @@ internal object CarPlayMediaKeys {
             else {
                 focusEventRevision += 1
                 // Only permanent loss moves media keys elsewhere; transient losses come back.
-                if (change == AudioManager.AUDIOFOCUS_LOSS) focusHeld = false
-                else if (change == AudioManager.AUDIOFOCUS_GAIN) focusHeld = true
+                when (change) {
+                    AudioManager.AUDIOFOCUS_LOSS -> {
+                        focusHeld = false
+                        transientFocusInterrupted = false
+                    }
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> transientFocusInterrupted = true
+                    AudioManager.AUDIOFOCUS_GAIN -> {
+                        focusHeld = true
+                        transientFocusInterrupted = false
+                    }
+                }
                 true
             }
         }
@@ -420,6 +439,7 @@ internal object CarPlayMediaKeys {
         focusRequest = null
         legacyFocusListener = null
         focusHeld = false
+        transientFocusInterrupted = false
     }
 
     private fun publishPlaybackStateLocked() {
