@@ -11,6 +11,7 @@ import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.Window
 import android.widget.CompoundButton
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.PopupWindow
 import android.widget.SeekBar
@@ -167,6 +168,19 @@ internal object UiCompat {
             view.background?.mutate()?.setColorFilter(color, PorterDuff.Mode.SRC_IN)
         }
     }
+
+    /**
+     * `FrameLayout.LayoutParams(FrameLayout.LayoutParams)` 比 API 17 新：GM C140A 的框架只提供
+     * `(int, int, int)` 与 `(ViewGroup.LayoutParams)` 两个构造，Kotlin 会优先选中同型拷贝构造，
+     * dalvik 解析不到就把该指令替换成抛 [NoSuchMethodError] 的桩，执行即崩。手工逐字段复制。
+     */
+    fun copyFrameLayoutParams(source: FrameLayout.LayoutParams): FrameLayout.LayoutParams =
+        FrameLayout.LayoutParams(source.width, source.height, source.gravity).apply {
+            leftMargin = source.leftMargin
+            topMargin = source.topMargin
+            rightMargin = source.rightMargin
+            bottomMargin = source.bottomMargin
+        }
 
     /**
      * View.setOutlineProvider is API 21+. The provider class itself only exists from 21 on, so it

@@ -26,7 +26,6 @@ import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
-import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.net.Uri
 import android.os.Build
@@ -55,6 +54,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -224,6 +224,19 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             updateHotspotStatusBlock()
             maybeStartCarPlay()
         }
+    private val wiredPermissions =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+            awaitingWiredPermissions = false
+            wiredPermissionsResolved = true
+            appendLog(
+                if (grants.values.all { it }) {
+                    "Wired startup permissions granted"
+                } else {
+                    "Local network access denied: Android 17 may drop the iPhone's AirPlay connection over USB"
+                },
+            )
+            requestStartupPrerequisites()
+        }
     private val microphonePermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             microphoneAvailable = granted
@@ -340,6 +353,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var picturePanelGeneration = 0
     private var gestureOverlay: View? = null
     private var settingsMenu: View? = null
+    private var settingsMenuCategoryKey = "connection"
+    private var settingsMenuContentScroll: ScrollView? = null
     private var mfiTargetGroup: RadioGroup? = null
     private var mfiI2cFields: View? = null
     private var mfiRemoteFields: View? = null
@@ -422,6 +437,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var displayDiagnosticAttempt: String? = null
     private var hevcEnabled = true
     private var hevcSoftwareDecoderEnabled = false
+    private val hevcDecoders by lazy { HevcSupport.decoders() }
+    /** The codec a session asks for: the HEVC setting falls back to H.264 without a decoder for it (#727). */
+    private val sessionHevc: Boolean
+        get() = HevcSupport.usable(hevcEnabled, hevcSoftwareDecoderEnabled, hevcDecoders)
     private var advancedAudioChannelMappingSupported = false
     private var advancedAudioChannelMapping = false
     private var navigationStreamType = 14
@@ -468,6 +487,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var awaitingVpnConsent = false
     private var vpnAdbConsentTried = false
     private var awaitingWirelessPermissions = false
+    private var awaitingWiredPermissions = false
+    private var wiredPermissionsResolved = false
     private var awaitingLocationPermission = false
     private var vpnReady = false
     private var hotspotStatus = HotspotStatus(state = "off")
@@ -562,7 +583,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private val sidePanelTabFade = Runnable {
         sidePanelTabHint = false
         sidePanelTab?.background?.let { pill ->
-            ObjectAnimator.ofInt(pill, "alpha", pill.alpha, 0).setDuration(600L).start()
+            ObjectAnimator.ofInt(pill, "alpha", drawableAlpha(pill), 0).setDuration(600L).start()
         }
     }
     private var sidePanelShown = false
@@ -815,9 +836,25 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         }
         if (wirelessEnabled) {
             requestWirelessPermissions()
-        } else {
+        } else if (!requestWiredPermissions()) {
             requestVpnConsent()
         }
+    }
+
+    /**
+     * 申请有线启动所需的权限([WiredPermissions]);请求进行中返回 true。被拒绝仅记录日志并继续启动:
+     * 部分 ROM 上 USB 网络仍可通行。
+     */
+    private fun requestWiredPermissions(): Boolean {
+        if (wiredPermissionsResolved) return false
+        val missing = WiredPermissions.required(Build.VERSION.SDK_INT)
+            .filter { !PermissionCompat.hasPermission(this, it) }
+        if (missing.isEmpty()) return false
+        if (!awaitingWiredPermissions) {
+            awaitingWiredPermissions = true
+            wiredPermissions.launch(missing.toTypedArray())
+        }
+        return true
     }
 
     private fun requestLocationPermission() {
@@ -1572,7 +1609,11 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     override fun onDestroy() {
         // 波次十一批次D（main #669）：销毁时丢弃最后一帧并关闭其拷贝线程。
         discardLastPicture()
-        if (pictureCopyThreadStarted) pictureCopyThread.quitSafely()
+        // API17 适配：quitSafely 是 API 18+，dalvik 在 API 17 上把它替换成抛 NoSuchMethodError 的桩。
+        if (pictureCopyThreadStarted) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) pictureCopyThread.quitSafely()
+            else pictureCopyThread.quit()
+        }
         resetSidePanel()
         releaseSidePanelEffects()
         // main B7：销毁时释放外观归属权（作者：TRAE AI）。
@@ -2118,7 +2159,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private fun showSidePanelTabHint() {
         sidePanelTabHint = true
         sidePanelTab?.background?.let { pill ->
-            if (pill.alpha < 255) ObjectAnimator.ofInt(pill, "alpha", pill.alpha, 255).setDuration(200L).start()
+            val current = drawableAlpha(pill)
+            if (current < 255) ObjectAnimator.ofInt(pill, "alpha", current, 255).setDuration(200L).start()
         }
         mainHandler.removeCallbacks(sidePanelTabFade)
         mainHandler.postDelayed(sidePanelTabFade, SIDE_PANEL_TAB_HINT_MILLIS)
@@ -2393,14 +2435,21 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             val parent = previous.parent as? ViewGroup ?: return@let
             val index = parent.indexOfChild(previous)
             val visible = previous.visibility
-            val scrollY = findDescendant<ScrollView>(previous)?.scrollY ?: 0
+            val scrollY = settingsMenuContentScroll?.scrollY ?: 0
             val focusDescription = previous.findFocus()?.contentDescription?.toString()
             parent.removeView(previous)
             val replacement = buildSettingsMenu().apply { visibility = visible }
             settingsMenu = replacement
             parent.addView(replacement, index, FrameLayout.LayoutParams(-1, -1))
+            val replacementContentScroll = settingsMenuContentScroll
+            replacementContentScroll?.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+                override fun onLayoutChange(view: View, left: Int, top: Int, right: Int, bottom: Int,
+                    oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
+                    view.removeOnLayoutChangeListener(this)
+                    replacementContentScroll.scrollTo(0, scrollY)
+                }
+            })
             replacement.post {
-                findDescendant<ScrollView>(replacement)?.scrollTo(0, scrollY)
                 if (focusDescription != null) {
                     findDescendants(replacement).firstOrNull {
                         it.contentDescription?.toString() == focusDescription
@@ -2460,16 +2509,39 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 elevation = dp(SWIPE_PANEL_ELEVATION_DP).toFloat()
             }
         }
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(
-                dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CONTENT_TOP_PADDING_DP),
-                dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CONTENT_BOTTOM_PADDING_DP),
-            )
+        val categories = listOf(
+            "connection" to R.string.connection,
+            "display" to R.string.settings_display,
+            "navigation" to R.string.settings_navigation,
+            "vehicle" to R.string.settings_vehicle,
+            "diagnostics" to R.string.diagnostics,
+            "advanced" to R.string.settings_advanced,
+            "more" to R.string.settings_more,
+        )
+        val pages = LinkedHashMap<String, LinearLayout>()
+        categories.forEach { (key, title) ->
+            pages[key] = LinearLayout(this).apply {
+                tag = key
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(
+                    dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CONTENT_TOP_PADDING_DP),
+                    dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CONTENT_BOTTOM_PADDING_DP),
+                )
+                // The category name heads every page, so the sections below never add their own.
+                addView(
+                    settingsCategoryHeader(getString(if (key == "advanced") R.string.settings_swipe_advanced else title)),
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+            }
         }
+        fun pageFor(key: String) = pages.getValue(key)
+        var content = pageFor("connection")
         if (sessionDisplay?.viewAreas?.sidePanel() != null) {
-            content.addView(DiPlayButton(this).apply {
+            pageFor("advanced").addView(DiPlayButton(this).apply {
                 text = getString(if (sidePanelShown) R.string.side_panel_full_screen else R.string.side_panel_show)
                 textSize = 17f
                 minHeight = dp(52)
@@ -2480,14 +2552,6 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 }
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        content.addView(
-            settingsCategoryHeader(getString(R.string.connection)),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(32) },
-        )
-
         content.addView(
             buildMfiTargetSection(),
             LinearLayout.LayoutParams(
@@ -2565,13 +2629,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             ).apply { topMargin = dp(12) },
         )
 
-        content.addView(
-            settingsCategoryHeader(getString(R.string.settings_navigation)),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(36) },
-        )
+        content = pageFor("navigation")
         content.addView(
             buildLocationReportingSection(),
             LinearLayout.LayoutParams(
@@ -2581,13 +2639,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         )
 
         if (advancedAudioChannelMappingSupported) {
-            content.addView(
-                settingsCategoryHeader(getString(R.string.audio)),
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(36) },
-            )
+            content = pageFor("advanced")
             content.addView(
                 settingsSwitchRow(
                     label = getString(R.string.advanced_audio_channel_mapping),
@@ -2608,13 +2660,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             )
         }
 
-        content.addView(
-            settingsCategoryHeader(getString(R.string.settings_vehicle)),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(36) },
-        )
+        content = pageFor("vehicle")
         content.addView(
             buildIdentitySettingsSection(),
             LinearLayout.LayoutParams(
@@ -2630,7 +2676,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 description = getString(R.string.settings_hide_byd_call_popup_description),
             ) { hideBydCallPopup = it })
         }
-        content.addView(
+        pageFor("display").addView(
             buildAirPlayIconSection(),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2644,20 +2690,14 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(26) },
         )
-        content.addView(
+        pageFor("display").addView(
             buildDockSection(),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(26) },
         )
-        content.addView(
-            settingsCategoryHeader(getString(R.string.settings_display)),
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(40) },
-        )
+        content = pageFor("display")
 
         val resolutionControl = DisplaySettingsSection.createResolutionSlider(
             context = this,
@@ -2749,7 +2789,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             )
             updateResolutionMenu()
         }
-        content.addView(
+        pageFor("advanced").addView(
             hevcRow.rowView,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2771,7 +2811,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             updateResolutionMenu()
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            content.addView(
+            pageFor("advanced").addView(
                 softwareHevcRow.rowView,
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2796,13 +2836,16 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             ).apply { topMargin = dp(12) },
         )
 
+        val preview = menuText("", 17f, MENU_SECONDARY)
         content.addView(
-            settingsCategoryHeader(getString(R.string.diagnostics)),
+            preview,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(40) },
+            ).apply { topMargin = dp(30) },
         )
+
+        content = pageFor("diagnostics")
         content.addView(
             buildDebugLogsSection(),
             LinearLayout.LayoutParams(
@@ -2812,6 +2855,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         )
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            content = pageFor("advanced")
             content.addView(
                 settingsCategoryHeader(getString(R.string.android_9_compatibility)),
                 LinearLayout.LayoutParams(
@@ -2832,15 +2876,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             )
         }
 
-        val preview = menuText("", 17f, MENU_SECONDARY)
-        content.addView(
-            preview,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(30) },
-        )
-
+        content = pageFor("more")
         val save = DiPlayButton(this).apply {
             text = getString(R.string.save_and_reconnect)
             textSize = 17f
@@ -2877,7 +2913,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             }
         }
         gestureButton.text = settingsGestureButtonText()
-        content.addView(gestureButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        pageFor("vehicle").addView(gestureButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
         val openDiPlaySettingsButton = DiPlayButton(this).apply {
             text = "${getString(R.string.app_name)} ${getString(R.string.settings)}"
@@ -2906,16 +2942,112 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             ).apply { topMargin = dp(30) },
         )
 
+        val pageHost = FrameLayout(this)
+        val selectedPage = settingsMenuCategoryKey.takeIf(pages::containsKey) ?: "connection"
+        settingsMenuCategoryKey = selectedPage
+        pages.forEach { (key, page) ->
+            page.visibility = if (key == selectedPage) View.VISIBLE else View.GONE
+            pageHost.addView(page, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             clipToPadding = false
             addView(
-                content,
+                pageHost,
                 ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                 ),
             )
+        }
+        settingsMenuContentScroll = scroll
+        val categoryButtons = mutableListOf<Pair<String, DiPlayButton>>()
+        lateinit var chips: HorizontalScrollView
+        var fitNavigation: ((Int) -> Unit)? = null
+        fun selectCategory(key: String) {
+            settingsMenuCategoryKey = key
+            pages.forEach { (candidate, page) ->
+                page.visibility = if (candidate == key) View.VISIBLE else View.GONE
+            }
+            categoryButtons.forEach { (candidate, button) ->
+                button.style(if (candidate == key) DiPlayButtonKind.PRIMARY else DiPlayButtonKind.SECONDARY,
+                    overlayPalette, overlay = true)
+            }
+            scroll.scrollTo(0, 0)
+            chips.requestLayout()
+        }
+        fun categoryButton(key: String, title: Int) = DiPlayButton(this).apply {
+            text = getString(title)
+            textSize = 16f
+            minHeight = dp(SWIPE_CATEGORY_ACTION_HEIGHT_DP)
+            categoryButtons += key to this
+            style(if (key == selectedPage) DiPlayButtonKind.PRIMARY else DiPlayButtonKind.SECONDARY,
+                overlayPalette, overlay = true)
+            setOnClickListener { selectCategory(key) }
+        }
+        val rail = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CHROME_PADDING_DP),
+                dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_CHROME_PADDING_DP))
+            categories.forEach { (key, title) ->
+                addView(categoryButton(key, title), LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(SWIPE_ACTION_GAP_DP)
+                })
+            }
+        }
+        val railScroll = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(ColorUtils.blendARGB(MENU_BACKGROUND, overlayPalette.surface, 0.55f))
+            addView(rail)
+        }
+        val chipRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_ACTION_GAP_DP),
+                dp(SWIPE_CHROME_PADDING_DP), dp(SWIPE_ACTION_GAP_DP))
+            categories.forEach { (key, title) ->
+                addView(categoryButton(key, title), LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    marginEnd = dp(SWIPE_ACTION_GAP_DP)
+                })
+            }
+        }
+        chips = object : HorizontalScrollView(this) {
+            override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+                super.onLayout(changed, left, top, right, bottom)
+                val selectedIndex = categories.indexOfFirst { it.first == settingsMenuCategoryKey }
+                if (selectedIndex >= 0) {
+                    scrollTo((chipRow.getChildAt(selectedIndex).left - dp(SWIPE_CHROME_PADDING_DP))
+                        .coerceAtLeast(0), 0)
+                }
+            }
+        }.apply {
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(ColorUtils.blendARGB(MENU_BACKGROUND, overlayPalette.surface, 0.55f))
+            addView(chipRow)
+        }
+        val body = LinearLayout(this)
+        var railShown: Boolean? = null
+        fitNavigation = { panelWidth ->
+            val showRail = panelWidth >= dp(SWIPE_CATEGORY_RAIL_MIN_WIDTH_DP)
+            if (railShown != showRail) {
+                railShown = showRail
+                body.removeAllViews()
+                (scroll.parent as? ViewGroup)?.removeView(scroll)
+                body.orientation = if (showRail) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+                if (showRail) {
+                    body.addView(railScroll, LinearLayout.LayoutParams(dp(SWIPE_CATEGORY_RAIL_WIDTH_DP),
+                        ViewGroup.LayoutParams.MATCH_PARENT))
+                    body.addView(scroll, LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+                } else {
+                    body.addView(chips, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT))
+                    body.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                        0, 1f))
+                }
+            }
         }
         // 波次十一批次F（main #642）：标题栏（标题 + 关闭）与底栏（保存）各带"玻璃壳"的上/下圆角。
         val headerTitle = menuText(getString(R.string.carplay_settings), 20f, Color.WHITE, bold = true).apply {
@@ -2978,7 +3110,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                     ),
                 )
                 addView(
-                    scroll,
+                    body,
                     LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
                 )
                 addView(
@@ -3000,6 +3132,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 Gravity.CENTER,
             ),
         )
+        fitNavigation?.invoke(settingsMenuWidth(resources.displayMetrics.widthPixels))
 
         resolutionValueView = resolutionValue
         resolutionPreviewView = preview
@@ -3929,7 +4062,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 add(WirelessHotspotMode.WIFI_P2P to getString(R.string.wi_fi_p2p_5_ghz))
             }
-            add(WirelessHotspotMode.EXISTING_WIFI to getString(R.string.existing_wifi_title))
+            // EXISTING_WIFI 依赖 ConnectivityManager.NetworkCallback（API 21），API 17-20 设备不可用
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                add(WirelessHotspotMode.EXISTING_WIFI to getString(R.string.existing_wifi_title))
+            }
         }
         var selectedId = View.NO_ID
         for ((mode, label) in modes) {
@@ -4261,7 +4397,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             "${getString(R.string.resolution_handshake_prefix)}${native.width} x ${native.height} -> " +
                 "${negotiated.widthPixels} x ${negotiated.heightPixels}"
         }
-        val transport = if (!hevcEnabled) {
+        val transport = if (!sessionHevc) {
             "H.264"
         } else {
             "HEVC (H.265, ${if (hevcSoftwareDecoderEnabled) "software" else "hardware"})"
@@ -4317,10 +4453,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         } else decoderCanvasSupport(display)
 
     private fun decoderCanvasSupport(display: AirPlayDisplayConfig): CanvasSupport = try {
-        val mime = if (hevcEnabled) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+        val mime = if (sessionHevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
         // Match MediaCodec.createDecoderByType's first suitable decoder; do not silently force
         // an enlarged stream through a software decoder on a slower head unit.
-        val decoder = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
+        val decoder = CodecCompat.all().firstOrNull {
             !it.isEncoder && it.supportedTypes.any { type -> type.equals(mime, ignoreCase = true) }
         }
         if (decoder == null) {
@@ -4334,7 +4470,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 display.widthPixels, display.heightPixels, display.fps.toDouble()) == true
             val reason = when {
                 !hardware -> "software_decoder"
-                hevcEnabled && hevcSoftwareDecoderEnabled -> "software_hevc_selected"
+                sessionHevc && hevcSoftwareDecoderEnabled -> "software_hevc_selected"
                 video == null -> "no_video_capabilities"
                 !sizeSupported -> "canvas_dimensions_unsupported"
                 !rateSupported -> "frame_rate_unsupported"
@@ -4347,7 +4483,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                     "alignment=${video?.widthAlignment}x${video?.heightAlignment} " +
                     "fpsRange=${video?.supportedFrameRates} result=$reason")
         }
-    } catch (error: Exception) {
+    } catch (error: Throwable) {
+        // 同上：NoSuchMethodError 属 Error，catch (Exception) 拦不住，会让整个 host 崩掉。
         CanvasSupport(false, "capability_query_${error.javaClass.simpleName}",
             "Decoder capability query failed error=${error.javaClass.simpleName}")
     }
@@ -4466,7 +4603,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         }
         val longPixels = maxOf(display.widthPixels, display.heightPixels)
         val square = if (CarPlayRotation.enabled(this) && !inSplitScreen) {
-            CarPlayRotation.squareSide(longPixels, CarPlayRotation.picture(this), hevcEnabled, hevcSoftwareDecoderEnabled)
+            CarPlayRotation.squareSide(longPixels, CarPlayRotation.picture(this), sessionHevc, hevcSoftwareDecoderEnabled)
         } else null
         val canvas = if (square == null) display else {
             // The square keeps the plain canvas's pixel density, so CarPlay's scale (and "CarPlay size")
@@ -4500,13 +4637,17 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             "surface=${size.width}x${size.height} resolution=${requestedResolutionPercent}% " +
             "base=${requestedResolutionDisplay.widthPixels}x${requestedResolutionDisplay.heightPixels} " +
             "candidate=${candidate.widthPixels}x${candidate.heightPixels} fps=$fps " +
-            "codec=${if (hevcEnabled) "HEVC" else "H.264"} softwareHevc=$hevcSoftwareDecoderEnabled"
+            "codec=${if (sessionHevc) "HEVC" else "H.264"} softwareHevc=$hevcSoftwareDecoderEnabled"
         val effectiveSummary = "Display effective percent=$uiScalePercent resolution=${displayScalePercent}% " +
             "canvas=${display.widthPixels}x${display.heightPixels} decision=${support.reason} " +
             "physical=${physical.widthMm}x${physical.heightMm}mm safeArea=${display.safeArea} " +
             "drawOutside=${display.safeAreaDrawOutside}"
         displayDiagnosticAttempt = DisplayDiagnosticSnapshot.begin(this, requestSummary, support.details, effectiveSummary)
         appendLog(requestSummary)
+        if (hevcEnabled && !sessionHevc) {
+            appendLog("HEVC is on, but no hardware decoder plays it (${hevcDecoders.joinToString { it.name }.ifEmpty { "none" }}); " +
+                "this session uses H.264")
+        }
         appendLog(support.details)
         appendLog(effectiveSummary)
         // main #432：CarPlay 音频走车机蓝牙（实验性）。
@@ -4520,7 +4661,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             main = declared,
             cluster = clusterDisplayConfig(),
             rightHandDrive = rightHandDrive,
-            hevc = hevcEnabled,
+            hevc = sessionHevc,
             microphone = microphoneAvailable,
             manufacturer = normalizedManufacturer(),
             model = normalizedModel(),
@@ -4750,6 +4891,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             onMediaAudioChanged = CarPlayMediaKeys::onMediaAudioChanged,
             callEchoCancellation = AirPlayPersistence.loadCallEchoCancellation(this),
             callVoiceFilter = AirPlayPersistence.loadCallVoiceFilter(this),
+            callSpeakerphone = { AirPlayPersistence.loadCallSpeakerphone(this) },
             // Only a SurfaceView honours release timestamps; smooth video always selects one.
             videoPacingDelayMillis = if (smoothVideo) smoothVideoDelayMillis(fps) else 0,
             // main #417：主屏解码器按帧率设置申请工作速率。
@@ -4995,6 +5137,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) return
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress || controller != null) return
         val controllerGeneration = restartGeneration
+        // Settings → Connection can change the target while this screen stays open (#696).
+        mfiTarget = AirPlayPersistence.loadMfiTarget(this)
+        runCatching { DiPlayBootstrap.ensure(this, mfiTarget) }
         val config = createRuntimeConfig()
         val effectiveSize = if (isMultiWindowActive() && !AirPlayPersistence.loadAdaptPipResolution(this) &&
             maximumDetectedWidthPixels >= size.width && maximumDetectedHeightPixels >= size.height &&
@@ -5629,7 +5774,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         appendLog(
             "$prefix; resolution " +
                 "${displayScalePercent}% with " +
-                (if (hevcEnabled) "HEVC (H.265)" else "H.264") +
+                (if (sessionHevc) "HEVC (H.265)" else "H.264") +
                 ", MFI ${mfiTargetLabel(mfiTarget)}" +
                 ", Wi-Fi session ${hotspotModeLabel(wirelessHotspotMode)}",
         )
@@ -5657,7 +5802,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private fun exitApplication() {
         if (shuttingDown.get()) return
         restoreSettingsBaseline()
-        finishAndRemoveTask()
+        // API17 适配：Activity.finishAndRemoveTask 是 API 21+，dalvik 在 API 17 上把它替换成抛
+        // NoSuchMethodError 的桩。低版本退回 finish()（随后 shutdown 会终止进程，效果等价）。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) finishAndRemoveTask() else finish()
         shutdown(terminateProcess = true, reason = "settings exit application")
     }
 
@@ -5702,11 +5849,13 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 if (!UiCompat.isAttachedToWindow(texture)) return true
                 removeVideoSurfaceProbe()
                 if (isDestroyed || videoView !== texture) return true
-                val mode = carPlayVideoSurfaceMode(texture.isHardwareAccelerated, smoothVideo, directVideoOutput)
+                val unsafeDecoder = textureUnsafeVideoDecoder()
+                val mode = carPlayVideoSurfaceMode(
+                    texture.isHardwareAccelerated, smoothVideo, directVideoOutput, textureUnsafeDecoder = unsafeDecoder != null)
                 appendLog("Video output mode=$mode windowHardwareAccelerated=${texture.isHardwareAccelerated} " +
-                    "smoothVideo=$smoothVideo directVideoOutput=$directVideoOutput")
+                    "smoothVideo=$smoothVideo directVideoOutput=$directVideoOutput textureUnsafeDecoder=${unsafeDecoder ?: "none"}")
                 if (mode == CarPlayVideoSurfaceMode.TEXTURE) return true
-                useFallbackVideoSurface(texture)
+                useFallbackVideoSurface(texture, unsafeDecoder)
                 return false // Measure the replacement before drawing the software window.
             }
         }
@@ -5720,7 +5869,23 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         videoSurfaceProbe = null
     }
 
-    private fun useFallbackVideoSurface(texture: TextureView) {
+    /** The default H.264 decoder, and the HEVC one when HEVC is on, if its pictures cannot be textures. */
+    private fun textureUnsafeVideoDecoder(): String? = try {
+        // CodecCompat 而非直调 MediaCodecList：后者及其 codecInfos 都是 API 21+，
+        // API 17 车机上会抛 NoSuchMethodError（Error 家族，下面的 catch 才有意义）。
+        val decoders = CodecCompat.all()
+            .filter { !it.isEncoder }
+            .map { VideoDecoderInfo(it.name, it.supportedTypes.toList()) }
+        val mimes = listOfNotNull(MediaFormat.MIMETYPE_VIDEO_AVC, MediaFormat.MIMETYPE_VIDEO_HEVC.takeIf { hevcEnabled })
+        textureUnsafeDecoder(decoders, mimes)
+    } catch (error: Throwable) {
+        // 这是"要么用 TextureView、要么换 SurfaceView"的探测：任何失败都应退回旧的
+        // TextureView 行为，绝不能把 NoSuchMethodError 这类 LinkageError 漏出去杀掉进程。
+        appendLog("Video decoder list unavailable: ${error.message}")
+        null
+    }
+
+    private fun useFallbackVideoSurface(texture: TextureView, unsafeDecoder: String?) {
         val root = texture.parent as? FrameLayout ?: return
         val index = root.indexOfChild(texture)
         val viewport = FrameLayout(this).apply { clipChildren = true }
@@ -5751,6 +5916,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 "starting at ${smoothVideoDelayMillis(fps)} ms; picture adjustments unavailable"
         } else if (directVideoOutput) {
             "Using SurfaceView video output: direct video output, frames shown as soon as they are decoded; " +
+                "picture adjustments unavailable"
+        } else if (unsafeDecoder != null) {
+            "Using SurfaceView video output: $unsafeDecoder pictures cannot be shown as a texture; " +
                 "picture adjustments unavailable"
         } else {
             "Using SurfaceView video output: window has no hardware acceleration; picture adjustments unavailable"
@@ -5802,7 +5970,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             pictureHold = it
             viewport.addView(it)
         }
-        (surfaceView.layoutParams as? FrameLayout.LayoutParams)?.let { hold.layoutParams = FrameLayout.LayoutParams(it) }
+        // API17 适配：同型拷贝构造比 API 17 新，走 UiCompat。
+        (surfaceView.layoutParams as? FrameLayout.LayoutParams)?.let { hold.layoutParams = UiCompat.copyFrameLayoutParams(it) }
         hold.animate().cancel()
         hold.setImageBitmap(picture)
         hold.alpha = 1f
@@ -6011,6 +6180,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         message.contains("createGroup failed", true) -> getString(R.string.the_head_unit_couldn_t_start_carplay_wi_fi_check_wi_fi_and)
         message.contains("needs a reset", true) -> getString(R.string.a_previous_wi_fi_direct_connection_is_still_running_reset)
         message.contains(BluetoothLinkCheck.UNREAL_MARK, true) -> getString(R.string.bluetooth_connections_not_real)
+        message.contains(BluetoothLinkCheck.NO_SOCKETS_MARK, true) -> getString(R.string.bluetooth_cannot_open_connections)
         message.contains("socket", true) || message.contains("RFCOMM", true) -> getString(R.string.your_iphone_isn_t_available_unlock_it_and_check_bluetooth)
         message.contains("unsupported", true) || message.contains("not supported", true) -> getString(R.string.this_head_unit_may_not_support_wireless_carplay_try_a_usb)
         message.contains("denied", true) || message.contains("permission", true) -> getString(R.string.allow_the_connection_permission_to_continue)
@@ -6179,6 +6349,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         const val SWIPE_CONTENT_BOTTOM_PADDING_DP = 36
         const val SWIPE_ACTION_HEIGHT_DP = 52
         const val SWIPE_ACTION_GAP_DP = 8
+        const val SWIPE_CATEGORY_ACTION_HEIGHT_DP = 48
+        const val SWIPE_CATEGORY_RAIL_WIDTH_DP = 208
+        const val SWIPE_CATEGORY_RAIL_MIN_WIDTH_DP = 640
         const val SWIPE_SCRIM_COLOR = 0xB3000000.toInt()
         val MENU_SECONDARY = Color.rgb(170, 180, 190)
         val MENU_ACCENT = Color.rgb(127, 205, 154)
@@ -6321,6 +6494,9 @@ private class GravityLayerDrawable(
 ) : Drawable() {
     private var alpha = 255
 
+    /** API 17/18 没有 Drawable.getAlpha，外部要读当前透明度只能走这个字段（见 [drawableAlpha]）。 */
+    val currentAlpha: Int get() = alpha
+
     override fun draw(canvas: Canvas) {
         val b = bounds
         for (i in layers.indices) {
@@ -6362,3 +6538,15 @@ private class GravityLayerDrawable(
     @Deprecated("Deprecated in Java")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
+
+/**
+ * 读一个 [Drawable] 的当前透明度。
+ *
+ * `Drawable.getAlpha` 是 API 19+，API 17/18 直接读会被 dalvik 替换成抛 [NoSuchMethodError] 的桩，
+ * 且它发生在属性初始化/淡出回调里，没有任何 try/catch 兜底，执行即崩。API 17 上侧栏药丸用的是本文件
+ * 自绘的 [GravityLayerDrawable]（alpha 存在自己的字段里），取该字段即可；平台的 LayerDrawable 只在
+ * API 23+ 才被选中，那时 getAlpha 早已存在。
+ */
+private fun drawableAlpha(drawable: Drawable): Int =
+    if (Build.VERSION.SDK_INT >= 19) drawable.alpha
+    else (drawable as? GravityLayerDrawable)?.currentAlpha ?: 255

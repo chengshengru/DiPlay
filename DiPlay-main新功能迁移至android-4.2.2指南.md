@@ -1,7 +1,7 @@
 # DiPlay main 分支新功能迁移至 android-4.2.2 分支 — 详细迁移指南
 
 > **作者**: TRAE AI
-> **生成日期**: 2026-10-09 ｜ **最后更新**: 2026-10-12
+> **生成日期**: 2026-10-09 ｜ **最后更新**: 2026-10-14
 > **源分支基线**: `main` @ `ef4e3fe5c39fa49a532a9570ecb930618a06e106`（2026-10-09 16:00 +0400，Merge PR #528）
 > **目标分支**: `android-4.2.2` @ `6a08b07d`（2026-10-09 20:42 +0800，"迁移热点恢复"）
 > **分叉点**: `7887bb7b`（v0.2.14，2026-10-07）
@@ -34,7 +34,7 @@
 
 | 锚点 | Commit（完整哈希） | 时间 | 说明 |
 |------|--------------------|------|------|
-| **main 基线** | `9aa9c549ee2726770ad55ec997beeeff642990fe` | 2026-10-13 | `Prepare DiPlay 0.2.19 public preview release`（v0.2.19 / versionCode 38）；**波次十一（0.2.19 增量轮，批次 A–I）已迁移完成**。上一基线与历史：`d9881b4a`（Merge PR #660，release/0.2.18；波次十批次 A–H 已迁移）→ `24ae1fa5`（Merge PR #628，release/0.2.18；波次九批次 A–H）→ `4314bbe1`（Merge PR #584，release/0.2.17；波次八） |
+| **main 基线** | `c30d3f0df18dd132739d864a9e054c73b3d57d8c` | 2026-10-13 | `Merge pull request #734 from shihabal3amri/fix/reports-20261013b`（0.2.20 next，尚未打 tag）；**波次十二（0.2.20 增量轮，批次 A–H）已迁移**。上一基线与历史：`9aa9c549`（0.2.19；波次十一批次 A–I 已迁移）→ `d9881b4a`（release/0.2.18；波次十批次 A–H）→ `24ae1fa5`（波次九批次 A–H）→ `4314bbe1`（波次八） |
 | **分叉点** | `7887bb7bf2b52258e663a2a4ea1332382ed80ad8` | 2026-10-07 15:24 +0400 | v0.2.14 发布合并点，两分支共同祖先 |
 | **android-4.2.2 起点** | `6a08b07d2ee41f002d9f8b5151c94d7ed26d5fea` | 2026-10-09 20:42 +0800 | 分支已有 4 个移植提交（API 17 下移、legacy-mdns、热点恢复） |
 
@@ -158,6 +158,15 @@ flowchart LR
 | 十一 | 批次G 手机页诊断报告 | #686/#671 | ✅ 已完成 | 2026-10-13 | 分支提交 `ac4034c5`；SettingsBackupServer `/report` + 6 位验证码 + 每连接线程池 + TLS 首字节直退 + typedAddress/8888；`settings-code.html` ×8 语系；DiPlayActivity forReport 分支。**K1 适配**：构造器 val 智能转换改局部变量后判断 |
 | 十一 | 批次H 热点 ADB 兜底失败日志 | #667 | ✅ 已完成 | 2026-10-13 | 分支提交 `92532978`；无法观测 AP / 无热点启动命令 / 固件拒绝 三种失败分别记录原因（拒绝时截断回显） |
 | 十一 | 批次I 本地化补缺与发布收尾 | 各批次随附 | ✅ 已完成 | 2026-10-13 | 本批次；zh-rTW 移除 4 条孤键 `fps_counter_*`，新增 TraditionalChineseTranslationsTest（API 17 适配：只校验确实存在默认语系的模块）；版本同步 `versionCode 38` / `0.2.19-api17` + CHANGELOG 首段 + 本指南 + 0.2.19 迁移报告归档 |
+| 十二 | 批次A 有线USB配置切换保留claim关闭重开 + Save后重发CarPlay模式 | #518/#335 | ✅ 已完成 | 2026-10-14 | 本批次；`UsbConfigurationSelection.select` 改 6 参（+`reopen`：close 丢弃 detach claim 而非提前 releaseInterface）、`WiredSessionMemory`（同枚举节点记忆）、`WiredConfigurationAction.choose/fallbackAfterRejection` 增 `sessionAlreadyStarted`；测试 `UsbSetupDiagnosticsTest`/`WiredConfigurationActionTest` 同步。**工作区未提交，构建三关待执行** |
+| 十二 | 批次B 有线ACCESS_LOCAL_NETWORK权限（守卫改37）+ 车机热点shell TetheringManager兜底 | #737/#616 | ✅ 已完成 | 2026-10-14 | 本批次；`WiredPermissions.required` 守卫由 API 36 改字面量 `37`（compileSdk 36 无 `CINNAMON_BUN`/`ACCESS_LOCAL_NETWORK` 常量）+ `PERMISSION_ACCESS_LOCAL_NETWORK` 字符串常量；新增 `CarHotspotStartMain`（app_process shell 入口）+ `CarHotspotAdbFallback.start` 增 `helper` 参数；修复兜底路径日志位置（无论 helper 是否有都先记「firmware lists no hotspot start command」）。测试 `WiredPermissionsTest`/`CarHotspotAdbFallbackTest` 同步 |
+| 十二 | 批次C 蓝牙无法为应用建连可诊断 + 热点空名不显示 | #709 | ✅ 已完成 | 2026-10-14 | 本批次；`BluetoothLinkCheck.socketServiceMissing/connectFailure/NO_SOCKETS_MARK`（缺失 socket manager → `WirelessStartupFailure.BLUETOOTH_UNUSABLE` 不重试）；`CarHotspotNameText` 空名不渲染 `"…"` 句；`edit_saved_hotspot_prefix` zh-rTW 尾随空格改 `\u0020`（Android 会裁掉裸尾空格）。测试 `BluetoothLinkCheckTest`/`CarHotspotNameTextTest` 同步 |
+| 十二 | 批次D 无硬件HEVC回退H.264 + FFmpeg Codec2走SurfaceView | #727 | ✅ 已完成 | 2026-10-14 | 本批次；新增 `HevcSupport`（`usable/Decoder`）；`CarPlayVideoSurface` 纹理不安全解码器（`c2.ffmpeg.*`）走 SurfaceView。测试 `HevcSupportTest`/`CarPlayVideoSurfaceTest` 同步 |
+| 十二 | 批次E DiLink3集群路由告警 + 控制器13/17集群 + HUD退避 | #722/#301/#552/#609 | ✅ 已完成 | 2026-10-14 | 本批次；`DiLink4ClusterDisplay.FULL_PANEL_NAMES` 增 `fission_magicsentry`/`sission_magicsentry`；`DiLink51ClusterLayout` 共享层；`BydHudProtocol.bindRetryMillis`（拒绝绑定后 60s 退避）；DiLink3 集群路由冲突告警复用既有串。测试 `DiLink4ClusterDisplayTest`/`DiLink51ClusterLayoutTest`/`BydHudProtocolTest`/`DiLink3ClusterRouteSettingsTest` 同步 |
+| 十二 | 批次F 通话扬声器 + 麦克风语音消息/无音频重启 | #701/#566 | ✅ 已完成 | 2026-10-14 | 本批次；`AndroidMediaSink(callSpeakerphone=)`/`CallSpeaker`（`isSpeakerphoneOn`/`communicationDevice`）；`MicrophoneStart`（下行前静默起麦）+ `MicrophoneUplink(noAudioRestartMillis)` + `MicrophoneCaptureStats`；字符串 `settings_call_speakerphone*` ×8。测试 `CallSpeakerphoneTest`/`MicrophoneStartTest`/`MicrophoneNoAudioRestartTest` 同步 |
+| 十二 | 批次G 设置滑动菜单按目标分组 + 搜索不杀进程(Android9-) + mfi认证入设置 | #696 | ✅ 已完成 | 2026-10-14 | 本批次（高风险合并）；`CarPlayHostActivity.buildSettingsMenu` 按目标分组（connection/navigation/display/vehicle/diagnostics/advanced/more）合并既有玻璃壳，**仅替换内容区**、保留 `UiCompat` 守卫；`setLayoutInScreenEnabled` 反射 `runCatching`；`createMfiTargetChoice`（LOCAL/USB_CH341）入 Connection。测试 `CarPlayHostSettingsTest`/`AdaptiveSettingsUiTest`/`MfiTargetSettingsTest` 同步（⏭️ 分支无截图基建，跳过 `checkSwipeMenuScreenshot`） |
+| 十二 | 批次H 方向盘按键日志 + 崩溃记录进诊断报告 | #662/#463 | ✅ 已完成 | 2026-10-14 | 本批次；新增 `WheelKeyLog`（环形缓冲 40，`@Synchronized`）+ `CrashRecord`（`format/report/install`；provider `authorities=${applicationId}.crash-record`）；`DiPlayActivity` 诊断报告追加两段。测试 `WheelKeyLogTest`/`WheelKeyServiceReportTest`/`CrashRecordTest` 同步 |
+| 十二 | 批次I 本地化补缺与测试同步 | 各批次随附 | ✅ 已完成 | 2026-10-14 | 本批次；6 语系（ar/es/ru/uk/zh-rCN/zh-rTW）`strings_settings_layout.xml` 补 `settings_more`/`settings_swipe_advanced`（此前缺失会导致 `SettingsTranslationsTest`/`TraditionalChineseTranslationsTest` 红灯）；新增 11 个测试文件；按 main 增量同步 11 个既有测试（`NavigationWheelKeyPolicyTest` 分支已删，正确跳过）。版本同步 `versionCode 39`/`0.2.20-api17` + CHANGELOG 首段（依报告 §7；待 main 打 0.2.20 tag 若有出入以 main tag 为准） |
 
 ### 0.5 每轮迁移的文档更新义务
 
@@ -202,6 +211,16 @@ mobile/build.gradle.kts → android.defaultConfig.versionCode / versionName
 | debug `versionName` | `0.2.18-hud-test` | **`0.2.18-api17-hud-test`** |
 | `CHANGELOG.md` 首段标题 | `# DiPlay 0.2.18 — 2026-10-11` | **`# DiPlay 0.2.18-api17 — <本轮日期>`** |
 | 上一轮（v0.2.17） | `36` / `0.2.17` | `36` / `0.2.17-api17`（已完成） |
+
+**波次十二落定值（main 尚未打 0.2.20 tag，依迁移报告 §7 预置）**：
+
+| 载体 | main `c30d3f0d`（next） | 分支（波次十二落定） |
+|------|------------------------|---------------------|
+| `mobile` `versionCode` | `38`（未递增） | **`39`** |
+| `mobile` `versionName` | `0.2.19` | **`0.2.20-api17`** |
+| `CHANGELOG.md` 首段标题 | — | **`# DiPlay 0.2.20-api17 — 2026-10-14`** |
+
+> ⚠️ main 当前 tip `c30d3f0d` 仍为 `versionCode 38` / `0.2.19`，**未递增**。分支按其即将发布的 0.2.20 预留了 `39`/`0.2.20-api17`；**当 main 正式打 0.2.20 tag 后须复核**，若 main 最终以其它整数/名称发版，以 main tag 为准（届时同步 `mobile/build.gradle.kts` 与本表）。
 
 #### 0.6.3 不同步的模块（误改会破坏独立版本线）
 
@@ -346,9 +365,54 @@ android-4.2.2
 | `shared/.../media/OpusEncoder.kt` | main 加能力广告 | 叠加（见波次一） |
 | `shared/.../network/WifiP2pGroupManager.kt` | 分支已有 Api17 通道类 | 叠加频段选择逻辑，走 legacy 路径 |
 | `shared/.../orchestration/CarPlayController.kt` | 双方都改 lease | 手工合并 |
-| 3 个 `AndroidManifest.xml` | 分支删运行时权限声明 | 手工加 main 新增组件声明，**不恢复运行时权限** |
+| 3 个 `AndroidManifest.xml` | 分支删运行时权限声明 | 手工加 main 新增组件声明，**不恢复运行时权限**；组件 `android:name` 必须与 main **逐字相同**（见下方铁律） |
 | 7 个 `strings.xml` + `themes.xml` | 双方各自新增 | 文本级合并，无结构冲突 |
 | `common/build.gradle.kts`、`mobile/build.gradle.kts`、`shared/build.gradle` | 构建链版本完全不同 | **绝不从 main 覆盖**，只按需加分支兼容的依赖 |
+
+> **⚠️ Manifest 组件声明铁律（2026-10-14 真机崩溃后固化）**
+>
+> `common` 模块的 `namespace` 是 **`com.shilapi.xcertplay.host`**（`common/build.gradle.kts:7`），但其 Java/Kotlin 源码都在包 **`com.shilapi.xcertplay`**。**两者不一致** → 在 `common/src/main/AndroidManifest.xml` 里写 `.Foo` 这种**相对名**，AGP 会按 **namespace** 展开成 `com.shilapi.xcertplay.host.Foo`，而 APK 里只有 `com.shilapi.xcertplay.Foo`：
+> `RuntimeException: Unable to get provider …: ClassNotFoundException` → **进程启动即 FATAL EXCEPTION**（`ActivityThread.installProvider`）。
+>
+> 规则：
+> 1. **common 清单中所有 `android:name` 一律写全限定名**（`com.shilapi.xcertplay.Xxx`，禁止 `.Xxx`）。既有 `DiagnosticReportProvider`、`update.UpdateApkProvider` 均为全限定名。
+> 2. 新增 provider 的 `authorities` 用 `${applicationId}.<slug>`（与 `${applicationId}.diagnostic-reports` / `${applicationId}.update-apks` 同风格），**不要硬编码** `com.shilapi.xcertplay.*`——`mobile` 变体的 applicationId 是 `com.shihab.diplay[.hudtest]`，硬编码会与实际包名不符。
+> 3. 校验方式：合并后的清单里组件名必须在 `app/build/intermediates/merged_manifest/**/AndroidManifest.xml` 中能对应到 APK 内真实类（`dexdump`/反编译或 `grep -r` 源码包名）。
+
+> **⚠️ API 21+ 成员调用铁律（2026-10-12 真机崩溃后固化）**
+>
+> 现象：`NoSuchMethodError: android.media.MediaCodecList.<init>` → `CarPlayHostActivity.textureUnsafeVideoDecoder(CarPlayHostActivity.kt:5864)` ← `observeVideoWindow$probe$1.onPreDraw` → **进程 FATAL**（视频窗首次 attach）。
+> 根因：main 面向现代 Android，直接使用 **API 21+ 成员**；`minSdk = 17`，dalvik 在加载时把这类指令**替换成抛 `NoSuchMethodError` 的桩**，**执行到就崩**。它属 **`Error`**，所以外层的 `catch (Exception)` / `catch (RuntimeException)` **拦不住**。
+>
+> 规则：
+> 1. **每个 `android.*` / `androidx.*` 成员都要查 API level**。≥18 的一律加 `SDK_INT` 守卫，或走 `common` 的 `UiCompat` / `shared/.../compat/*Compat` 垫片。`PageScrollView`(21+)、`PixelCopy`(24+)、`setLayerGravity`(23+)、`quitSafely`(18+)、`startForegroundService`(26+)、`VpnService.Builder.setBlocking`(21+)、`setIndeterminateTintList`(21+)、`isInMultiWindowMode`(24+)、**`MediaCodecList(REGULAR_CODECS).codecInfos`(21+)**、**`Activity.finishAndRemoveTask`(21+)**、**`View.isAttachedToWindow`(19+)**、**`Context.registerReceiver(r,f,int)` 三参重载(26+)** 是高频踩点。
+> 2. **探测/诊断类方法的 `catch` 一律写 `Throwable`**（或其 `runCatching` 等价物），不得只写 `Exception`。此次崩溃点原本写的就是 `catch (RuntimeException)`。
+> 3. **不能只核「平台类编译期引用」**——main 的普通 Kotlin 代码可以编译通过、却在 API 17 上运行期崩溃。除增量 diff 外，还要核：①新文件引用的**同模块既有成员**是否存在（`CarHotspotTethering.describe` 之教训）；②框架成员的 **API level**（`MediaCodecList` 之教训）。
+> 4. **已知垫片（勿重复踩）**：`MediaCodecList` 枚举 → `CodecCompat.all()`；`FrameLayout.LayoutParams(同型)` → `UiCompat.copyFrameLayoutParams()`；`Drawable.getAlpha` → `CarPlayHostActivity.drawableAlpha()`；`HandlerThread.quitSafely` → `if (SDK_INT >= JELLY_BEAN_MR2) quitSafely() else quit()`；`View.isAttachedToWindow` → `UiCompat.isAttachedToWindow()`（API 19+，低于此用 `windowToken != null` 兜底）；`PopupWindow.setElevation`/`TextView.setLetterSpacing`/`View.setClipToOutline` → 走 `UiCompat`；`Activity.finishAndRemoveTask` → `if (SDK_INT >= LOLLIPOP) finishAndRemoveTask() else finish()`；`Context.registerReceiver(r,f,int)` 三参重载 → `if (SDK_INT >= TIRAMISU) 三参 else 二参`。
+> 5. **最权威的审查输入**：真机 logcat 中 dalvik 的 `Could not find method …` / `VFY: unable to resolve …` 就是**该项目实际未解析方法的完整清单**，逐条比对「是否已在 SDK 守卫之内」。注意 dalvik 对**已被守卫**的调用同样会打印这些行（守卫是运行时分支），所以判定必须**回读源码**、不能只看日志。
+
+> **⚠️ 未解析符号全量审计（2026-10-14 真机 logcat 后固化）**
+>
+> 对一次真机崩溃的 dalvik 日志逐条回读源码（15 条 `VFY: unable to resolve`），结论如下——**仅 1 条是新发现的真 bug**，其余早已守卫或来自库：
+>
+> | dalvik 未解析项 | API | 分支处置 | 判定 |
+> |---|---|---|---|
+> | `FrameLayout$LayoutParams.<init>(同型)` | 21+ | `UiCompat.copyFrameLayoutParams()` | 已修 ✅ |
+> | `MediaCodecList.<init>(I)`（×2） | 21+ | `CodecCompat.all()` | 已修 ✅ |
+> | `Drawable.getAlpha()` | 19+ | `drawableAlpha()` / `GravityLayerDrawable.currentAlpha` | 已修 ✅ |
+> | `HandlerThread.quitSafely()` | 18+ | `SDK_INT >= JELLY_BEAN_MR2` 守卫（3 处） | 已守卫 ✅ |
+> | **`Activity.finishAndRemoveTask()`** | **21+** | **`exitApplication()` 原为裸调 → 本次加 `LOLLIPOP` 守卫，低版本回退 `finish()`** | **新修 ✅** |
+> | `View.isAttachedToWindow()` | 19+ | `UiCompat.isAttachedToWindow()`；`DiPlayActivity`/`ClusterSpeedometerView` 两处裸调 → 本次补齐 | 新修 ✅ |
+> | `LayerDrawable.setLayerGravity(II)` | 23+ | `SDK_INT >= 23` 分支 + `GravityLayerDrawable` 自绘兜底 | 已守卫 ✅ |
+> | `FrameLayout.setElevation(F)` | 21+ | `SDK_INT >= LOLLIPOP` 守卫（`buildSettingsMenu` :2508） | 已守卫 ✅ |
+> | `VpnService$Builder.setBlocking(Z)` | 21+ | `SDK_INT >= 21` 守卫（`CarPlayVpnService`） | 已守卫 ✅ |
+> | `Context.registerReceiver(r,f,int)` | 26+ | `SDK_INT >= TIRAMISU` 三参 / 否则二参（4 处） | 已守卫 ✅ |
+> | `CarPlayHostActivity.isInMultiWindowMode()` | 24+ | `SDK_INT >= N &&` 短路（:5322） | 已守卫 ✅ |
+> | `CarPlayHostActivity.startForegroundService()` | 26+ | `SDK_INT >= 26` 守卫（:5237） | 已守卫 ✅ |
+> | `CompoundButton.drawableHotspotChanged`、`ProgressBar.setIndeterminateTintList`、`WindowInsets.equals` | 21+/21+/28+ | 源码无直调 → 来自 AndroidX `SwitchCompat`/`AppCompat` 内部（库自行按 API 降级） | 非本仓 ✅ |
+> | `CarPlayHostActivity$$ExternalSyntheticLambda54` `new-instance` 未解析 | — | 合成 lambda 类缺失，**典型增量编译残留 dex**；非源码可修 | 建议 `./gradlew clean` 重打包复核 |
+>
+> **教训**：`VFY: unable to resolve` 清单**不等于 bug 清单**——绝大多数是「已守卫但 dalvik 仍打印」或「库内部」。但**每一条都必须回读源码确认**；本次正是靠此法揪出 `finishAndRemoveTask` 这一处长期潜伏的 API 21+ 裸调（走「设置 → 退出应用」即崩）。
 
 ---
 
@@ -736,6 +800,65 @@ main 新增 49 个 shared 测试 + 41 个 common 测试。与迁移功能对应�
 | 视频播放 | 积压恢复生效；低延迟选项在 API 17 隐藏或不生效且不崩溃 |
 | 更新检查 | About 页检查 GitHub 发布、SHA-256 校验、安装跳转 |
 | 外观切换 | Light/Dark/Auto 全界面生效，无崩溃 |
+
+### 12.4 波次十二验收门（须在具备 Android SDK 的机器执行）
+
+> **本机已可运行 Gradle**（`local.properties` 已配 `sdk.dir=/Users/chengshengru/Apps/Android/sdk`；Gradle 7.6.4 + JDK corretto-17.0.20）。①②关已在本机跑通；③关（全量 CI，含 `:mobile:lintDebug`/`assembleDebug`）建议在**签名机**执行。改文件后先 `touch` 再编译以避免假阴性，期望**零警告**。
+
+```sh
+# ① 增量编译
+./gradlew :common:compileDebugKotlin :shared:compileDebugKotlin
+# ② 单元测试
+./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest
+# ③ 全量 CI（AGENTS.md）
+./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :home:testDebugUnitTest \
+  :mobile:lintDebug :home:lintDebug :maphost:lintDebug \
+  :mobile:assembleDebug :home:assembleDebug :maphost:assembleDebug
+```
+
+> **①关（增量编译）结果 — 2026-10-14 · PASS ✅**
+> `./gradlew :common:compileDebugKotlin :shared:compileDebugKotlin` → **BUILD SUCCESSFUL**（3m42s，仅 15 条既有 deprecated/未用变量告警，无 error）。
+> 首跑曾 FAILED：`e: CarHotspotStartMain.kt:39:42 Unresolved reference: describe` —— 本轮新增的 `CarHotspotStartMain.kt` 引用 `CarHotspotTethering.describe`，而分支 `CarHotspotTethering.kt`（波次十一漏迁）从未包含该函数（该函数在 `9aa9c549` 基线中即存在，故增量 diff 中仅以上下文行出现）。已补 `describe` + 3 处配套诊断日志，保留 2 处 API 17 适配。
+> **①关复跑（⑤关审计修复后）— 2026-10-14 · PASS ✅**：加 `exitApplication()` 的 `finishAndRemoveTask` 守卫 + 2 处 `isAttachedToWindow` 改 `UiCompat` 后，`:common:compileDebugKotlin`（:shared UP-TO-DATE）→ **BUILD SUCCESSFUL in 23s**，零 error、零新增告警。
+
+> **②关（单元测试）结果 — 2026-10-14**
+>
+> | 模块 | 用例 | 失败 | 跳过 | 结论 |
+> |---|---|---|---|---|
+> | `:common:testDebugUnitTest` | 1116 | **57** | 0 | 与基线**逐条一致** → 波次十二**零回归** |
+> | `:shared:testDebugUnitTest` | 1250 | **1** | **260** | 失败与基线一致；跳过为工具链限制 |
+>
+> **失败归因（用 `git worktree` 在波次十二前的 `b9b4303c` 上跑基线对照，逐条 diff 失败用例集合）**
+> - `:common`：当前 57 失败 vs 基线 57 失败，**新增 0、消失 0**（集合完全相同）→ 这 57 个**与本轮无关**。主因是环境：`IllegalStateException: ConnectivityManager is unavailable` / `WifiManager is unavailable`（`ExistingWifiManagerTest` 14、`CarPlayBonjourDualStackTest` 6）、`UpdateHomeAvailabilityTest` 期望 `about` 实得 `settings` 等，均为分支既有状态。
+> - `:shared`：唯一失败 `AirPlayDualListenerTest.acceptsBothFamiliesOnTheSamePort`（`SocketTimeoutException` @ `:20`，`::1`/`127.0.0.1` 真实回环 socket）在**基线同样失败** → 环境问题（本机沙箱隔离 loopback），非代码缺陷。
+>
+> **⚠️ `shared` 的 260 个跳过用例（既有问题，非本轮引入，且**不能**简单开启）**
+> `shared/build.gradle` 未配 `unitTests.isIncludeAndroidResources = true`（`common/build.gradle.kts:31` 有）。Robolectric 4.10 在 legacy resources 模式下**跳过所有 `@Config(sdk >= 29)` 的用例**（`Robolectric doesn't support legacy resources mode after P`）：**32 个测试类整类跳过**（含本轮新增的 `CallSpeakerphoneTest`，以及 `CarHotspotTetheringTest`、`TelephonyMicrophoneTest`、`HotspotJoin*`、`Byd*Cluster*` 等），另 8 类部分跳过。main 用 Robolectric 4.17，已无此限制，故 main 侧无感。
+> **实测：不能直接照 `common` 打开它** —— 加上 `testOptions { unitTests.includeAndroidResources = true }` 后 `:shared:processDebugUnitTestManifest` **FAILED**：
+> `uses-sdk:minSdkVersion 17 cannot be smaller than version 23 declared in library [androidx.car.app:app:1.2.0]`。
+> 即：二进制资源模式会真的去合并**测试清单**，从而暴露 `androidx.car.app`(minSdk 23) 与分支 minSdk 17 的冲突——这正是分支刻意不开该开关的原因（见 `shared/build.gradle:67-69` 注释）。故**本次不改**，仅登记。
+> 若后续要恢复这 260 个用例的覆盖，需要额外在测试源集里 `tools:overrideLibrary="androidx.car.app"`（新风险，独立评估）。
+
+> **⑤关（真机运行）结果 — 2026-10-12 · `com.shihab.diplay.hudtest`**
+> 两次 **FATAL EXCEPTION**，均已修复：
+> 1. **启动即崩** —— `ClassNotFoundException: com.shilapi.xcertplay.host.CrashRecordInstaller`（`ActivityThread.installProvider`）。根因：清单 provider 写了**相对名** `.CrashRecordInstaller`，而 `common` 的 `namespace` 是 `com.shilapi.xcertplay.host` → 解析到不存在的类。已改全限定名 + `${applicationId}.crash-record` 并移到 `<application>` 首位。
+> 2. **视频窗 attach 即崩** —— `NoSuchMethodError: android.media.MediaCodecList.<init>` @ `CarPlayHostActivity.textureUnsafeVideoDecoder(5864)` ← `observeVideoWindow$probe$1.onPreDraw(5842)`。根因：`MediaCodecList(REGULAR_CODECS).codecInfos` 是 **API 21+**，且崩溃点只写了 `catch (RuntimeException)`（`NoSuchMethodError` 属 `Error`，拦不住）。已新增 `CodecCompat` 垫片、探测方法改写 `catch (Throwable)`，并连带修掉 4 处同源未守卫项。
+> 3. **全量未解析符号审计（同日志 15 条 `VFY: unable to resolve`）** —— 逐条回读源码，**仅新发现 1 处真 bug**：`CarPlayHostActivity.exitApplication()`（:5799）裸调 `finishAndRemoveTask()`（**API 21+**），走「设置 → 退出应用」即崩。已加 `LOLLIPOP` 守卫、低版本回退 `finish()`；并补齐 2 处 `isAttachedToWindow`（**API 19+**：`DiPlayActivity:1977` 本轮漏改 + `ClusterSpeedometerView:65` 存量）→ `UiCompat.isAttachedToWindow()`。其余：或已守卫（`setElevation`/`LayerDrawable.setLayerGravity`/`startForegroundService`/`isInMultiWindowMode`/`registerReceiver 三参`/`VpnService.Builder.setBlocking`），或来自 AndroidX（`CompoundButton.drawableHotspotChanged`/`ProgressBar.setIndeterminateTintList`/`WindowInsets.equals`）；另有 `CarPlayHostActivity$$ExternalSyntheticLambda54` 合成类 `new-instance` 未解析 → 判定**增量编译残留 dex**，建议 `./gradlew clean` 重打包复核。
+> 详见 §3「未解析符号全量审计」表与迁移报告批次 D。
+
+
+重点回归（波次十二新增/同步；`file:line` 以分支实际行为准）：
+
+| 测试 | 覆盖 | 关注点 |
+|------|------|--------|
+| `SettingsTranslationsTest` / `TraditionalChineseTranslationsTest` / `JapaneseTranslationsTest` | 6 语系 `settings_more`/`settings_swipe_advanced`、`settings_call_speakerphone*`、`bluetooth_cannot_open_connections` | 补齐后必须全绿；注意日文测试不漏 `translatable="false"` |
+| `CarHotspotAdbFallbackTest` | `start(..., helper)` 兜底路径 | 断言日志含「firmware lists no hotspot start command」→「shell tethering request result 0」→「AP enabled state confirmed」 |
+| `UsbSetupDiagnosticsTest` / `WiredConfigurationActionTest` | 6 参 `select(+reopen)` / `choose(+sessionAlreadyStarted)` / `WiredSessionMemory` | 重开仅在 detach 非空时执行；同枚举节点仅重发一次模式请求 |
+| `BluetoothLinkCheckTest` | `socketServiceMissing`/`connectFailure` | 缺失 socket manager → `BLUETOOTH_UNUSABLE` 不重试，cause 保留原异常 |
+| `CarPlayHostSettingsTest` / `AdaptiveSettingsUiTest` / `MfiTargetSettingsTest` | G 批次设置菜单分组 | 分类导航单页、窄窗 chip 行、`side_panel`/`carplay_dock` 归属 |
+| `HevcSupportTest` / `CarPlayVideoSurfaceTest` | D 批次解码器回退 | 无硬件 HEVC → H.264；`c2.ffmpeg.*` 走 SurfaceView |
+| `DiLink4ClusterDisplayTest` / `DiLink51ClusterLayoutTest` / `BydHudProtocolTest` / `DiLink3ClusterRouteSettingsTest` | E 批次集群/HUD | 控制器 13/17 同整屏、Leopard5 共享层、绑定被拒 60s 退避 |
+| `WheelKeyLogTest` / `WheelKeyServiceReportTest` / `CrashRecordTest` | H 批次诊断报告 | 环形缓冲 40、崩溃段进报告 |
 
 ---
 

@@ -4,12 +4,15 @@ import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
-/** Uses only a firmware-advertised command for the saved hotspot; never configures a replacement AP. */
+/**
+ * 仅用固件声明的命令启动已保存热点,绝不配置替代 AP;当 [start] 收到 [helper] 时,
+ * 改用由 shell 运行的平台自身 tethering 调用([CarHotspotStartMain])。
+ */
 internal object CarHotspotAdbFallback {
     private const val EXIT = "DIPLAY_HOTSPOT_EXIT:"
 
     fun start(deadline: Long, cancelled: () -> Boolean, state: () -> Boolean?,
-        shell: (String, Int) -> String?, log: (String) -> Unit): Boolean {
+        shell: (String, Int) -> String?, log: (String) -> Unit, helper: String? = null): Boolean {
         fun remaining() = ((deadline - System.nanoTime()) / 1_000_000L).coerceAtMost(30_000).toInt()
         fun stopped() = cancelled() || Thread.currentThread().isInterrupted || remaining() <= 0
         fun read(command: String): String? = if (stopped()) null else shell(command, remaining().coerceAtLeast(1))
@@ -28,17 +31,26 @@ internal object CarHotspotAdbFallback {
         if (command == null) {
             // 波次十一批次H（main #667）：固件未在 cmd connectivity/tethering help 中列出热点启动命令。
             log("car hotspot: firmware lists no hotspot start command in cmd connectivity/tethering help")
-            return false
+            if (helper == null) return false
+            // #616：Android 10 车机既无此命令，应用侧调用又被拦截，改由 shell 跑平台自身的 tethering 调用。
+            val reply = CarHotspotStartMain.parse(read(helper))
+            if (stopped()) return false
+            if (!CarHotspotStartMain.accepted(reply)) {
+                log("car hotspot: shell tethering request failed: ${reply ?: "no reply"}")
+                return false
+            }
+            log("car hotspot: shell tethering request $reply; waiting for AP enabled state")
+        } else {
+            val output = read("$command 2>&1; printf '\\n$EXIT%s\\n' \"\$?\"")
+            if (stopped()) return false
+            if (!accepted(output)) {
+                // 波次十一批次H（main #667）：固件拒绝命令，截断回显便于诊断。
+                log("car hotspot: firmware rejected '$command': " +
+                    output.orEmpty().lineSequence().map(String::trim).firstOrNull { it.isNotEmpty() }.orEmpty().take(120))
+                return false
+            }
+            log("car hotspot: firmware ADB start request accepted; waiting for AP enabled state")
         }
-        val output = read("$command 2>&1; printf '\\n$EXIT%s\\n' \"\$?\"")
-        if (stopped()) return false
-        if (!accepted(output)) {
-            // 波次十一批次H（main #667）：固件拒绝命令，截断回显便于诊断。
-            log("car hotspot: firmware rejected '$command': " +
-                output.orEmpty().lineSequence().map(String::trim).firstOrNull { it.isNotEmpty() }.orEmpty().take(120))
-            return false
-        }
-        log("car hotspot: firmware ADB start request accepted; waiting for AP enabled state")
         while (!stopped()) {
             if (observed() == true && !stopped()) {
                 log("car hotspot: AP enabled state confirmed after local ADB request")

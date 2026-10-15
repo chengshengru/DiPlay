@@ -21,7 +21,15 @@ internal enum class WiredConfigurationAction(val diagnostic: String) {
          * [found] 表示该配置同时具备 USBMUX 与 NCM，[carPlayMode] 表示它还带 Apple Ethernet。
          * 被拒绝的请求回落到 [fallbackAfterRejection]。
          */
-        fun choose(found: Boolean, carPlayMode: Boolean, transitionsTried: Int, maximumTransitions: Int) = when {
+        fun choose(
+            found: Boolean,
+            carPlayMode: Boolean,
+            transitionsTried: Int,
+            maximumTransitions: Int,
+            sessionAlreadyStarted: Boolean = false,
+        ) = when {
+            // DiPlay 自己结束的会话所遗留的模式不会再起新会话(#335;WiredSessionMemory)。
+            found && carPlayMode && sessionAlreadyStarted && transitionsTried == 0 -> REQUEST_TRANSITION
             found && carPlayMode -> USE
             found && transitionsTried > 0 -> USE_WITHOUT_APPLE_ETHERNET
             transitionsTried < maximumTransitions -> REQUEST_TRANSITION
@@ -31,6 +39,10 @@ internal enum class WiredConfigurationAction(val diagnostic: String) {
         /**
          * 拒绝模式请求的 iPhone（iOS 12、iOS 15、锁屏状态等）仍按原样在它提供的配置上尝试。
          */
-        fun fallbackAfterRejection(found: Boolean, carPlayMode: Boolean): Boolean = found && !carPlayMode
+        fun fallbackAfterRejection(
+            found: Boolean,
+            carPlayMode: Boolean,
+            sessionAlreadyStarted: Boolean = false,
+        ): Boolean = found && (!carPlayMode || sessionAlreadyStarted)
     }
 }

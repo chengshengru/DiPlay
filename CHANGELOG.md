@@ -1,3 +1,16 @@
+# DiPlay 0.2.20-api17 — 2026-10-14
+
+Android 4.2.2 (API 17) port of the 18-commit increment between `main` @ `9aa9c549` (0.2.19, already ported) and `main` @ `c30d3f0d`. Wave 12 ports that increment (batches A–H) on top of 0.2.19-api17; see the [migration report](DiPlay-main分支增量差异迁移报告-0.2.19-next.md) for per-feature details, file-level diffs and API 17 guards:
+
+- Wired USB CarPlay no longer re-grabs the driver on every config switch: the same claimed interface is reopened, and after a Save & reconnect the host re-requests CarPlay mode so the iPhone does not stay in USB tethering (#518, #335).
+- Wired CarPlay asks for the Android 17 local-network permission (guarded to API 37, literal `37` because `CINNAMON_BUN` does not exist at compileSdk 36) and falls back to the shell `TetheringManager` call when the firmware lists no hotspot start command (#737, #616).
+- A Bluetooth failure now says the head unit's Android Bluetooth cannot open connections for apps, so wireless CarPlay is impossible and a USB cable is the fix (#709); a saved hotspot with a blank name no longer renders a `"…"` sentence (#?).
+- HEVC falls back to H.264 when no hardware decoder can play it, and an FFmpeg `c2.ffmpeg.*` decoder whose pictures cannot be textured is routed through SurfaceView instead of TextureView (#727).
+- DiLink 3 cluster-route conflict is surfaced both in setup and in Settings → Cluster map, and the DiLink 4 route flag is derived from the ADB and legacy routes (#722, #301, #552, #609).
+- Calls can play on the loudspeaker of an Android phone/tablet used as the head unit (API 31 `setCommunicationDevice` / legacy `isSpeakerphoneOn`), and the microphone opens silently before downlink audio and restarts on silence (#701, #566).
+- The in-car settings menu is grouped by driving goal (connection / display / navigation / vehicle / diagnostics / advanced / more) with a rail on wide panels and a chip row on narrow ones, the chosen category is remembered across rebuilds, and the MFi signing target (Local / USB-CH341) is reachable from Settings → Connection as well as the CarPlay menu (#696).
+- The diagnostic report now includes the wheel-key service ring buffer and the last uncaught crash recorded by DiPlay, in addition to the existing on-disk crash log (#662, #463).
+
 # DiPlay 0.2.19-api17 — 2026-10-13
 
 Android 4.2.2 (API 17) port of DiPlay 0.2.19 (`main` @ `9aa9c549`). Wave 11 ports the post-0.2.18 increment (57 commits, 38 non-merge; 99 files, +3481/−455) on top of wave 10; see the [migration guide](DiPlay-main新功能迁移至android-4.2.2指南.md) for per-feature details and API 17 guards:

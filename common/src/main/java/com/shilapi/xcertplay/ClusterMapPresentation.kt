@@ -157,7 +157,8 @@ internal class ClusterMapPresentation(
                 contentDescription = context.getString(R.string.cluster_waiting_for_map)
             }, FrameLayout.LayoutParams((40 * density).toInt(), (40 * density).toInt(), Gravity.CENTER))
         }
-        root.addView(waitingLabel, FrameLayout.LayoutParams(videoParams))
+        // API17 适配：FrameLayout.LayoutParams 的同型拷贝构造比 API 17 新，走 UiCompat（作者：TRAE AI）。
+        root.addView(waitingLabel, UiCompat.copyFrameLayoutParams(videoParams))
         turnCardView = ClusterTurnCardView(context).apply { visibility = View.GONE }
         root.addView(turnCardView, FrameLayout.LayoutParams(-1, -1))
         // 波次十 #660：音乐卡片挂载在转弯卡之后、车速表之前（作者：TRAE AI）

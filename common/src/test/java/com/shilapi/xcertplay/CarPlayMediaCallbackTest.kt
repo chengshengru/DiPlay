@@ -4,12 +4,14 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.media.MediaMetadata
+import android.media.session.MediaSession
 import android.view.KeyEvent
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -65,6 +67,22 @@ class CarPlayMediaCallbackTest {
         callback.onMediaButtonEvent(button(KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_NEXT, 0)))
 
         assertEquals(listOf(CarPlayMediaButton.NEXT), sent)
+    }
+
+    /**
+     * 生产代码按名字反射构造回调（CarPlayMediaKeys.callback）：改名或改构造参数会让 API 21+ 上
+     * 媒体会话静默起不来，这里把「类名 + 构造签名 + 可实例化」整条边界钉住。
+     */
+    @Test
+    fun theReflectiveCallbackBoundaryMatchesTheRealSignature() {
+        val type = Class.forName(CarPlayMediaKeys.MEDIA_CALLBACK_CLASS)
+
+        assertEquals(CarPlayMediaCallback::class.java, type)
+        val constructor = type.getConstructor(Function0::class.java, Function2::class.java)
+        assertEquals(listOf(Function0::class.java, Function2::class.java), constructor.parameterTypes.toList())
+        val experimental: () -> Boolean = { false }
+        val send: (Int, String) -> Unit = { _, _ -> }
+        assertTrue(constructor.newInstance(experimental, send) is MediaSession.Callback)
     }
 
     @Test

@@ -12,15 +12,23 @@
  * what LIVI does on Linux by writing sysfs bConfigurationValue ("6"). USBDEVFS_DISCONNECT is tried
  * first because SET_CONFIGURATION is rejected with EBUSY while any interface still has a driver.
  *
+ * The ioctl numbers MUST come from the kernel header. Hand-copying them is how the first attempt
+ * shipped `_IOR('U', 3, ...)` for SET_CONFIGURATION: 3 is USBDEVFS_RESETEP (reset endpoint), so the
+ * "kernel path" silently reset an endpoint and never switched the configuration — the device stayed
+ * on the old config while the log claimed success. Include <linux/usbdevice_fs.h> (present in the
+ * NDK sysroot) so the constants can never drift again; the #ifndef fallbacks carry the correct
+ * values for toolchains that do not ship the header.
+ *
  * Both functions return 0 on success and the negated errno otherwise, so the Kotlin caller can log
  * the failure and fall back to the raw control transfer without exceptions crossing the boundary.
  */
 #include <errno.h>
 #include <jni.h>
 #include <sys/ioctl.h>
+#include <linux/usbdevice_fs.h>
 
 #ifndef USBDEVFS_SETCONFIGURATION
-#define USBDEVFS_SETCONFIGURATION _IOR('U', 3, unsigned int)
+#define USBDEVFS_SETCONFIGURATION _IOR('U', 5, unsigned int)
 #endif
 
 #ifndef USBDEVFS_DISCONNECT

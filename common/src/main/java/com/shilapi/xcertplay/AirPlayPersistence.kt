@@ -83,6 +83,7 @@ object AirPlayPersistence {
     private const val KEY_SPEECH_WITHOUT_8_16KHZ = "speech_without_8_16khz"
     private const val KEY_CALL_ECHO_CANCELLATION = "call_echo_cancellation"
     private const val KEY_CALL_VOICE_FILTER = "call_voice_filter"
+    private const val KEY_CALL_SPEAKERPHONE = "call_speakerphone"
     private const val KEY_SMOOTH_VIDEO = "smooth_video"
     // main #608：MTK 解码器低延迟（实验性，默认关）。
     private const val KEY_MTK_DECODER_TUNING = "mtk_decoder_tuning"
@@ -743,6 +744,14 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CALL_VOICE_FILTER, enabled).apply()
     }
 
+    /** A phone or tablet used as the head unit plays CarPlay calls on its loudspeaker (#701). */
+    fun loadCallSpeakerphone(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CALL_SPEAKERPHONE, false)
+
+    fun saveCallSpeakerphone(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CALL_SPEAKERPHONE, enabled).apply()
+    }
+
     fun saveFps(context: Context, fps: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_FPS, AirPlayDisplaySettings.sanitizeFps(fps))
@@ -814,6 +823,10 @@ object AirPlayPersistence {
     // main #348：Platform-21 独立仪表任务路由，仅仪表地图开启时生效（作者：TRAE AI）
     fun loadLegacyClusterEnabled(context: Context): Boolean = loadClusterMapEnabled(context) &&
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("platform21_cluster_enabled", false)
+
+    /** Either DiLink 4 cluster route, ADB video or the Platform 21 task; on DiLink 3 both stop the dashboard map (#722). */
+    fun loadDiLink4ClusterRouteEnabled(context: Context): Boolean =
+        loadAdbClusterEnabled(context) || loadLegacyClusterEnabled(context)
 
     fun saveLegacyClusterEnabled(context: Context, enabled: Boolean) {
         val edit = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

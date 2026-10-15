@@ -79,6 +79,14 @@ class IphoneUsbHost(
     /** claim 失败时的接口探针只做一次：强制 claim 会分离内核驱动，不能每次重试都跑。 */
     private val claimProbeDone = AtomicBoolean(false)
 
+    /**
+     * 最近一次配置切换的结果（内核/控制传输、目标的 detach/ioctl 返回值）。
+     *
+     * 随 claim 失败信息一起显示：屏幕日志是滚动窗口，`usb config …` 那行会被后面长长的
+     * `usbmux pre-claim`/`deviceIfaces` 顶出可视区，真机复验时看不见切换到底走没走通。
+     */
+    @Volatile private var lastConfigurationSwitch: String? = null
+
     sealed class PermissionRequest {
         data class AlreadyGranted(val device: UsbDevice) : PermissionRequest()
         data class Requested(val device: UsbDevice) : PermissionRequest()
@@ -254,7 +262,7 @@ class IphoneUsbHost(
         if (!usbManager.hasPermission(device)) {
             throw IphoneUsbException.PermissionDenied("USB permission has not been granted")
         }
-        val connection = usbManager.openDevice(device)
+        var connection = usbManager.openDevice(device)
             ?: throw IphoneUsbException.DeviceUnavailable("UsbManager could not open the iPhone")
         var claimedInterface: UsbInterface? = null
         try {
@@ -262,7 +270,7 @@ class IphoneUsbHost(
                 ?: throw IphoneUsbException.Protocol(
                     "Re-enumerated iPhone exposes no USBMUX CarPlay configuration",
                 )
-            selectConfiguration(connection, device, configuration)
+            connection = selectConfiguration(connection, device, configuration)
             val candidates = IphoneCarPlayConfiguration.usbMuxCandidates(device, configuration)
             if (candidates.isEmpty()) {
                 throw IphoneUsbException.Protocol("CarPlay configuration exposes no USBMUX interface")
@@ -286,6 +294,7 @@ class IphoneUsbHost(
                         "(candidates=${candidates.map { it.id }} " +
                         "active=${activeConfiguration(connection)} " +
                         "claimProbe=[${probeClaimableInterfaces(connection, device)}] " +
+                        "switch=[${lastConfigurationSwitch ?: "unknown"}] " +
                         "deviceIfaces=[${describeDeviceInterfaces(device)}])",
                 )
             claimedInterface = claim.usbInterface
@@ -297,57 +306,77 @@ class IphoneUsbHost(
         }
     }
 
-    /** Selects [configuration], detaching head-unit drivers that block the switch (#518). */
-    private fun selectConfiguration(connection: UsbDeviceConnection, device: UsbDevice, configuration: UsbConfigurationView) {
+    /**
+     * 选择 [configuration],分离阻塞切换的车机内核驱动(#518)。返回从此刻起应使用的连接:
+     * 分离操作会用一条新连接替换 [connection]。
+     */
+    private fun selectConfiguration(
+        connection: UsbDeviceConnection,
+        device: UsbDevice,
+        configuration: UsbConfigurationView,
+    ): UsbDeviceConnection {
         // API 17-20 框架不暴露配置值:先从 raw descriptors 解析出实际 SET_CONFIGURATION 目标值,
         // 解析不到时降级为旧的"切换失败也照常 claim"行为(卸载驱动逻辑需要可比对的目标值)。
         val target = configuration.id.takeIf { it > 0 }
             ?: UsbDescriptorCompat.configurationValues(connection.rawDescriptors).getOrNull(configuration.index)
         if (target == null) {
             val selected = UsbDescriptorCompat.selectConfiguration(connection, device, configuration)
-            onDiagnostic(
-                "usb config select target=unknown label=${configuration.label} ok=$selected " +
-                    "active=${activeConfiguration(connection)}",
-            )
+            val diagnostic = "usb config select target=unknown label=${configuration.label} " +
+                "ok=$selected active=${activeConfiguration(connection)}"
+            lastConfigurationSwitch = diagnostic
+            onDiagnostic(diagnostic)
             if (!selected) {
                 Log.w(
                     IphoneCarPlayConfiguration.TAG,
                     "setConfiguration ${configuration.label} reported failure; claiming anyway",
                 )
             }
-            return
+            return connection
         }
         val interfaces = UsbDescriptorCompat.configurations(device, connection.rawDescriptors)
             .flatMap { it.interfaces }
             .associateBy { it.id }
-        val outcome = UsbConfigurationSelection.select(
-            target = target,
-            interfaceIds = interfaces.keys.toList(),
-            setConfiguration = { switchConfiguration(connection, device, configuration, target) },
-            activeConfiguration = { activeConfiguration(connection) },
-            // 强制 claim 会分离内核驱动;release 之后接口保持未绑定
-            detach = { id ->
-                val usbInterface = interfaces.getValue(id)
-                connection.claimInterface(usbInterface, true).also { if (it) connection.releaseInterface(usbInterface) }
-            },
-        ) ?: run {
-            // select() 只在首次 SET_CONFIGURATION 就成功时返回 null，这里补一条屏幕诊断，
-            // 否则切换过程在屏幕上完全不可见（真机复验只能靠它判断切到了哪个配置）。
-            onDiagnostic(
-                "usb config select target=$target ok=true detached=none " +
-                    "active=${activeConfiguration(connection)}",
-            )
-            return
-        }
-        runCatching { onDiagnostic(outcome.diagnostic()) }
-        if (outcome.wrongConfiguration) {
-            throw IphoneUsbException.DeviceUnavailable(
-                "Android could not switch the iPhone to USB configuration ${configuration.label} " +
-                    "(still ${outcome.after}); a head-unit driver may hold it",
-            )
-        }
-        if (!outcome.selected) {
-            Log.w(IphoneCarPlayConfiguration.TAG, "setConfiguration ${configuration.label} reported failure; claiming anyway")
+        var current = connection
+        try {
+            val outcome = UsbConfigurationSelection.select(
+                target = target,
+                interfaceIds = interfaces.keys.toList(),
+                setConfiguration = { switchConfiguration(current, device, configuration, target) },
+                activeConfiguration = { activeConfiguration(current) },
+                // 强制 claim 分离内核驱动;保持持有直到 reopen。
+                detach = { id -> current.claimInterface(interfaces.getValue(id), true) },
+                // 关闭会丢弃 claim 而无需 releaseInterface() 触发的内核重新绑定。
+                reopen = {
+                    current.close()
+                    current = usbManager.openDevice(device)
+                        ?: throw IphoneUsbException.DeviceUnavailable("UsbManager could not reopen the iPhone")
+                },
+            ) ?: run {
+                // select() 只在首次 SET_CONFIGURATION 就成功时返回 null，这里补一条屏幕诊断，
+                // 否则切换过程在屏幕上完全不可见（真机复验只能靠它判断切到了哪个配置）。
+                val diagnostic = "usb config select target=$target ok=true detached=none " +
+                    "active=${activeConfiguration(current)}"
+                lastConfigurationSwitch = diagnostic
+                onDiagnostic(diagnostic)
+                return current
+            }
+            val switchDiagnostic = outcome.diagnostic()
+            lastConfigurationSwitch = switchDiagnostic
+            runCatching { onDiagnostic(switchDiagnostic) }
+            if (outcome.wrongConfiguration) {
+                throw IphoneUsbException.DeviceUnavailable(
+                    "Android could not switch the iPhone to USB configuration ${configuration.label} " +
+                        "(still ${outcome.after}); a head-unit driver may hold it",
+                )
+            }
+            if (!outcome.selected) {
+                Log.w(IphoneCarPlayConfiguration.TAG, "setConfiguration ${configuration.label} reported failure; claiming anyway")
+            }
+            return current
+        } catch (error: Throwable) {
+            // 调用方会关闭它传入的连接;替换出来的连接在这里关闭。
+            if (current !== connection) current.close()
+            throw error
         }
     }
 
@@ -367,6 +396,10 @@ class IphoneUsbHost(
         target: Int,
     ): Boolean {
         val fileDescriptor = runCatching { connection.fileDescriptor }.getOrDefault(-1)
+        if (!NativeUsbConfigurationKernel.available) {
+            // 库没打进 APK 时静默回退最容易被误读成"内核拒绝切换"；显式说清楚。
+            runCatching { onDiagnostic("usb config kernel library unavailable; kernel path skipped") }
+        }
         val outcome = UsbConfigurationSwitch.switch(
             fileDescriptor = fileDescriptor,
             target = target,
@@ -378,7 +411,9 @@ class IphoneUsbHost(
             },
             controlSet = { UsbDescriptorCompat.selectConfiguration(connection, device, configuration) },
         )
-        runCatching { onDiagnostic(outcome.diagnostic(target, fileDescriptor, activeConfiguration(connection))) }
+        val diagnostic = outcome.diagnostic(target, fileDescriptor, activeConfiguration(connection))
+        lastConfigurationSwitch = diagnostic
+        runCatching { onDiagnostic(diagnostic) }
         return outcome.selected
     }
 

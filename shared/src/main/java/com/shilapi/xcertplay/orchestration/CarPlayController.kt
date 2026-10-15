@@ -218,6 +218,7 @@ class CarPlayController(
     private val availabilityPollGeneration = AtomicInteger(0)
     private var permissionPollGeneration = 0
     private var reenumerationAttempts = 0
+    @Volatile private var wiredDeviceName: String? = null
     // API 17 车机修复：重枚举阶段若 iPhone 原地切换配置（无总线重枚举）或 ATTACHED 广播未被捕获，
     // 控制器会永久停在 WaitingForReenumeration 且无超时、无报错——即“iPhone 无反应、卡在连接界面”的典型症状。
     // 用 generation 守卫避免 watchdog 在重枚举已成功后误触发；用 lastIphoneDevice 兜底重试。
@@ -2080,16 +2081,19 @@ class CarPlayController(
                         // 波次十 #634：配置选取改为状态机。无 Apple Ethernet 的配置先请求
                         // CarPlay 模式，被拒后再回落采用，避免 AirPlay 永不打开。
                         val carPlayMode = configuration?.let(IphoneCarPlayConfiguration::isCarPlayMode) == true
+                        val sessionAlreadyStarted = WiredSessionMemory.startedOn(result.device.deviceName)
                         val action = WiredConfigurationAction.choose(
                             found = configuration != null,
                             carPlayMode = carPlayMode,
                             transitionsTried = reenumerationAttempts,
                             maximumTransitions = MAXIMUM_REENUMERATION_ATTEMPTS,
+                            sessionAlreadyStarted = sessionAlreadyStarted,
                         )
                         connectionDiagnostic(
                             "USB configuration ready=${configuration != null} " +
                                 "configurationId=${configuration?.label ?: "none"} " +
                                 "reenumerationAttempts=$reenumerationAttempts " +
+                                (if (sessionAlreadyStarted && carPlayMode) "previousSessionOnThisEnumeration=true " else "") +
                                 "action=${action.diagnostic}",
                         )
                         when (action) {
@@ -2097,7 +2101,8 @@ class CarPlayController(
                             WiredConfigurationAction.USE_WITHOUT_APPLE_ETHERNET -> openDataPaths(result.device)
                             WiredConfigurationAction.REQUEST_TRANSITION -> beginReenumeration(
                                 result.device,
-                                WiredConfigurationAction.fallbackAfterRejection(configuration != null, carPlayMode),
+                                WiredConfigurationAction.fallbackAfterRejection(
+                                    configuration != null, carPlayMode, sessionAlreadyStarted),
                             )
                             WiredConfigurationAction.REJECT -> fail(
                                 IphoneUsbException.Protocol(
@@ -2266,6 +2271,7 @@ class CarPlayController(
 
     private fun openDataPaths(device: UsbDevice) {
         phase = Phase.DATAPATHS
+        wiredDeviceName = device.deviceName
         debugLog("wired opening iPhone USB data paths")
         onStatus(CarPlayStatus.SelectingConfiguration)
         onStatus(CarPlayStatus.OpeningDataPaths)
@@ -2457,7 +2463,10 @@ class CarPlayController(
                 locationProvider = locationProvider,
                 vehicleStatusProvider = vehicleStatusProvider,
                 onIncoming = ::onRouteFrame,
-                onProgress = { message -> debugLog("wired $message") },
+                onProgress = { message ->
+                    if (message.startsWith(START_SESSION_PROGRESS)) wiredDeviceName?.let(WiredSessionMemory::started)
+                    debugLog("wired $message")
+                },
             )
             onStatus(
                 when (result.terminal) {
@@ -2528,6 +2537,17 @@ class CarPlayController(
         ) {
             throw WirelessStartupException(WirelessStartupFailure.HOTSPOT_CONFIGURATION,
                 "The car hotspot is off. Turn it on in the car settings and connect again.")
+        }
+        // android-4.2.2：ExistingWifiManager 依赖 ConnectivityManager.NetworkCallback（API 21）等
+        // 一整套 API 21+ 网络 API；API 17-20 设备上匿名回调子类连类加载都无法完成
+        // （NoClassDefFoundError），必须在此拒绝而不是让车机崩溃。
+        if (hotspotMode == WirelessHotspotMode.EXISTING_WIFI &&
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP
+        ) {
+            throw WirelessStartupException(
+                WirelessStartupFailure.HOTSPOT_CONFIGURATION,
+                "Existing Wi-Fi mode requires Android 5.0 or newer. Pick the car hotspot mode instead.",
+            )
         }
         val manager: WirelessHotspotManager = when (hotspotMode) {
             WirelessHotspotMode.WIFI_P2P -> WifiP2pGroupManager(appContext, ::debugLog,
@@ -2755,11 +2775,11 @@ class CarPlayController(
                 "Timed out after ${RFCOMM_CONNECT_TIMEOUT_MILLIS}ms connecting RFCOMM to $address",
             )
         }
-        when (val failure = result.get()) {
-            null -> Unit
-            is IOException -> throw failure
-            else -> throw IOException("Could not connect RFCOMM to $address", failure)
+        val failure = result.get() ?: return
+        if (BluetoothLinkCheck.socketServiceMissing(failure)) {
+            connectionDiagnostic("Bluetooth socket manager missing failureClass=${failure.javaClass.simpleName}")
         }
+        throw BluetoothLinkCheck.connectFailure(failure, address)
     }
 
     /** Reads cached service metadata only; it does not start/cancel discovery or require SCAN. */
@@ -3261,6 +3281,7 @@ class CarPlayController(
         private const val WIRELESS_HANDOFF_TIMEOUT_MILLIS = 45_000L
         private const val RFCOMM_CONNECT_TIMEOUT_MILLIS = 15_000L
         private const val MAXIMUM_REENUMERATION_ATTEMPTS = 2
+        private const val START_SESSION_PROGRESS = "iap2 tx=0x4301"
         // API 17 车机：重枚举静默挂起防护。重枚举通常在 1–2s 内完成，5s 是安全的兜底窗口。
         private const val REENUMERATION_WATCHDOG_MILLIS = 5_000L
         private const val EXECUTOR_CLOSE_TIMEOUT_MILLIS = 2_000L

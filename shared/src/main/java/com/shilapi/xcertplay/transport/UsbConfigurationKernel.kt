@@ -22,10 +22,17 @@ internal interface UsbConfigurationKernel {
 
 /** Production bridge; degrades to [LIBRARY_UNAVAILABLE] when the shared library cannot be loaded. */
 internal object NativeUsbConfigurationKernel : UsbConfigurationKernel {
-    private const val LIBRARY_UNAVAILABLE = -1
+    /**
+     * Distinct from every negated errno (errno stays below ~200), so a missing library cannot be
+     * mistaken for `-EPERM` in the diagnostic. Reported as `result=-1000` on screen.
+     */
+    internal const val LIBRARY_UNAVAILABLE = -1000
 
     private val loaded: Boolean =
         runCatching { System.loadLibrary("xcertplay_usbconfig"); true }.getOrDefault(false)
+
+    /** False when `libxcertplay_usbconfig.so` did not load, so the kernel path cannot be used. */
+    val available: Boolean get() = loaded
 
     override fun setConfiguration(fileDescriptor: Int, configurationValue: Int): Int =
         if (loaded) UsbConfigurationNative.setConfiguration(fileDescriptor, configurationValue)

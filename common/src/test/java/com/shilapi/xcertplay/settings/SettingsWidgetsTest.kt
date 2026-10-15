@@ -220,6 +220,15 @@ class SettingsWidgetsTest {
         assertEquals(WirelessHotspotMode.MANUAL, options.first { it.isChecked }.tag)
     }
 
+    /** ExistingWifiManager 依赖 API 21 的 ConnectivityManager.NetworkCallback，API 17-20 设备上不得呈现。 */
+    @Test @Config(sdk = [17]) fun android422HotspotChoiceDoesNotExposeExistingWifi() {
+        val row = ConnectionSettingsSection.createHotspotModeChoice(context, WirelessHotspotMode.MANUAL,
+            onSelected = {})
+        val options = views(row.container).filterIsInstance<RadioButton>().toList()
+        assertEquals(listOf(WirelessHotspotMode.MANUAL), options.map { it.tag })
+        assertEquals(WirelessHotspotMode.MANUAL, options.first { it.isChecked }.tag)
+    }
+
     @Test fun carHotspotIsTheFirstAndRecommendedHotspotChoice() {
         val row = ConnectionSettingsSection.createHotspotModeChoice(context, WirelessHotspotMode.WIFI_P2P,
             onSelected = {})

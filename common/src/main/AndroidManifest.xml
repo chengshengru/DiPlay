@@ -39,6 +39,10 @@
     <uses-sdk tools:overrideLibrary="androidx.car.app,androidx.car.app.projected,androidx.media3.common,androidx.media3.exoplayer,androidx.media3.exoplayer_hls,androidx.media3.ui,androidx.media3.container" />
     <application>
         <provider
+            android:name="com.shilapi.xcertplay.CrashRecordInstaller"
+            android:authorities="${applicationId}.crash-record"
+            android:exported="false" />
+        <provider
             android:name="com.shilapi.xcertplay.DiagnosticReportProvider"
             android:authorities="${applicationId}.diagnostic-reports"
             android:exported="false"

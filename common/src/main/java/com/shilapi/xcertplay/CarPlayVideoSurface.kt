@@ -9,15 +9,34 @@ internal enum class CarPlayVideoSurfaceMode { TEXTURE, SURFACE }
  * Decide from the attached window, not the declared manifest flag or vehicle model. Smooth video also
  * needs a SurfaceView: only the compositor honours the frame timestamps it releases with. Direct video
  * output (a setting, main #496) picks one too: frames go straight to the compositor instead of through
- * the app's own drawing, which can save about a refresh.
+ * the app's own drawing, which can save about a refresh。当某解码器的画面无法作为纹理交给应用的绘制时
+ * ([textureUnsafeDecoder]),SurfaceView 同样是唯一选择。
  */
 internal fun carPlayVideoSurfaceMode(
     hardwareAccelerated: Boolean,
     smoothVideo: Boolean = false,
     directVideoOutput: Boolean = false,
+    textureUnsafeDecoder: Boolean = false,
 ): CarPlayVideoSurfaceMode =
-    if (hardwareAccelerated && !smoothVideo && !directVideoOutput) CarPlayVideoSurfaceMode.TEXTURE
+    if (hardwareAccelerated && !smoothVideo && !directVideoOutput && !textureUnsafeDecoder) CarPlayVideoSurfaceMode.TEXTURE
     else CarPlayVideoSurfaceMode.SURFACE
+
+/** 已安装的视频解码器,按 MediaCodecList 顺序。 */
+internal data class VideoDecoderInfo(val name: String, val types: List<String>)
+
+/**
+ * [mimes] 中(按序取第一个列出它的)解码器,当其画面无法通过 TextureView 呈现时返回其名称,否则 null。
+ * emteria 的 Android 17(Raspberry Pi 5)用 c2.ffmpeg.h264.decoder 解码,它被报告为硬件加速:应用的渲染器
+ * 在画出第一帧纹理后立即以"Invalid GrBackendTexture"中止,而 SurfaceView 能正常合成同样的画面。其它
+ * FFmpeg 背景的 Codec2 解码器输出相同,故按名称前缀匹配该家族。
+ */
+internal fun textureUnsafeDecoder(decoders: List<VideoDecoderInfo>, mimes: List<String>): String? =
+    mimes.asSequence()
+        .mapNotNull { mime -> decoders.firstOrNull { decoder -> decoder.types.any { it.equals(mime, ignoreCase = true) } } }
+        .firstOrNull { it.name.startsWith(FFMPEG_CODEC2_PREFIX, ignoreCase = true) }
+        ?.name
+
+private const val FFMPEG_CODEC2_PREFIX = "c2.ffmpeg."
 
 /** Integer compositor bounds retain overscan when a CarPlay view area crops the canvas. */
 internal data class CarPlaySurfaceBounds(val left: Int, val top: Int, val width: Int, val height: Int) {

@@ -902,4 +902,10 @@
     <string name="connection_help_general">接続を再試行してください。再び失敗する場合はDiPlayに戻り、［設定］→［診断］からレポートを保存してください。</string>
     <string name="connection_help_wifi_direct">車載端末のWi-FiとBluetoothをオンにし、iPhoneのロックを解除して近くに置いてから再試行してください。改善しない場合は、iPhoneの［設定］→［一般］→［CarPlay］でこの車の登録を削除してから再接続してください。</string>
     <string name="connection_help_existing_wifi">車載端末とiPhoneが同じWi-Fiネットワークに接続され、その名前とパスワードがDiPlayの設定と一致しているか確認して、再試行してください。</string>
+    <string name="settings_more">その他</string>
+    <string name="settings_swipe_advanced">詳細設定（実験的機能）</string>
+    <string name="bluetooth_cannot_open_connections">この車載端末のAndroid Bluetoothはアプリからの接続を開始できません。アプリが接続に使う部分がファームウェアにありません。車載Bluetoothの通話と音楽には影響しませんが、この端末ではワイヤレスCarPlayを使用できません。USB接続をお試しください。</string>
+    <string name="settings_mfi_target_description">USB/CH341 は、CH341 認証アダプターを車載機に接続しているときだけ選択してください。接続していない場合は「ローカル／オフライン」を選択します。次回の接続から適用されます。</string>
+    <string name="settings_call_speakerphone">通話をスピーカーで再生</string>
+    <string name="settings_call_speakerphone_description">車載機として使う Android スマートフォンやタブレット向け：CarPlay の通話を受話口ではなくスピーカーで再生し、ハンズフリー用マイクを使います。車の車載機ではオフのままにしてください。次の通話から適用されます。</string>
 </resources>

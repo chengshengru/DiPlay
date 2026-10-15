@@ -200,6 +200,8 @@ class AndroidMediaSink(
     private val callEchoCancellation: Boolean = false,
     /** Cut the bass that head units add when they play a call as music. */
     private val callVoiceFilter: Boolean = false,
+    /** Read at each call: a phone or tablet used as the head unit plays calls on its loudspeaker (#701). */
+    private val callSpeakerphone: () -> Boolean = { false },
     /**
      * Smooth video: show main-screen frames at the iPhone's frame time plus a delay that starts here and
      * then follows how late the decoder releases frames ([PacingDelay]); 0 shows each as soon as it is
@@ -258,6 +260,7 @@ class AndroidMediaSink(
     private val audioModeLock = Any()
     private var communicationModeStream: AudioStreamId? = null
     private var savedAudioMode = AudioManager.MODE_NORMAL
+    private var callSpeaker: CallSpeaker? = null // guarded by audioModeLock
     private val pendingVideoCodec = ConcurrentHashMap<Int, VideoCodec>()
     private val videoRecoveryHandlers = ConcurrentHashMap<Int, () -> Unit>()
     private val videoDiagnosticHandlers = ConcurrentHashMap<Int, (String) -> Unit>()
@@ -560,12 +563,15 @@ class AndroidMediaSink(
             savedAudioMode = manager.mode
             manager.mode = AudioManager.MODE_IN_COMMUNICATION
             communicationModeStream = id
+            val speakerRequested = runCatching(callSpeakerphone).getOrDefault(false)
+            if (speakerRequested) callSpeaker = CallSpeaker.on(manager)
             Log.i("xcertplay-usb", "audio mode $savedAudioMode -> ${manager.mode} for telephony stream=$id")
             // main #499：写入诊断报告而非仅 logcat：停留在语音通道的车机不放媒体，
             // 没有 adb 就无法诊断。上报失败不得干扰模式切换，故放在最后且不可抛出。
             runCatching {
                 onAudioDiagnostic("Audio: mode entered communication from=$savedAudioMode" +
-                    " now=${manager.mode} stream=$id")
+                    " now=${manager.mode} stream=$id" +
+                    if (speakerRequested) " loudspeaker=${callSpeaker != null}" else "")
             }
         }
     }
@@ -576,6 +582,8 @@ class AndroidMediaSink(
             val active = communicationModeStream ?: return
             if (id != null && id != active) return
             communicationModeStream = null
+            callSpeaker?.restore()
+            callSpeaker = null
             // main #499：诊断文本在 try 内构造、在 try 外发送：在 try 内上报会让
             // 失败的回调被当成失败的音频模式恢复而被捕获。
             val line = try {
@@ -727,7 +735,9 @@ internal class ParkingOutput(width: Int, height: Int) {
             }, android.os.Handler(thread.looper))
             surface = reader.surface
         } catch (error: Throwable) {
-            thread.quitSafely()
+            // API17 适配：HandlerThread.quitSafely 是 API 18+，GM C140A（API 17）上 dalvik 解析不到，
+            // 直接调用会抛 NoSuchMethodError（Error 家族，外层 catch 拦不住）。低版本退回 quit()。
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) thread.quitSafely() else thread.quit()
             throw error
         }
     }
@@ -741,7 +751,9 @@ internal class ParkingOutput(width: Int, height: Int) {
                 }
             }
         } finally {
-            thread.quitSafely()
+            // API17 适配：HandlerThread.quitSafely 是 API 18+，GM C140A（API 17）上 dalvik 解析不到，
+            // 直接调用会抛 NoSuchMethodError（Error 家族，外层 catch 拦不住）。低版本退回 quit()。
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) thread.quitSafely() else thread.quit()
         }
     }
 }

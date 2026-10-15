@@ -53,7 +53,10 @@ object ConnectionSettingsSection {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 add(WirelessHotspotMode.WIFI_P2P to context.getString(R.string.wi_fi_p2p_5_ghz))
             }
-            add(WirelessHotspotMode.EXISTING_WIFI to context.getString(R.string.existing_wifi_title))
+            // EXISTING_WIFI 依赖 ConnectivityManager.NetworkCallback（API 21），API 17-20 设备不可用
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                add(WirelessHotspotMode.EXISTING_WIFI to context.getString(R.string.existing_wifi_title))
+            }
         }
         return SettingsWidgets.createChoiceRow(
             context = context,

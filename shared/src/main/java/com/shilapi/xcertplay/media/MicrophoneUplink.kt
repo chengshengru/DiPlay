@@ -41,6 +41,7 @@ internal class MicrophoneUplink(
             },
         )
     },
+    private val noAudioRestartMillis: Long = NO_AUDIO_RESTART_MILLIS,
 ) : Closeable {
     private val running = AtomicBoolean(false)
     private val stats = MicrophoneCaptureStats(config, report = { message ->
@@ -273,6 +274,8 @@ internal class MicrophoneUplink(
         var filled = 0
         // 波次十 #647：首读失败后的重启次数
         var readRestarts = 0
+        var noAudioRestarts = 0
+        var lastAudioNs = System.nanoTime()
         try {
             while (running.get()) {
                 stats.reading()
@@ -291,15 +294,33 @@ internal class MicrophoneUplink(
                         readRestarts < MAX_READ_RESTARTS && restartRecording(recorder)
                     ) {
                         readRestarts++
-                        stats.restarted(readRestarts)
+                        stats.restarted(readRestarts, "read-error", routeType(recorder))
                         continue
                     }
                     return
                 }
                 if (count == 0) {
                     stats.flush(routeType = routeInfo)
+                    // A recorder that starts with no input device routed returns 0 bytes at once, for
+                    // as long as it runs: a Leapmotor T03 (Android 7.1) did this for minutes of Siri and
+                    // call capture (#566). Restart it, and pause between empty reads instead of spinning.
+                    val now = System.nanoTime()
+                    if (running.get() && noAudioRestarts < MAX_NO_AUDIO_RESTARTS &&
+                        now - lastAudioNs >= noAudioRestartMillis * 1_000_000L
+                    ) {
+                        noAudioRestarts++
+                        lastAudioNs = now
+                        if (restartRecording(recorder)) {
+                            stats.restarted(noAudioRestarts, "no-audio", routeType(recorder))
+                        } else {
+                            stats.failure(MicrophoneFailureStage.RECORDING, code = recorder.recordingState)
+                        }
+                    } else {
+                        Thread.sleep(EMPTY_READ_PAUSE_MILLIS)
+                    }
                     continue
                 }
+                lastAudioNs = System.nanoTime()
                 var offset = 0
                 while (offset < count && running.get()) {
                     val copied = minOf(frame.size - filled, count - offset)
@@ -483,6 +504,9 @@ internal class MicrophoneUplink(
         // 波次十 #647：首读失败自动重启的上限与暂停
         const val MAX_READ_RESTARTS = 3
         const val READ_RESTART_PAUSE_MILLIS = 50L
+        const val NO_AUDIO_RESTART_MILLIS = 1_000L
+        const val MAX_NO_AUDIO_RESTARTS = 3
+        const val EMPTY_READ_PAUSE_MILLIS = 5L
         // AudioRecord.ERROR_DEAD_OBJECT 的字面量（API 24+ 才有该常量，API 17 需内联避免解析失败）
         const val DEAD_OBJECT_READ_CODE = -6
     }

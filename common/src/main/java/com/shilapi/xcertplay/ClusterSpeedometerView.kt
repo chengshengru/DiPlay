@@ -62,7 +62,8 @@ internal class ClusterSpeedometerView(
             stopObservingSpeed = observeSpeed { speed ->
                 val receivedAt = android.os.SystemClock.elapsedRealtime()
                 main.post {
-                    if (generation == readingGeneration && isAttachedToWindow) {
+                    // API17 适配：View.isAttachedToWindow 是 API 19+，走 UiCompat 兜底。
+                    if (generation == readingGeneration && UiCompat.isAttachedToWindow(this)) {
                         main.removeCallbacks(expireSpeed)
                         setSpeedKmh(if (android.os.SystemClock.elapsedRealtime() - receivedAt < 2_000) speed else null)
                         main.postDelayed(expireSpeed, 2_000)

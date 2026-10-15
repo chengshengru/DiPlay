@@ -14,6 +14,8 @@ import com.shilapi.xcertplay.network.ManualHotspotManager
 import com.shilapi.xcertplay.network.ExistingWifiManager
 import com.shilapi.xcertplay.network.WirelessHotspotBackend
 import com.shilapi.xcertplay.network.WirelessHotspotInfo
+import com.shilapi.xcertplay.network.WirelessStartupException
+import com.shilapi.xcertplay.network.WirelessStartupFailure
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import com.shilapi.xcertplay.orchestration.CarPlayRuntimeConfig
 import com.shilapi.xcertplay.orchestration.CarPlayTransport
@@ -88,6 +90,20 @@ class CarHotspotFallbackTest {
         CarHotspotAdbGrantTest.WritePermission.allowed = false
         controller(WirelessHotspotMode.EXISTING_WIFI).use {
             assertEquals(WirelessHotspotBackend.EXISTING_WIFI, start(it).backend)
+        }
+        assertEquals(0, ManualAttachment.starts)
+    }
+
+    /**
+     * android-4.2.2：ExistingWifiManager 依赖 API 21 的 ConnectivityManager.NetworkCallback，
+     * API 17 设备上构造即 NoClassDefFoundError（车机崩溃日志 crash-last.log）。
+     * 守卫必须先于构造拒绝该模式，抛可读的 WirelessStartupException。
+     */
+    @Test @Config(sdk = [17]) fun existingWifiIsRejectedOnApi17InsteadOfCrashing() {
+        controller(WirelessHotspotMode.EXISTING_WIFI).use {
+            val error = assertThrows(WirelessStartupException::class.java) { start(it) }
+            assertEquals(WirelessStartupFailure.HOTSPOT_CONFIGURATION, error.reason)
+            assertFalse(error.reason.retryable)
         }
         assertEquals(0, ManualAttachment.starts)
     }

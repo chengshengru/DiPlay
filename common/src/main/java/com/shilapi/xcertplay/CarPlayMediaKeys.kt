@@ -40,6 +40,15 @@ import kotlin.math.roundToInt
  */
 internal object CarPlayMediaKeys {
     private const val TAG = "DiPlay-MediaKeys"
+
+    /**
+     * 反射边界的类名。CarPlayMediaCallback 继承 MediaSession.Callback（API 21+），本类不可静态引用它：
+     * Dalvik（API 17-20）加载本类时逐方法校验，校验 getCallback 的 check-cast 与构造 lambda 的 new-instance
+     * 都会去解析该类，而其超类在 API 17 上不存在 → 链结失败并打印
+     * "E Could not find class 'com.shilapi.xcertplay.CarPlayMediaCallback', referenced from method
+     * CarPlayMediaKeys.getCallback"。契约由 CarPlayMediaCallbackTest 钉住。
+     */
+    internal const val MEDIA_CALLBACK_CLASS = "com.shilapi.xcertplay.CarPlayMediaCallback"
     private const val ACTIONS = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
         PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS
 
@@ -451,13 +460,15 @@ internal object CarPlayMediaKeys {
         return runCatching { active.requestSiri() }.getOrDefault(false)
     }
 
-    // 懒加载：CarPlayMediaCallback 继承 MediaSession.Callback（API 21）。
-    // API 17 设备上若在 <clinit> 中直接构造，会触发 NoClassDefFoundError 导致整个对象初始化失败而闪退。
-    private val callback: CarPlayMediaCallback by lazy {
-        CarPlayMediaCallback(
-            experimentalDiLink3Keys = { appContext?.let(BydOutputSettings::carPlayCallControls) == true },
-            send = ::send,
-        )
+    // API 21+ 专用（start() 已按 SDK_INT 守卫），按名字反射构造：见 [MEDIA_CALLBACK_CLASS]。
+    // by lazy 只推迟构造、推迟不了校验，所以本类与它的 lambda 都不能再静态引用 CarPlayMediaCallback。
+    private val callback: MediaSession.Callback by lazy {
+        Class.forName(MEDIA_CALLBACK_CLASS)
+            .getConstructor(Function0::class.java, Function2::class.java)
+            .newInstance(
+                { appContext?.let(BydOutputSettings::carPlayCallControls) == true },
+                { index: Int, source: String -> send(index, source) },
+            ) as MediaSession.Callback
     }
 
     /** Whether [next] changes what the media session's metadata shows; position and play state do not. */

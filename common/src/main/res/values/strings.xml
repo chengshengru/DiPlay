@@ -929,4 +929,10 @@
     <string name="connection_help_general">Retry the connection. If it fails again, return to DiPlay and save a report under Settings → Diagnostics.</string>
     <string name="connection_help_wifi_direct">Keep the head unit\'s Wi-Fi and Bluetooth on and the iPhone unlocked nearby, then retry. If it keeps failing, forget the car on the iPhone under Settings → General → CarPlay and connect again.</string>
     <string name="connection_help_existing_wifi">Make sure the head unit and the iPhone are on the same Wi-Fi network and its name and password match DiPlay settings, then retry.</string>
+    <string name="settings_more">More</string>
+    <string name="settings_swipe_advanced">Advanced (experimental)</string>
+    <string name="bluetooth_cannot_open_connections">This head unit’s Android Bluetooth cannot open connections for apps: its firmware leaves out the part that apps connect through. Calls and music over the car’s own Bluetooth are not affected, but wireless CarPlay cannot work on this head unit. Try a USB connection.</string>
+    <string name="settings_mfi_target_description">Choose USB/CH341 only while a CH341 authentication adapter is connected to the head unit. Without one, choose Local offline. Applies at the next connection.</string>
+    <string name="settings_call_speakerphone">Calls on the loudspeaker</string>
+    <string name="settings_call_speakerphone_description">For an Android phone or tablet used as the head unit: plays CarPlay calls on its loudspeaker instead of the earpiece and uses its hands-free microphone. Leave off on a car head unit. Applies from the next call.</string>
 </resources>

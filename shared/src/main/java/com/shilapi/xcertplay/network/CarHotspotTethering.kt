@@ -37,14 +37,20 @@ object CarHotspotTethering {
         val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
         val observedAdbState = AtomicReference<Boolean?>()
         val startReflection: (ResultReceiver) -> Unit = { receiver ->
-            val service = ConnectivityManager::class.java.getDeclaredField("mService")
-                .apply { isAccessible = true }
-                .get(context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)
-                ?: throw NoSuchMethodException("Connectivity service unavailable")
-            service.javaClass.getMethod(
-                "startTethering", Int::class.javaPrimitiveType, ResultReceiver::class.java,
-                Boolean::class.javaPrimitiveType, String::class.java,
-            ).invoke(service, 0, receiver, false, context.packageName)
+            try {
+                val service = ConnectivityManager::class.java.getDeclaredField("mService")
+                    .apply { isAccessible = true }
+                    .get(context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)
+                    ?: throw NoSuchMethodException("Connectivity service unavailable")
+                service.javaClass.getMethod(
+                    "startTethering", Int::class.javaPrimitiveType, ResultReceiver::class.java,
+                    Boolean::class.javaPrimitiveType, String::class.java,
+                ).invoke(service, 0, receiver, false, context.packageName)
+            } catch (error: Exception) {
+                // #616: the report did not say which start path failed.
+                log("car hotspot: Android start request failed ${describe(error)}")
+                throw error
+            }
         }
         val startAdb: () -> Boolean = {
             val client = AtomicReference<LocalAdb?>()
@@ -53,10 +59,13 @@ object CarHotspotTethering {
                 val adb = LocalAdb(AdbKeys.load(context))
                 client.set(adb)
                 adb.use {
-                    if (isCancelled() || Thread.currentThread().isInterrupted || System.nanoTime() >= deadline) false
-                    else if (adb.connect(mayAsk = false) != LocalAdb.Access.READY) false
+                    val access = if (isCancelled() || Thread.currentThread().isInterrupted || System.nanoTime() >= deadline) null
+                        else adb.connect(mayAsk = false)
+                    if (access != null && access != LocalAdb.Access.READY) log("car hotspot: ADB access=$access")
+                    if (access != LocalAdb.Access.READY) false
                     else CarHotspotAdbFallback.start(deadline, isCancelled,
-                        state = { CarHotspotStatus.isEnabled(context) }, shell = adb::shell, log = log)
+                        state = { CarHotspotStatus.isEnabled(context) }, shell = adb::shell, log = log,
+                        helper = shellTetheringHelper(context))
                         .also { if (it) observedAdbState.set(true) }
                 }
             }
@@ -68,7 +77,11 @@ object CarHotspotTethering {
             stateWithAdbObservation({ CarHotspotStatus.isEnabled(context) }, observedAdbState),
             startFallback = startAdb,
             start = startReflection,
-        ).also { log("car hotspot auto-enable: ${it.diagnostic}") }
+        ).also {
+            if (it != Result.READY && it != Result.CANCELLED)
+                log("car hotspot: Android state=${CarHotspotStatus.isEnabled(context) ?: "unknown"} writeSettings=${permitted(context)}")
+            log("car hotspot auto-enable: ${it.diagnostic}")
+        }
     }
 
     /** An ADB observation supplements hidden platform status, but never overrides a current off state. */
@@ -76,6 +89,15 @@ object CarHotspotTethering {
         platformState: () -> Boolean?,
         observation: AtomicReference<Boolean?>,
     ): () -> Boolean? = { platformState() ?: observation.get() }
+
+    /** 固件没有热点命令时,改用 shell 自身平台 tethering 调用([CarHotspotStartMain])。 */
+    private fun shellTetheringHelper(context: Context): String = CarHotspotStartMain.command(context.applicationInfo.sourceDir)
+
+    internal fun describe(error: Throwable): String {
+        val cause = (error as? InvocationTargetException)?.targetException ?: error
+        val reason = cause.javaClass.simpleName + (cause.message?.let { ": ${it.take(100)}" } ?: "")
+        return if (cause === error) reason else "${error.javaClass.simpleName} caused by $reason"
+    }
 
     internal fun enable(
         timeoutMillis: Long,
