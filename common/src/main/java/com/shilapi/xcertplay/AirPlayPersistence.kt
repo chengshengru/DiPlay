@@ -132,6 +132,7 @@ object AirPlayPersistence {
     private const val KEY_RIGHT_HAND_DRIVE = "right_hand_drive"
     private const val KEY_HIDE_TOP_BAR = "hide_top_bar"
     private const val KEY_HIDE_BOTTOM_BAR = "hide_bottom_bar"
+    private const val KEY_TEMPORARY_SYSTEM_BARS = "temporary_system_bars"
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
     private const val KEY_ADAPT_PIP_RESOLUTION = "adapt_pip_resolution"
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
@@ -1220,6 +1221,17 @@ object AirPlayPersistence {
 
     // main #613：Harman 固件回收 OEM 侧栏的老式全屏（实验性，默认关）。
     private const val KEY_HARMAN_FULLSCREEN = "harman_fullscreen"
+
+    /** Optional three-finger upward reveal; does not alter the saved bar visibility preference. */
+    fun loadTemporarySystemBars(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_TEMPORARY_SYSTEM_BARS, false)
+
+    fun saveTemporarySystemBars(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_TEMPORARY_SYSTEM_BARS, enabled)
+            .apply()
+    }
 
     fun loadHarmanFullscreen(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

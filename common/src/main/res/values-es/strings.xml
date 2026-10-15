@@ -876,4 +876,6 @@
     <string name="settings_mfi_target_description">Elige USB/CH341 solo si hay un adaptador de autenticación CH341 conectado a la unidad principal. Sin él, elige Local sin conexión. Se aplica en la próxima conexión.</string>
     <string name="settings_call_speakerphone">Llamadas por el altavoz</string>
     <string name="settings_call_speakerphone_description">Para un teléfono o una tableta Android usados como unidad principal: reproduce las llamadas de CarPlay por su altavoz en lugar del auricular y usa su micrófono manos libres. Déjalo desactivado en la unidad principal de un coche. Se aplica desde la próxima llamada.</string>
+    <string name="temporary_system_bars">Mostrar barras del sistema durante 5 segundos</string>
+    <string name="temporary_system_bars_description">Opcional: desliza hacia arriba con el número de dedos configurado para abrir los ajustes de DiPlay y mostrar durante cinco segundos las barras ocultas del vehículo. Deslizar hacia abajo sigue abriendo los ajustes. Desactívalo si hay conflictos; algunos equipos pueden ignorarlo.</string>
 </resources>

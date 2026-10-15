@@ -975,4 +975,6 @@
     <string name="settings_mfi_target_description">Choose USB/CH341 only while a CH341 authentication adapter is connected to the head unit. Without one, choose Local offline. Applies at the next connection.</string>
     <string name="settings_call_speakerphone">Calls on the loudspeaker</string>
     <string name="settings_call_speakerphone_description">For an Android phone or tablet used as the head unit: plays CarPlay calls on its loudspeaker instead of the earpiece and uses its hands-free microphone. Leave off on a car head unit. Applies from the next call.</string>
+    <string name="temporary_system_bars">Temporary system bars (5 seconds)</string>
+    <string name="temporary_system_bars_description">Optional: swipe up with the configured settings gesture fingers to show hidden car status/navigation bars for five seconds; swipe down still opens DiPlay settings. Disable on head units with conflicting gestures. Some firmware may ignore the request.</string>
 </resources>
