@@ -191,6 +191,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var disconnectButton: Button? = null
     private var lastRunning: Boolean? = null
     private var pendingWireless = false
+    // main #799（波次十三批次E）：驾驶员是否已被送去过蓝牙设置页。再次回来仍是关闭，说明开关留不住。
+    private var bluetoothSettingsVisited = false
     private var initialLaunch = true
     private var notificationTransport = true
     private var exportInProgress = false
@@ -5524,7 +5526,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         // 误弹"打开蓝牙"；统一走 BluetoothCompat.getAdapter（API 17 回退 getDefaultAdapter）。
         val adapter = BluetoothCompat.getAdapter(this)
         if (adapter == null) {
-            showTurnOnBluetoothDialog(adapter); return
+            // main #799（波次十三批次E）：这台车机的 Android 根本没有向应用开放蓝牙，
+            // 没有可引导驾驶员去拨的开关，直接说明原因而不是再问一遍。
+            pendingWireless = false
+            AlertDialog.Builder(this).setTitle(getString(R.string.wireless_carplay_2))
+                .setMessage(getString(R.string.bluetooth_cannot_open_connections))
+                .setPositiveButton(getString(R.string.got_it), null).show(); return
         }
         // Plan A 列表优先：先读已配对列表与已连接探针，只要能给出候选设备就放行进入选择；
         // "打开蓝牙"弹窗只留给"无适配器 / 一个候选都拿不到且 isEnabled 关闭"的场景。
@@ -5608,33 +5615,33 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
      * 由于真机无法查看 logcat，这里把关键探测值直接显示在对话框里，
      * 用户截图即可反馈实际卡点，无需 adb。
      */
-    private fun showTurnOnBluetoothDialog(adapter: BluetoothAdapter? = null) {
+    private fun showTurnOnBluetoothDialog(adapter: BluetoothAdapter) {
         val diag = buildString {
             append(getString(R.string.enable_the_car_s_bluetooth_and_pair_your_iphone_first))
+            // main #799（波次十三批次E）：从蓝牙设置页回来仍是关闭——有些车机的开关留不住，
+            // 说明这台车机把蓝牙留给自己的通话和音乐，应用无法使用。
+            if (bluetoothSettingsVisited) append("\n\n").append(getString(R.string.bluetooth_will_not_stay_on_hint))
             append("\n\n———— 诊断信息（请截图反馈）————\n")
             append("系统版本: Android ${Build.VERSION.SDK_INT}\n")
-            if (adapter == null) {
-                append("蓝牙适配器: 获取失败(getDefaultAdapter 返回 null)\n")
-                append("→ 本机系统未向应用开放蓝牙适配器，Plan A/B 不可行，需改用 Wi-Fi 直连方案")
-            } else {
-                append("蓝牙适配器: 可用\n")
-                append("开关状态(isEnabled): ${adapter.isEnabled}\n")
-                val bonded = runCatching { adapter.bondedDevices }.getOrNull()
-                append("已配对设备数: ${bonded?.size ?: "读取失败"}\n")
-                val conn = BluetoothCompat.findConnectedIphone(adapter)
-                append("已连接 iPhone: ${conn?.address ?: "未探测到"}\n")
-                // 双蓝牙鉴别：与系统蓝牙设置里显示的车机名比对。
-                append("适配器名称: ${runCatching { adapter.name }.getOrNull() ?: "读取失败"}\n")
-                append("适配器地址: ${runCatching { adapter.address }.getOrNull() ?: "读取失败"}\n")
-                if (bonded.isNullOrEmpty() && !adapter.isEnabled) {
-                    append("→ 应用层既拿不到配对列表、开关又误报关闭，疑似系统未向应用开放蓝牙数据")
-                }
+            append("蓝牙适配器: 可用\n")
+            append("开关状态(isEnabled): ${adapter.isEnabled}\n")
+            val bonded = runCatching { adapter.bondedDevices }.getOrNull()
+            append("已配对设备数: ${bonded?.size ?: "读取失败"}\n")
+            val conn = BluetoothCompat.findConnectedIphone(adapter)
+            append("已连接 iPhone: ${conn?.address ?: "未探测到"}\n")
+            // 双蓝牙鉴别：与系统蓝牙设置里显示的车机名比对。
+            append("适配器名称: ${runCatching { adapter.name }.getOrNull() ?: "读取失败"}\n")
+            append("适配器地址: ${runCatching { adapter.address }.getOrNull() ?: "读取失败"}\n")
+            if (bonded.isNullOrEmpty() && !adapter.isEnabled) {
+                append("→ 应用层既拿不到配对列表、开关又误报关闭，疑似系统未向应用开放蓝牙数据")
             }
         }
         AlertDialog.Builder(this).setTitle(getString(R.string.turn_on_bluetooth))
             .setMessage(diag)
             .setPositiveButton(getString(R.string.open_bluetooth)) { _, _ ->
-                if (adapter != null && BluetoothCompat.tryEnable(adapter)) {
+                // main #799（波次十三批次E）：无论应用层直接开启还是跳转系统设置，驾驶员都已被告知去开开关。
+                bluetoothSettingsVisited = true
+                if (BluetoothCompat.tryEnable(adapter)) {
                     toast("已发送开启蓝牙请求，稍候自动重试")
                     window.decorView.postDelayed({ choosePhone() }, 2000)
                 } else {

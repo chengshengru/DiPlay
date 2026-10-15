@@ -1259,7 +1259,8 @@ class CarPlayController(
                 (!preflightAdapter.isEnabled && !bluetoothPausedByUs &&
                     probeConnectedWirelessIphone(preflightAdapter) == null)
             ) {
-                throw IOException(
+                // main #799（波次十三批次E）：无适配器不再无限重试，直接带原因终止；无线电关闭仍可重试。
+                throw BluetoothRadioCheck.failure(
                     BluetoothRadioCheck.blocker(
                         adapterPresent = preflightAdapter != null,
                         enabled = preflightAdapter?.isEnabled == true,
@@ -1357,7 +1358,7 @@ class CarPlayController(
             onStatus(CarPlayStatus.WaitingForPairedIphone)
 
             val adapter = bluetoothAdapter
-                ?: throw IOException(BluetoothRadioCheck.NO_ADAPTER)
+                ?: throw BluetoothRadioCheck.failure(BluetoothRadioCheck.NO_ADAPTER)
             // main #307：无线握手前有界恢复被我们暂停的车机蓝牙；不恢复本就关闭的无线电。
             val bluetoothRecoveryComplete = BydBluetoothSuspend.resumeAndWait(appContext, adapter)
             // Plan A：先探测真实 ACL 已连接的 iPhone。它是无线电（含 iAP2 RFCOMM 引导）可用的铁证，

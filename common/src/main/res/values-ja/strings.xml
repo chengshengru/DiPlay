@@ -918,6 +918,7 @@
     <string name="settings_more">その他</string>
     <string name="settings_swipe_advanced">詳細設定（実験的機能）</string>
     <string name="bluetooth_cannot_open_connections">この車載端末のAndroid Bluetoothはアプリからの接続を開始できません。アプリが接続に使う部分がファームウェアにありません。車載Bluetoothの通話と音楽には影響しませんが、この端末ではワイヤレスCarPlayを使用できません。USB接続をお試しください。</string>
+    <string name="bluetooth_will_not_stay_on_hint">そこでBluetoothをオンのままにできない場合、この車載端末のBluetoothは端末自身の通話と音楽専用で、アプリからは利用できません。その場合ワイヤレスCarPlayは使用できないため、USBケーブルで接続してください。</string>
     <string name="settings_mfi_target_description">USB/CH341 は、CH341 認証アダプターを車載機に接続しているときだけ選択してください。接続していない場合は「ローカル／オフライン」を選択します。次回の接続から適用されます。</string>
     <string name="settings_call_speakerphone">通話をスピーカーで再生</string>
     <string name="settings_call_speakerphone_description">車載機として使う Android スマートフォンやタブレット向け：CarPlay の通話を受話口ではなくスピーカーで再生し、ハンズフリー用マイクを使います。車の車載機ではオフのままにしてください。次の通話から適用されます。</string>

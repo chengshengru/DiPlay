@@ -1,5 +1,9 @@
 package com.shilapi.xcertplay.transport
 
+import com.shilapi.xcertplay.network.WirelessStartupException
+import com.shilapi.xcertplay.network.WirelessStartupFailure
+import java.io.IOException
+
 /**
  * 移植自 main #677（波次十一批次A）：无线启动前，车机蓝牙无线电可用性的前置判断。
  *
@@ -22,7 +26,16 @@ object BluetoothRadioCheck {
         else -> null
     }
 
-    const val NO_ADAPTER = "Bluetooth adapter is unavailable"
+    /**
+     * main #799（波次十三批次E）：把阻断原因转成要抛出的异常。无线电关闭是可以再打开的，
+     * 因此该尝试仍会重试；而重试并不能给车机变出一个蓝牙适配器，所以无适配器时直接带上原因终止。
+     */
+    fun failure(blocker: String): IOException =
+        if (blocker == NO_ADAPTER) WirelessStartupException(WirelessStartupFailure.BLUETOOTH_UNUSABLE, blocker)
+        else IOException(blocker)
+
+    /** 以宿主屏匹配"应用无法使用蓝牙"关键词的措辞结尾。 */
+    const val NO_ADAPTER = "Bluetooth adapter is unavailable: Android on this head unit ${BluetoothLinkCheck.NO_SOCKETS_MARK}"
 
     /** 要求驾驶员去操作的措辞；宿主屏按此关键词匹配本地化提示。 */
     const val RADIO_OFF_MARK = "Turn on Bluetooth"

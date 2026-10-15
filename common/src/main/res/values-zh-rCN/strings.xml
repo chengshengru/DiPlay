@@ -906,6 +906,7 @@
     <string name="connection_help_wifi_direct">保持车机的 Wi-Fi 和蓝牙开启，iPhone 解锁并放在附近，然后重试。如果仍然失败，请在 iPhone 的“设置 → 通用 → CarPlay 车载”中忘记这辆车，再重新连接。</string>
     <string name="connection_help_existing_wifi">请确认车机和 iPhone 连接的是同一个 Wi-Fi 网络，且网络名称和密码与 DiPlay 设置一致，然后重试。</string>
     <string name="bluetooth_cannot_open_connections">此车机的系统蓝牙无法为应用建立连接：固件没有提供应用连接要用的那一部分。车机自己的蓝牙通话和音乐不受影响，但此车机无法使用无线 CarPlay。请尝试 USB 连接。</string>
+    <string name="bluetooth_will_not_stay_on_hint">如果蓝牙在那里打不开，或打开后又自己关闭，说明这台车机的蓝牙只供它自己的通话和音乐使用，应用无法使用。这种情况下无法使用无线 CarPlay，请改用 USB 线。</string>
     <string name="settings_mfi_target_description">只有车机上插着 CH341 认证适配器时才选择 USB/CH341。没有适配器时请选择「本地离线」。下次连接时生效。</string>
     <string name="settings_call_speakerphone">通话使用扬声器</string>
     <string name="settings_call_speakerphone_description">适用于用作车机的 Android 手机或平板：CarPlay 通话从扬声器播放而不是听筒，并使用免提麦克风。车机上请保持关闭。从下一次通话开始生效。</string>

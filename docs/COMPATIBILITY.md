@@ -52,6 +52,7 @@ The specifically observed 1280×480 DiLink 3 projection surface is now recognize
 - Some iOS/head-unit combinations do not visibly apply icon and text size. Reconnection is implemented; that does not guarantee the iPhone chooses the requested layout.
 - A radio that supports joining a 5 GHz network may still reject a 5 GHz Wi-Fi Direct group. The capability flag is diagnostic, not proof of group-owner support.
 - Automatic startup depends on the car's firmware and startup permissions.
+- A head unit whose Android has no Bluetooth adapter at all is told so, when the driver chooses an iPhone and when a connection is tried, instead of being asked to turn Bluetooth on. Where the adapter exists but its switch will not stay on, as on the GAC unit in [#581](https://github.com/shihabal3amri/DiPlay/issues/581), the request to turn Bluetooth on adds that this means wireless CarPlay cannot work there once the driver has been to Bluetooth settings and come back with it still off.
 - USB requires a data port and correct host/device-role behavior.
 - Calls, Siri, background reconnection, long journeys and future iOS releases need broader testing.
 
