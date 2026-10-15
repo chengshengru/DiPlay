@@ -423,6 +423,7 @@
     <string name="wi_fi_session">Wi-Fi 会话</string>
     <string name="widest_width">较宽边</string>
     <string name="wireless_carplay">无线 CarPlay</string>
+    <string name="home_usb_carplay">USB 有线 CarPlay</string>
     <string name="wireless_carplay_2">无线 CarPlay</string>
     <string name="wireless_carplay_active">无线 CarPlay 已启用</string>
     <string name="wireless_carplay_control_running">无线 CarPlay 控制通道运行中</string>
@@ -614,6 +615,8 @@
     <string name="settings_auto_car_hotspot_system_description">打开 DiPlay 时及无线连接前开启已保存的车辆热点。DiPlay 需要 Android 的“修改系统设置”权限；无需 ADB。若要在完全重启后也有热点，请同时开启“车辆启动后打开 DiPlay”。热点不会自动关闭。</string>
     <string name="settings_write_settings_missing">尚未允许“修改系统设置”权限。请允许，以便 DiPlay 开启热点。</string>
     <string name="settings_write_settings_allow">允许权限</string>
+    <string name="settings_wifi_direct_scan_pause">CarPlay 期间暂停车机 Wi-Fi 搜索 · 需要 ADB</string>
+    <string name="settings_wifi_direct_scan_pause_description">Wi-Fi 直连时，车机每隔几秒搜索一次 Wi-Fi 网络，每次搜索都会让音乐和画面卡顿。开启后，CarPlay 运行期间 DiPlay 会暂停这个搜索。这段时间车机也不会自动连接已知网络（例如手机热点），可以在车机 Wi-Fi 设置里手动连接；CarPlay 结束后恢复。关闭后车机可以自动连接。下次连接时生效。</string>
     <string name="settings_write_settings_granted">“修改系统设置”权限：已允许</string>
     <string name="auto_car_hotspot_description">DiPlay 启动时开启车机热点。打开开关会自动通过 ADB 申请所需权限，请允许车机上的授权提示。配合“车辆启动后打开”可随开机启动。保留热点名称和密码，不会自动关闭热点。</string>
     <string name="hotspot_control_missing">缺少热点控制权限。请通过 ADB 授权，或在车机设置中手动开启热点。</string>

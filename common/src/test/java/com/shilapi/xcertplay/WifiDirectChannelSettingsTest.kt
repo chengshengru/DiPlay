@@ -91,6 +91,33 @@ class WifiDirectChannelSettingsTest {
         assertEquals(149, config.wifiP2pPreferredChannel)
     }
 
+    // main #755（波次十三批次G）：扫描暂停开关默认开，可关闭以保留车机自动入网。
+    @Test fun theScanPauseSwitchIsOnByDefaultAndCanBeTurnedOff() {
+        // #755: the pause also stops the car joining the phone's hotspot by itself, so drivers can turn it off.
+        assertTrue(AirPlayPersistence.loadWifiDirectScanPause(activity))
+        val title = activity.getString(R.string.settings_wifi_direct_scan_pause)
+        val switch = findSwitch(controls(), title)!!
+        assertTrue(switch.isChecked)
+        switch.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(AirPlayPersistence.loadWifiDirectScanPause(activity))
+        assertFalse(prefs.getBoolean(AirPlayPersistence.KEY_WIFI_DIRECT_SCAN_PAUSE, true))
+    }
+
+    @Test fun theScanPauseSwitchIsOnlyForWifiDirect() {
+        AirPlayPersistence.saveWirelessHotspotMode(activity, WirelessHotspotMode.MANUAL)
+        assertNull(findSwitch(controls(), activity.getString(R.string.settings_wifi_direct_scan_pause)))
+    }
+
+    // 分支 toggle() 生成 SwitchCompat（SettingsWidgets），与 main 的 android.widget.Switch 不同，此处适配。
+    private fun findSwitch(view: View, title: String): androidx.appcompat.widget.SwitchCompat? {
+        if (view is androidx.appcompat.widget.SwitchCompat && view.contentDescription == title) return view
+        if (view is ViewGroup) for (index in 0 until view.childCount) {
+            findSwitch(view.getChildAt(index), title)?.let { return it }
+        }
+        return null
+    }
+
     private val choices get() = listOf(WifiP2pChannels.AUTO) + WifiP2pChannels.channels
 
     private fun select(dialog: AlertDialog, channel: Int) {

@@ -86,6 +86,18 @@ class BydVehicleDataSettingsTest {
         assertTrue(switches().any { it.contentDescription == activity.getString(R.string.video_while_parked) })
     }
 
+    // main #724（波次十三批次G）：点"检查 ADB 权限"后 toast 结果，否则按钮看似无反应。
+    @Test fun aTappedAdbCheckShowsItsResult() {
+        // #724: on a head unit without network ADB only the status line changed, so the button seemed dead.
+        openSettings()
+        texts().single { it.text == activity.getString(R.string.advanced_vehicle_data) }.performClick()
+        backend.checkResult = BydAdbAccess.Status(BydAdbAccess.State.ADB_OFF)
+        texts().single { it.text == activity.getString(R.string.check_adb_access) }.performClick()
+        backend.run("diplay-adb-state")
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertEquals(activity.getString(R.string.adb_off), org.robolectric.shadows.ShadowToast.getTextOfLatestToast())
+    }
+
     @Test fun successfulLiveProbeRevealsOnlySupportedSettings() {
         BydOutputSettings.setLegacyVehicleProbe(context, true)
         openSettings()

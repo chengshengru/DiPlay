@@ -1748,7 +1748,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         }
         panel.addView(gestureHint)
         paintWaitingScreen = {
-            val colors = WaitingScreenColors.of(darkMode)
+            // main #536（波次十三批次G）：连接屏是 DiPlay 自身界面，跟随应用主题而非发给 CarPlay 的日夜模式。
+            val colors = WaitingScreenColors.of(appNight)
             viewport.setBackgroundColor(colors.background)
             title.setTextColor(colors.text)
             stage.setTextColor(colors.text)
@@ -1756,7 +1757,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             help.setTextColor(colors.secondary)
             gestureHint.setTextColor(colors.secondary)
             // main #594：等待屏按钮跟随日夜配色统一由 DiPlayButton 着色（作者：TRAE AI）。
-            val buttonPalette = DiPlayPalette.of(darkMode)
+            val buttonPalette = DiPlayPalette.of(appNight)
             back.style(DiPlayButtonKind.PRIMARY, buttonPalette, overlay = false)
             retry.style(DiPlayButtonKind.SECONDARY, buttonPalette, overlay = false)
             recovery.style(DiPlayButtonKind.SECONDARY, buttonPalette, overlay = false)
@@ -2433,6 +2434,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         val nextNight = resolveAppNightNow(darkMode)
         if (nextNight == appNight) return
         appNight = nextNight
+        // main #536（波次十三批次G）：主题变化时连接屏立即重绘。
+        paintWaitingScreen()
 
         settingsMenu?.let { previous ->
             val parent = previous.parent as? ViewGroup ?: return@let

@@ -2622,6 +2622,13 @@ class CarPlayController(
     // Kept across reconnects within this controller: resuming between attempts would start a scan.
     private fun pauseWifiScans(backend: WirelessHotspotBackend) = synchronized(this) {
         if (closed || !WifiScanPause.eligible(backend)) return@synchronized
+        // main #755：设置→连接 允许司机保留车机自动入网（例如连手机热点），关闭扫描暂停（作者：TRAE AI）。
+        // Settings → Connection lets a driver keep the car's automatic joining, e.g. for the phone's hotspot (#755).
+        if (!appContext.getSharedPreferences("xcertplay_airplay", android.content.Context.MODE_PRIVATE)
+                .getBoolean("wifi_direct_scan_pause", true)) {
+            if (wifiScanPause == null) debugLog("Wi-Fi scan pause off in Settings; the car keeps searching and joining networks")
+            return@synchronized
+        }
         (wifiScanPause ?: WifiScanPause(appContext, ::debugLog).also { wifiScanPause = it }).pause()
     }
 

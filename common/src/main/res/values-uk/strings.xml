@@ -422,6 +422,7 @@
     <string name="wi_fi_session">Сеанс Wi-Fi</string>
     <string name="widest_width">Найбільша ширина</string>
     <string name="wireless_carplay">БЕЗДРОТОВИЙ CARPLAY</string>
+    <string name="home_usb_carplay">CARPLAY ЧЕРЕЗ USB</string>
     <string name="wireless_carplay_2">Бездротовий CarPlay</string>
     <string name="wireless_carplay_active">Бездротовий CarPlay активний</string>
     <string name="wireless_carplay_control_running">Керування бездротовим CarPlay працює</string>
@@ -583,6 +584,8 @@
     <string name="settings_auto_car_hotspot_system_description">Вмикає збережену точку доступу під час відкриття DiPlay і перед бездротовим підключенням. Потрібен доступ Android «Зміна системних налаштувань»; ADB не потрібен. Щоб точка доступу з’являлася й після повного перезапуску, увімкніть відкриття DiPlay після запуску автомобіля. Точка доступу автоматично не вимикається.</string>
     <string name="settings_write_settings_missing">Доступ «Зміна системних налаштувань» ще не дозволено. Дозвольте його, щоб DiPlay міг вмикати точку доступу.</string>
     <string name="settings_write_settings_allow">Дозволити доступ</string>
+    <string name="settings_wifi_direct_scan_pause">Призупинити пошук Wi-Fi автомобілем під час CarPlay · потрібен ADB</string>
+    <string name="settings_wifi_direct_scan_pause_description">У режимі Wi-Fi Direct автомобіль шукає мережі Wi-Fi кожні кілька секунд, і кожен пошук перериває музику й відео. Коли параметр увімкнено, DiPlay призупиняє пошук, поки працює CarPlay. Тоді автомобіль і сам не підключається до відомої мережі, наприклад до точки доступу телефона, доки CarPlay не завершиться; підключитися можна вручну в налаштуваннях Wi-Fi автомобіля. Вимкніть, щоб автомобіль підключався сам. Застосовується під час наступного підключення.</string>
     <string name="settings_write_settings_granted">Доступ «Зміна системних налаштувань»: дозволено</string>
     <string name="auto_car_hotspot_description">Вмикає збережену точку доступу під час відкриття DiPlay. Перемикач автоматично запитує потрібні дозволи через ADB; підтвердьте запит на екрані авто. Для запуску після завантаження ввімкніть відкриття DiPlay після запуску авто. Назва й пароль зберігаються, точка доступу автоматично не вимикається.</string>
     <string name="hotspot_control_missing">Немає дозволу керування точкою доступу. Надайте його через ADB або ввімкніть точку доступу в налаштуваннях авто.</string>

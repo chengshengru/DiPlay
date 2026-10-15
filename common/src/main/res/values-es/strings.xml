@@ -411,6 +411,7 @@
     <string name="wi_fi_session">Sesión Wi‑Fi</string>
     <string name="widest_width">Ancho máximo</string>
     <string name="wireless_carplay">CARPLAY INALÁMBRICO</string>
+    <string name="home_usb_carplay">CARPLAY POR USB</string>
     <string name="wireless_carplay_2">CarPlay inalámbrico</string>
     <string name="wireless_carplay_active">CarPlay inalámbrico activo</string>
     <string name="wireless_carplay_control_running">Control de CarPlay inalámbrico en ejecución</string>
@@ -570,6 +571,8 @@
     <string name="settings_auto_car_hotspot_system_description">Activa el punto de acceso guardado del coche al abrir DiPlay y antes de una conexión inalámbrica. DiPlay necesita el acceso de Android «Modificar ajustes del sistema»; no se requiere ADB. Para tener el punto de acceso tras un reinicio completo, activa también abrir DiPlay al arrancar el coche. El punto de acceso no se desactiva automáticamente.</string>
     <string name="settings_write_settings_missing">El acceso «Modificar ajustes del sistema» aún no está permitido. Permítelo para que DiPlay pueda activar el punto de acceso.</string>
     <string name="settings_write_settings_allow">Permitir acceso</string>
+    <string name="settings_wifi_direct_scan_pause">Pausar la búsqueda de Wi-Fi del coche con CarPlay · requiere ADB</string>
+    <string name="settings_wifi_direct_scan_pause_description">Con Wi-Fi Direct el coche busca redes Wi-Fi cada pocos segundos, y cada búsqueda hace que la música y el vídeo se corten. Con esta opción, DiPlay pausa la búsqueda mientras CarPlay está activo. Entonces el coche tampoco se conecta solo a una red conocida, como el punto de acceso de tu teléfono, hasta que CarPlay termina; puedes conectarte a mano en los ajustes de Wi-Fi del coche. Desactívala para que el coche se conecte solo. Se aplica en la próxima conexión.</string>
     <string name="settings_write_settings_granted">Acceso «Modificar ajustes del sistema»: permitido</string>
     <string name="auto_car_hotspot_description">Activa el punto de acceso guardado al abrir DiPlay. El interruptor solicita automáticamente los permisos necesarios mediante ADB; acepta el aviso en la pantalla del coche. Activa la apertura de DiPlay al arrancar para iniciarlo tras el encendido. Conserva el nombre y la contraseña y nunca apaga el punto de acceso.</string>
     <string name="hotspot_control_missing">Falta el permiso de control del punto de acceso. Concédelo mediante ADB o actívalo en los ajustes del coche.</string>

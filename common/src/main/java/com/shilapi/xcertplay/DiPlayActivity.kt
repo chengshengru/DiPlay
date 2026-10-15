@@ -187,6 +187,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var hotspotJoinControls: HotspotJoinControls? = null
     private var setupError: String? = null
     private var status: TextView? = null
+    // main #742：USB 会话时首页卡片改标题并隐藏 Wi-Fi 提示（作者：TRAE AI）。
+    private var homeCardTitle: TextView? = null
+    private var homeConnectionHint: TextView? = null
     private var connectButton: Button? = null
     private var disconnectButton: Button? = null
     private var lastRunning: Boolean? = null
@@ -1074,13 +1077,18 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(SETTINGS_BLOCK_GAP_DP) })
     }
 
+    /** main #799 前置（波次十三批次G，c2e1b22e）：选定 iPhone 前按钮只显示"选择 iPhone"，不再带英文占位名。 */
+    private fun chooseIphoneTitle(): String =
+        if (DiPlayPreferences.phoneAddress(this) == null) getString(R.string.choose_iphone)
+        else "${getString(R.string.choose_iphone_prefix)}${DiPlayPreferences.phoneName(this)}"
+
     private fun setupIphoneStep(content: LinearLayout) {
         setupTitle(content, R.string.setup_iphone_title, getString(R.string.keep_bluetooth_and_wi_fi_on_your_iphone_pair_with_the_car))
         val card = card()
         val chosen = DiPlayPreferences.phoneAddress(this) != null
         card.addView(label(if (chosen) DiPlayPreferences.phoneName(this) else getString(R.string.setup_iphone_none), 22,
             if (chosen) READY else TEXT, true))
-        card.addView(button("${getString(R.string.choose_iphone_prefix)}${DiPlayPreferences.phoneName(this)}", !chosen) {
+        card.addView(button(chooseIphoneTitle(), !chosen) {
             choosePhone()
         }, matchButton(16, 60))
         card.addView(button(getString(R.string.review_app_permissions), false) {
@@ -1313,7 +1321,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         left.addView(label(getString(R.string.a_familiar_drive), if (wide) 42 else 36, TEXT, true).apply { setPadding(0, dp(12), 0, dp(10)) })
         left.addView(label(getString(R.string.your_maps_music_and_conversations_carplay_right_here_on_yo), 19, MUTED))
         val card = card()
-        card.addView(label(getString(R.string.wireless_carplay), 12, ACCENT, true).apply { UiCompat.setLetterSpacing(this, .12f) })
+        // main #742：标题保存为字段，USB 会话时改为 "USB 有线 CarPlay"（作者：TRAE AI）。
+        homeCardTitle = label(getString(R.string.wireless_carplay), 12, ACCENT, true).apply { UiCompat.setLetterSpacing(this, .12f) }
+        card.addView(homeCardTitle)
         status = label(getString(R.string.ready_when_you_are), 24, TEXT, true).apply { setPadding(0, dp(10), 0, dp(16)) }
         card.addView(status)
         connectButton = button(getString(R.string.connect_phone), true) {
@@ -1327,7 +1337,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> getString(R.string.hotspot_hint_local)
             else -> getString(R.string.hotspot_hint_p2p)
         }
-        card.addView(label(connectionHint, 15, MUTED).apply { setPadding(0, dp(14), 0, 0) })
+        // main #742：提示保存为字段，USB 会话时隐藏（作者：TRAE AI）。
+        homeConnectionHint = label(connectionHint, 15, MUTED).apply { setPadding(0, dp(14), 0, 0) }
+        homeConnectionHint?.let(card::addView)
         val startupProblem = hotspotStartupResult?.takeIf {
             it != CarHotspotTethering.Result.READY && it != CarHotspotTethering.Result.CANCELLED &&
                 CarHotspotSettings.shouldEnable(this, true, AirPlayPersistence.loadWirelessHotspotMode(this)) &&
@@ -2260,7 +2272,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             // 开机自启 ADB 修复入口（#441）：一次性豁免后台限制，让 BOOT_COMPLETED 广播可达。
             card.addView(button(getString(R.string.boot_start_repair), false) { repairBootStart() }, matchButton(6, 56))
             card.addView(label(getString(R.string.boot_start_repair_desc), 14, MUTED).apply { setPadding(0, dp(8), 0, dp(6)) })
-            card.addView(button("${getString(R.string.choose_iphone_prefix)}${DiPlayPreferences.phoneName(this)}", false) { choosePhone() }, matchButton(12, 60))
+            card.addView(button(chooseIphoneTitle(), false) { choosePhone() }, matchButton(12, 60))
         }
         // main #583：USB 连接卡——有线充电电流报价档位（下次 USB 连接生效）。
         filteredSection(content, SettingsSection.USB_CONNECTION,
@@ -3427,7 +3439,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         section(content, getString(R.string.s_1_choose_your_connection)) { card -> wirelessLinkControls(card) }
         section(content, getString(R.string.s_2_pair_your_iphone)) { card ->
             card.addView(label(getString(R.string.keep_bluetooth_and_wi_fi_on_your_iphone_pair_with_the_car), 16, MUTED))
-            card.addView(button("${getString(R.string.choose_iphone_prefix)}${DiPlayPreferences.phoneName(this)}", false) { choosePhone() }, matchButton(12, 60))
+            card.addView(button(chooseIphoneTitle(), false) { choosePhone() }, matchButton(12, 60))
             card.addView(button(getString(R.string.review_app_permissions), false) {
                 openSystem(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
             }, matchButton(12, 60))
@@ -3510,6 +3522,14 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         } else if (mode == WirelessHotspotMode.WIFI_P2P) {
             parent.addView(label(getString(R.string.turn_the_car_s_wi_fi_switch_on_allow_location_nearby_devic), 16, MUTED))
             wifiDirectChannelControl(parent)
+            // main #755：扫描暂停开关。暂停也会让车机不自动连已知网络（如手机热点），故可关（作者：TRAE AI）。
+            // #755: the pause also stops the car joining a known network, such as the phone's hotspot, by itself.
+            toggle(parent, getString(R.string.settings_wifi_direct_scan_pause),
+                getString(R.string.settings_wifi_direct_scan_pause_description),
+                AirPlayPersistence.loadWifiDirectScanPause(this)) {
+                AirPlayPersistence.saveWifiDirectScanPause(this, it)
+                markReconnectNeeded()
+            }
             parent.addView(button(getString(R.string.open_car_wi_fi_settings), false) { openCarClientWifiSettings() }, matchButton(12, 60))
         }
     }
@@ -4678,6 +4698,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     vehicleProbeOutcome = null
                 }
                 render()
+                // main #724：手动点"检查 ADB 权限"后同时 toast 结果，状态行变化太隐蔽（作者：TRAE AI）。
+                // A check the driver asked for also says its result where they look: the status line
+                // above the button changed so quietly that the button seemed to do nothing (#724).
+                if (mayAsk) toast(status?.state?.let(::adbLinkStatusText) ?: getString(R.string.adb_check_failed))
                 // Unreadable data keeps the current connection; the page shows what is missing.
                 if (!legacy && vehicleDataReconnectPending && status?.state == BydAdbAccess.State.READY &&
                     enabledVehicleDataReadable(null, status)) {
@@ -5712,6 +5736,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     private fun refreshStatus() {
         val running = CarPlayBackgroundSession.hasSession()
+        // main #742：USB 会话共用卡片的状态与断开按钮，但不共用无线标题和 Wi-Fi 提示（作者：TRAE AI）。
+        // A USB session shares this card's status and Disconnect, but not its wireless title or Wi-Fi hint (#742).
+        val wired = HomeCardTransport.wired(running, AirPlayPersistence.loadWirelessEnabled(this))
+        homeCardTitle?.text = getString(if (wired) R.string.home_usb_carplay else R.string.wireless_carplay)
+        homeConnectionHint?.visibility = if (wired) View.GONE else View.VISIBLE
         status?.text = when {
             setupError != null -> getString(R.string.setup_needs_attention)
             CarPlayBackgroundSession.active -> getString(R.string.carplay_connected)

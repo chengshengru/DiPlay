@@ -56,6 +56,9 @@ object AirPlayPersistence {
     private const val KEY_WIRELESS_ENABLED = "wireless_enabled"
     private const val KEY_WIRELESS_HOTSPOT_MODE = "wireless_hotspot_mode"
     private const val KEY_WIFI_P2P_PREFERRED_CHANNEL = "wifi_p2p_preferred_channel"
+    // main #755：Wi-Fi Direct 扫描暂停开关，shared 模块 CarPlayController 以同名读取（作者：TRAE AI）。
+    /** Read by CarPlayController in the shared module under the same name. */
+    const val KEY_WIFI_DIRECT_SCAN_PAUSE = "wifi_direct_scan_pause"
     private const val KEY_MANUAL_HOTSPOT_SSID = "manual_hotspot_ssid"
     private const val KEY_MANUAL_HOTSPOT_PASSPHRASE = "manual_hotspot_passphrase"
     private const val KEY_MANUAL_HOTSPOT_BAND = "manual_hotspot_band"
@@ -387,6 +390,16 @@ object AirPlayPersistence {
         require(WifiP2pChannels.isValid(channel))
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_WIFI_P2P_PREFERRED_CHANNEL, channel).apply()
+    }
+
+    // main #755：CarPlay 运行期间暂停车机自身的 Wi-Fi 搜索（默认开，需要 ADB）（作者：TRAE AI）。
+    /** Wi-Fi Direct: pause the car's own Wi-Fi search while CarPlay runs (on by default, needs ADB). */
+    fun loadWifiDirectScanPause(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_WIFI_DIRECT_SCAN_PAUSE, true)
+
+    fun saveWifiDirectScanPause(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_WIFI_DIRECT_SCAN_PAUSE, enabled).apply()
     }
 
     fun loadExistingWifiSsid(context: Context): String =
