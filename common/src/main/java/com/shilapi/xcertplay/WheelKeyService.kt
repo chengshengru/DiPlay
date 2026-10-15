@@ -195,7 +195,8 @@ class WheelKeyService : AccessibilityService() {
         val key = WheelKey.of(event)
         if (BydOutputSettings.carPlayCallControls(this) &&
             CarPlayMediaButton.opensSiriWhileCarPlay(event.keyCode) &&
-            !WheelZoomSettings.isSiriKey(this, key) && session() != null) {
+            !(WheelZoomSettings.siriDoublePress(this) && WheelZoomSettings.isSiriKey(this, key)) &&
+            session() != null) {
             if (!down) {
                 // main #750/#751：短按可被"仅长按"开关吞掉；一次按下的双键只放行第一个（作者：TRAE AI）。
                 val shortPressIgnored = WheelZoomSettings.siriLongPressOnly(this) && CarPlayMediaButton.isShortVoiceKey(event.keyCode)
