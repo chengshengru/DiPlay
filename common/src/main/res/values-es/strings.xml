@@ -265,6 +265,12 @@
     <string name="mfi_certificate_signing_target">Certificado MFi y destino de firma</string>
     <string name="model">Modelo</string>
     <string name="music_buffer">Búfer de música</string>
+    <string name="settings_music_buffer_ms">%1$d ms</string>
+    <string name="settings_music_buffer_wireless">Búfer de música (inalámbrico)</string>
+    <string name="settings_music_buffer_wired">Búfer de música (cable USB)</string>
+    <string name="settings_navigation_attenuation">Volumen de las indicaciones de navegación</string>
+    <string name="settings_navigation_attenuation_value">%1$d dB</string>
+    <string name="settings_navigation_attenuation_description">Reduce solo las indicaciones de navegación de CarPlay, sin cambiar música ni llamadas. Se aplica al instante; sigue funcionando el volumen de navegación de la unidad.</string>
     <string name="resolution_native">Nativa</string>
     <string name="navigation_on_hud_and_instrument_cluster">Navegación en HUD y panel de instrumentos</string>
     <string name="navigation_stream_type">Tipo de flujo de navegación</string>

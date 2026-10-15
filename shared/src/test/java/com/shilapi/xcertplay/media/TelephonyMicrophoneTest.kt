@@ -12,6 +12,7 @@ import com.shilapi.xcertplay.airplay.AudioStreamId
 import com.shilapi.xcertplay.airplay.AudioFormat
 import com.shilapi.xcertplay.airplay.AudioCodecKind
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
+import com.shilapi.xcertplay.hud.BydOutputSettings
 import java.net.InetAddress
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CopyOnWriteArrayList
@@ -109,6 +110,10 @@ class TelephonyMicrophoneTest {
         sink.onMicrophoneStopped(telephony)
         assertEquals(AudioManager.MODE_NORMAL, manager.mode)
     }
+
+    // 分支未迁移 main 的 telecom PhoneAudioRoute（车机电话音频状态），
+    // 对应 main 用例 aCallInTheCarsPhoneStateRecordsFromVoiceRecognitionWithoutCallEffects 暂不移植；
+    // 纯函数分支逻辑由 TelephonyMicrophoneSourceTest 覆盖（作者：TRAE AI）。
 
     @Test fun anUnverifiedPauseFlagDoesNotSwitchCallAudioRouting() {
         context.getSharedPreferences("diplay_bt_suspend", 0).edit()

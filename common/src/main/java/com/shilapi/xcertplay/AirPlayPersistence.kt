@@ -50,6 +50,8 @@ object AirPlayPersistence {
     private const val KEY_DISABLE_MEDIA_KEY_AUDIO_FOCUS = "disable_media_key_audio_focus"
     private const val KEY_MEDIA_AUDIO_CHANNEL = "media_audio_channel"
     private const val KEY_NAVIGATION_AUDIO_CHANNEL = "navigation_audio_channel"
+    // main #719：导航播报专用衰减（dB，0=不衰减）（作者：TRAE AI）
+    private const val KEY_NAVIGATION_AUDIO_ATTENUATION = "navigation_audio_attenuation_db"
     private const val KEY_NAVIGATION_STREAM_TYPE = "navigation_stream_type"
     private const val KEY_WIRELESS_ENABLED = "wireless_enabled"
     private const val KEY_WIRELESS_HOTSPOT_MODE = "wireless_hotspot_mode"
@@ -75,7 +77,9 @@ object AirPlayPersistence {
     private const val KEY_AMBIENT_LUX_THRESHOLD = "ambient_lux_threshold"
     private const val KEY_APP_APPEARANCE = "app_appearance"
     private const val KEY_FPS = "display_fps"
+    // main #746：无线/有线分开的音乐缓冲区；media_buffer_ms 为无线键（曾共用）（作者：TRAE AI）
     private const val KEY_MEDIA_BUFFER_MS = "media_buffer_ms"
+    private const val KEY_WIRED_MEDIA_BUFFER_MS = "wired_media_buffer_ms"
     private const val KEY_MAIN_BUFFERED_AUDIO = "main_buffered_audio"
     // main #432：CarPlay 音频走车机蓝牙（实验性，默认关）。
     private const val KEY_CAR_BLUETOOTH_AUDIO = "car_bluetooth_audio"
@@ -283,6 +287,20 @@ object AirPlayPersistence {
     fun saveNavigationAudioChannel(context: Context, channel: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_NAVIGATION_AUDIO_CHANNEL, channel.takeIf { it in AUDIO_CHANNELS } ?: 0)
+            .apply()
+    }
+
+    /** main #719：导航播报专用衰减（dB）；只影响 CarPlay 导航流，不改变车机系统音量（作者：TRAE AI）。 */
+    fun loadNavigationAudioAttenuationDb(context: Context): Int =
+        com.shilapi.xcertplay.media.NavigationAudioGain.clamp(
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_NAVIGATION_AUDIO_ATTENUATION, 0),
+        )
+
+    fun saveNavigationAudioAttenuationDb(context: Context, db: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_NAVIGATION_AUDIO_ATTENUATION,
+                com.shilapi.xcertplay.media.NavigationAudioGain.clamp(db))
             .apply()
     }
 
@@ -654,10 +672,17 @@ object AirPlayPersistence {
             .getInt(KEY_FPS, 30),
     )
 
-    fun loadMediaBufferMillis(context: Context): Int = com.shilapi.xcertplay.media.MediaAudioBuffer.sanitize(
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getInt(KEY_MEDIA_BUFFER_MS, com.shilapi.xcertplay.media.MediaAudioBuffer.DEFAULT_MILLIS),
-    )
+    /** main #746：按传输方式读取音乐缓冲区；无线沿用旧共享键，有线有独立键（作者：TRAE AI）。 */
+    fun loadMediaBufferMillis(context: Context, wireless: Boolean): Int {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val shared = prefs.getInt(KEY_MEDIA_BUFFER_MS, com.shilapi.xcertplay.media.MediaAudioBuffer.DEFAULT_MILLIS)
+        return if (wireless) {
+            com.shilapi.xcertplay.media.MediaAudioBuffer.sanitizeWireless(shared)
+        } else {
+            // 有线尚无独立值时，沿用两传输共用时期的设置。
+            com.shilapi.xcertplay.media.MediaAudioBuffer.sanitizeWired(prefs.getInt(KEY_WIRED_MEDIA_BUFFER_MS, shared))
+        }
+    }
 
     /** CarPlay's buffered music (Apple Music sends ahead over TCP); off by default, applies at reconnect. */
     fun loadMainBufferedAudio(context: Context): Boolean =
@@ -723,9 +748,20 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_FPS_COUNTER, enabled).apply()
     }
 
-    fun saveMediaBufferMillis(context: Context, millis: Int) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putInt(KEY_MEDIA_BUFFER_MS, com.shilapi.xcertplay.media.MediaAudioBuffer.sanitize(millis)).apply()
+    /** main #746：按传输方式保存音乐缓冲区；首次改无线时把有线值固定下来，避免继续跟随（作者：TRAE AI）。 */
+    fun saveMediaBufferMillis(context: Context, wireless: Boolean, millis: Int) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (wireless) {
+            val wired = loadMediaBufferMillis(context, wireless = false)
+            prefs.edit()
+                .putInt(KEY_WIRED_MEDIA_BUFFER_MS, wired)
+                .putInt(KEY_MEDIA_BUFFER_MS, com.shilapi.xcertplay.media.MediaAudioBuffer.sanitizeWireless(millis))
+                .apply()
+        } else {
+            prefs.edit()
+                .putInt(KEY_WIRED_MEDIA_BUFFER_MS, com.shilapi.xcertplay.media.MediaAudioBuffer.sanitizeWired(millis))
+                .apply()
+        }
     }
 
     /** DiPlay's own experimental echo canceller on CarPlay call audio; opt-in, applies at reconnect. */

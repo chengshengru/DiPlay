@@ -273,6 +273,12 @@
     <string name="mfi_certificate_signing_target">MFi 证书与签名目标</string>
     <string name="model">型号</string>
     <string name="music_buffer">音乐缓冲</string>
+    <string name="settings_music_buffer_ms">%1$d 毫秒</string>
+    <string name="settings_music_buffer_wireless">音乐缓冲（无线）</string>
+    <string name="settings_music_buffer_wired">音乐缓冲（USB 有线）</string>
+    <string name="settings_navigation_attenuation">导航播报音量</string>
+    <string name="settings_navigation_attenuation_value">%1$d dB</string>
+    <string name="settings_navigation_attenuation_description">仅降低 CarPlay 导航播报音量，不影响音乐和通话。调整立即生效，车机自身的导航音量仍可使用。</string>
     <string name="resolution_native">原生</string>
     <string name="navigation_on_hud_and_instrument_cluster">HUD和仪表盘导航</string>
     <string name="navigation_stream_type">导航音频流类型</string>

@@ -272,6 +272,12 @@
     <string name="mfi_certificate_signing_target">Сертифікат MFi і ціль підписання</string>
     <string name="model">Модель</string>
     <string name="music_buffer">Буфер музики</string>
+    <string name="settings_music_buffer_ms">%1$d мс</string>
+    <string name="settings_music_buffer_wireless">Буфер музики (бездротовий CarPlay)</string>
+    <string name="settings_music_buffer_wired">Буфер музики (USB-кабель)</string>
+    <string name="settings_navigation_attenuation">Гучність навігаційних підказок</string>
+    <string name="settings_navigation_attenuation_value">%1$d дБ</string>
+    <string name="settings_navigation_attenuation_description">Зменшує лише гучність навігаційних підказок CarPlay, не змінюючи музику та виклики. Застосовується одразу; регулювання навігації на пристрої лишається доступним.</string>
     <string name="resolution_native">Рідна</string>
     <string name="navigation_on_hud_and_instrument_cluster">Навігація на HUD і панелі приладів</string>
     <string name="navigation_stream_type">Тип аудіопотоку навігації</string>

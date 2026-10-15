@@ -76,8 +76,14 @@ internal class MicrophoneUplink(
         }
 
         val source = when {
-            config.audioType == "telephony" && speakerphoneCall -> MediaRecorder.AudioSource.MIC
-            config.audioType == "telephony" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+            config.audioType == "telephony" -> telephonyMicrophoneSource(
+                speakerphoneCall = speakerphoneCall,
+                // 分支尚未迁移 main 的 telecom PhoneAudioRoute（车机电话音频状态持有者），
+                // 此处恒为 false：通话麦克风源选择与旧行为完全一致（免提→MIC，否则→VOICE_COMMUNICATION）。
+                // 待波次补齐 PhoneAudioRoute 后，改回 PhoneAudioRoute.carPlayCallsUseCarAudio()。
+                carPhoneState = false,
+                geelyHeadUnit = com.shilapi.xcertplay.network.GeelyHeadUnit.detected,
+            )
             // The Geely/Lynk head unit only opens the microphone for the voice-communication
             // source; its voice-recognition source records silence, so Siri never hears.
             config.audioType == "speechrecognition" ->
@@ -264,6 +270,7 @@ internal class MicrophoneUplink(
     }
 
     private fun capture(recorder: AudioRecord, socket: DatagramSocket) {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) }
         val frame = ByteArray(config.frameBytes)
         val readBuffer = ByteArray(maxOf(frame.size, MIN_READ_BYTES))
         val counters = MicrophoneCounters()
@@ -510,6 +517,19 @@ internal class MicrophoneUplink(
         // AudioRecord.ERROR_DEAD_OBJECT 的字面量（API 24+ 才有该常量，API 17 需内联避免解析失败）
         const val DEAD_OBJECT_READ_CODE = -6
     }
+}
+
+/**
+ * The recorder source for a CarPlay call. While DiPlay holds the car's phone audio state the car's call
+ * processing is on for every source, but VOICE_COMMUNICATION then clips (about a fifth of the samples on a
+ * Han) and the plain microphone source is muted. VOICE_RECOGNITION, which is also what the stock CarPlay
+ * service ends up with, gives a normal level with no clipping, and the car still suppresses the far end's
+ * echo on it. Geely/Lynk head units record silence on VOICE_RECOGNITION, so they keep the old choice.
+ */
+internal fun telephonyMicrophoneSource(speakerphoneCall: Boolean, carPhoneState: Boolean, geelyHeadUnit: Boolean): Int = when {
+    carPhoneState && !geelyHeadUnit -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+    speakerphoneCall -> MediaRecorder.AudioSource.MIC
+    else -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
 }
 
 /**

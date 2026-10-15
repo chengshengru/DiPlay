@@ -264,6 +264,12 @@
     <string name="mfi_certificate_signing_target">MFi証明書と署名先</string>
     <string name="model">モデル</string>
     <string name="music_buffer">音楽のバッファ</string>
+    <string name="settings_music_buffer_ms">%1$d ms</string>
+    <string name="settings_music_buffer_wireless">音楽のバッファ（ワイヤレス）</string>
+    <string name="settings_music_buffer_wired">音楽のバッファ（USB ケーブル）</string>
+    <string name="settings_navigation_attenuation">ナビ案内の音量</string>
+    <string name="settings_navigation_attenuation_value">%1$d dB</string>
+    <string name="settings_navigation_attenuation_description">CarPlayのナビ案内だけ音量を下げます。音楽や通話の音量は変わりません。変更はすぐに反映され、車載端末側のナビ音量も引き続き使用できます。</string>
     <string name="resolution_native">ネイティブ</string>
     <string name="navigation_on_hud_and_instrument_cluster">HUDとメーターにナビを表示</string>
     <string name="navigation_stream_type">ナビ音声のストリーム種別</string>

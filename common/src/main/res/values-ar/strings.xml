@@ -265,6 +265,12 @@
     <string name="mfi_certificate_signing_target">شهادة MFi وهدف التوقيع</string>
     <string name="model">الطراز</string>
     <string name="music_buffer">ذاكرة الموسيقى</string>
+    <string name="settings_music_buffer_ms">%1$d مللي ثانية</string>
+    <string name="settings_music_buffer_wireless">ذاكرة الموسيقى (لاسلكي)</string>
+    <string name="settings_music_buffer_wired">ذاكرة الموسيقى (كابل USB)</string>
+    <string name="settings_navigation_attenuation">مستوى صوت إرشادات الملاحة</string>
+    <string name="settings_navigation_attenuation_value">%1$d ديسيبل</string>
+    <string name="settings_navigation_attenuation_description">يخفض صوت إرشادات ملاحة CarPlay فقط دون تغيير صوت الموسيقى أو المكالمات. يُطبَّق التغيير فورًا وتظل وحدة السيارة تتحكم بمستوى صوت الملاحة.</string>
     <string name="resolution_native">أصلي</string>
     <string name="navigation_on_hud_and_instrument_cluster">الملاحة على شاشة العرض الأمامية ولوحة العدادات</string>
     <string name="navigation_stream_type">نوع بث الملاحة</string>

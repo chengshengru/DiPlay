@@ -274,6 +274,12 @@
     <string name="mfi_certificate_signing_target">MFI certificate &amp; signing target</string>
     <string name="model">Model</string>
     <string name="music_buffer">Music buffer</string>
+    <string name="settings_music_buffer_ms">%1$d ms</string>
+    <string name="settings_music_buffer_wireless">Music buffer (wireless CarPlay)</string>
+    <string name="settings_music_buffer_wired">Music buffer (USB cable)</string>
+    <string name="settings_navigation_attenuation">Navigation guidance volume</string>
+    <string name="settings_navigation_attenuation_value">%1$d dB</string>
+    <string name="settings_navigation_attenuation_description">Reduce CarPlay navigation guidance without changing music or call volume. Applies immediately; your head unit’s navigation volume still works.</string>
     <string name="resolution_native">Native</string>
     <string name="navigation_on_hud_and_instrument_cluster">Navigation on HUD and dashboard</string>
     <string name="navigation_stream_type">Navigation stream type</string>

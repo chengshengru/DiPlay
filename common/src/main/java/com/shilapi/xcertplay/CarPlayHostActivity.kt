@@ -4875,12 +4875,15 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             audioFocusAutoYield = AirPlayPersistence.loadAudioFocusAutoYield(this),
             mediaChannel = AirPlayPersistence.loadMediaAudioChannel(this),
             navigationChannel = AirPlayPersistence.loadNavigationAudioChannel(this),
+            // main #719：导航播报衰减（dB），会话创建时读取设置（作者：TRAE AI）
+            navigationAttenuationDb = AirPlayPersistence.loadNavigationAudioAttenuationDb(this),
             context = this,
             navigationStreamType = navigationStreamType,
             onScreenStreamActiveChanged = { type, active ->
                 onScreenStreamStateChanged(controllerGeneration, type, active)
             },
-            mediaBufferMillis = AirPlayPersistence.loadMediaBufferMillis(this),
+            // main #746：无线/有线分别维护音乐缓冲区（作者：TRAE AI）
+            mediaBufferMillis = AirPlayPersistence.loadMediaBufferMillis(this, wireless = wirelessEnabled),
             onAudioDiagnostic = { message ->
                 if (message.startsWith("Microphone: ")) {
                     AsyncDiagnosticLog.append(diagnosticLog, message)

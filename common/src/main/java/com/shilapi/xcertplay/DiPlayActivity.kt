@@ -2511,11 +2511,30 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             getString(R.string.audio_routing), R.drawable.ic_dp_audio) { card ->
             mediaChannelControl(card)
             navigationChannelControl(card)
-            val bufferPresets = com.shilapi.xcertplay.media.MediaAudioBuffer.presets
-            choice(card, getString(R.string.music_buffer), listOf(getString(R.string.s_300_ms_default), getString(R.string.s_500_ms), getString(R.string.s_1000_ms_most_stable)),
-                bufferPresets.indexOf(AirPlayPersistence.loadMediaBufferMillis(this)).coerceAtLeast(0)) {
-                AirPlayPersistence.saveMediaBufferMillis(this, bufferPresets[it])
+            // main #719：导航播报专用衰减滑块（-20..0 dB），运行中会话即时生效、无需重连（作者：TRAE AI）
+            val gainSlider = overlaySliderRow(
+                getString(R.string.settings_navigation_attenuation),
+                (com.shilapi.xcertplay.media.NavigationAudioGain.MIN_DB..
+                    com.shilapi.xcertplay.media.NavigationAudioGain.MAX_DB).toList(),
+                AirPlayPersistence.loadNavigationAudioAttenuationDb(this),
+            ) { db -> getString(R.string.settings_navigation_attenuation_value, db) }
+            val gainTitle = getString(R.string.settings_navigation_attenuation)
+            gainSlider.slider.contentDescription = gainTitle + ": " +
+                getString(R.string.settings_navigation_attenuation_value,
+                    AirPlayPersistence.loadNavigationAudioAttenuationDb(this))
+            gainSlider.onSave = { db ->
+                AirPlayPersistence.saveNavigationAudioAttenuationDb(this, db)
+                CarPlayBackgroundSession.snapshot()?.sink?.setNavigationAttenuationDb(db)
+                gainSlider.slider.contentDescription = gainTitle + ": " +
+                    getString(R.string.settings_navigation_attenuation_value, db)
             }
+            card.addView(gainSlider)
+            card.addView(label(getString(R.string.settings_navigation_attenuation_description), 14, MUTED).apply {
+                setPadding(0, dp(SETTINGS_BLOCK_GAP_DP), 0, 0)
+            })
+            // main #746：无线/有线各自的音乐缓冲区选择（作者：TRAE AI）
+            musicBufferChoice(card, wireless = true)
+            musicBufferChoice(card, wireless = false)
             toggle(card, getString(R.string.settings_call_speakerphone), getString(R.string.settings_call_speakerphone_description),
                 AirPlayPersistence.loadCallSpeakerphone(this)) { AirPlayPersistence.saveCallSpeakerphone(this, it) }
         }
@@ -6029,6 +6048,26 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         parent.addView(result.rowView)
         return result.switch
     }
+    /** main #746：单一传输方式的音乐缓冲区选择；仅当运行中会话属于该传输时才提示重连（作者：TRAE AI）。 */
+    private fun musicBufferChoice(card: LinearLayout, wireless: Boolean) {
+        val buffer = com.shilapi.xcertplay.media.MediaAudioBuffer
+        val presets = if (wireless) buffer.wirelessPresets else buffer.wiredPresets
+        val labels = presets.map { millis ->
+            when (millis) {
+                buffer.DEFAULT_MILLIS -> getString(R.string.s_300_ms_default)
+                buffer.MOST_STABLE_MILLIS -> getString(R.string.s_1000_ms_most_stable)
+                else -> getString(R.string.settings_music_buffer_ms, millis)
+            }
+        }
+        val title = getString(if (wireless) R.string.settings_music_buffer_wireless else R.string.settings_music_buffer_wired)
+        val sessionTransport = AirPlayPersistence.loadWirelessEnabled(this) == wireless
+        choice(card, title, labels,
+            presets.indexOf(AirPlayPersistence.loadMediaBufferMillis(this, wireless)).coerceAtLeast(0),
+            reconnects = sessionTransport) {
+            AirPlayPersistence.saveMediaBufferMillis(this, wireless, presets[it])
+        }
+    }
+
     // [announcesReconnect] labels a choice whose [save] reconnects by itself.
     private fun choice(parent: LinearLayout, title: String, options: List<String>, current: Int, reconnects: Boolean = true,
         announcesReconnect: Boolean = reconnects, enabled: Boolean = true, save: (Int) -> Unit) {
