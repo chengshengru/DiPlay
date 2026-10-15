@@ -985,14 +985,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             return
         }
         if (!wirelessPermissionsRefused) return
-        val missing = missingWirelessPermissions()
-        setConnectionStage(
-            if (Manifest.permission.ACCESS_FINE_LOCATION in missing || Manifest.permission.ACCESS_COARSE_LOCATION in missing) {
-                R.string.allow_precise_location_for_diplay_in_the_head_unit_s_app_p
-            } else {
-                R.string.allow_nearby_devices_for_diplay_in_the_head_unit_s_app_per
-            },
-        )
+        setConnectionStage(WirelessPermissions.refusalMessage(missingWirelessPermissions()))
     }
 
     private fun requiredWirelessPermissions(): List<String> =
@@ -6237,6 +6230,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private fun friendlyStage(message: String, englishMessage: String = message): String = when {
         // main 4aee3f80：VPN 授权不可用的提示本身就是用户可读文案，不能被通用 "permission" 分支吞掉。
         message == getString(R.string.vpn_authorization_unavailable) -> message
+        // It says where to look itself; its word "permissions" would turn it into the generic permission line.
+        message == getString(R.string.could_not_start_carplay_return_to_diplay_and_check_app_per) -> message
         message == getString(R.string.waiting_for_mfi_coprocessor) ||
             message == getString(R.string.requesting_mfi_usb_permission) -> message
         // A startup failure that names its cause, and a line saying the retries stopped, are shown as they are.
