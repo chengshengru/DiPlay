@@ -484,18 +484,16 @@ class NcmUsbBridge internal constructor(
         ): NcmUsbBridge {
             val claimed = ArrayList<UsbInterface>(2)
             try {
+                onDiagnostic("ncm open: reading host MAC from control iface=${function.control.id}")
                 val descriptorHostMac = readNcmHostMac(connection, function.control.id)
-                Log.i(
-                    IphoneCarPlayConfiguration.TAG,
-                    "ncm descriptor hostMac=${descriptorHostMac?.macString() ?: "unavailable"}",
-                )
+                onDiagnostic("ncm descriptor hostMac=${descriptorHostMac?.macString() ?: "unavailable"}")
                 // Apple's Ethernet function exposes control and data as alternate settings of the
                 // same interface id, so it must be claimed once and switched with setInterface.
                 val sameInterface = function.control.id == function.data.id
                 val first = if (sameInterface) function.data else function.control
+                onDiagnostic("ncm open: claiming control iface=${first.id} force=true")
                 val firstClaimed = retryUsbSetup { connection.claimInterface(first, true) }
-                Log.i(
-                    IphoneCarPlayConfiguration.TAG,
+                onDiagnostic(
                     "claim iface=${first.id}/${UsbDescriptorCompat.alternateSetting(first)} class=${first.interfaceClass}" +
                         " subclass=${first.interfaceSubclass} proto=${first.interfaceProtocol} ok=${firstClaimed != null}" +
                         " attempts=${firstClaimed ?: USB_SETUP_ATTEMPTS}",
@@ -507,9 +505,9 @@ class NcmUsbBridge internal constructor(
                 }
                 claimed.add(first)
                 if (!sameInterface) {
+                    onDiagnostic("ncm open: claiming data iface=${function.data.id} force=true")
                     val dataClaimed = retryUsbSetup { connection.claimInterface(function.data, true) }
-                    Log.i(
-                        IphoneCarPlayConfiguration.TAG,
+                    onDiagnostic(
                         "claim iface=${function.data.id}/${UsbDescriptorCompat.alternateSetting(function.data)}" +
                             " class=${function.data.interfaceClass} ok=${dataClaimed != null}" +
                             " attempts=${dataClaimed ?: USB_SETUP_ATTEMPTS}",
@@ -523,6 +521,7 @@ class NcmUsbBridge internal constructor(
                 }
                 // UsbDeviceConnection.setInterface is API 21+; the compat helper falls back to the
                 // standard SET_INTERFACE request on API 17-20.
+                onDiagnostic("ncm open: setInterface data iface=${function.data.id} alt=${NcmFunctionDiscovery.DATA_ALTERNATE_SETTING}")
                 val altSelected = retryUsbSetup {
                     UsbDescriptorCompat.selectInterface(
                         connection,
@@ -530,8 +529,7 @@ class NcmUsbBridge internal constructor(
                         NcmFunctionDiscovery.DATA_ALTERNATE_SETTING,
                     )
                 }
-                Log.i(
-                    IphoneCarPlayConfiguration.TAG,
+                onDiagnostic(
                     "setInterface iface=${function.data.id}/${UsbDescriptorCompat.alternateSetting(function.data)}" +
                         " ok=${altSelected != null}" +
                         " attempts=${altSelected ?: USB_SETUP_ATTEMPTS}",
@@ -541,10 +539,8 @@ class NcmUsbBridge internal constructor(
                         "Android could not select the NCM data alternate setting",
                     )
                 }
-                Log.i(
-                    IphoneCarPlayConfiguration.TAG,
-                    "ncm status endpoint=${function.statusIn?.address?.let { "0x${it.toString(16)}" } ?: "none"}",
-                )
+                onDiagnostic("ncm status endpoint=${function.statusIn?.address?.let { "0x${it.toString(16)}" } ?: "none"}")
+                onDiagnostic("ncm open: returning bridge (claimed ${claimed.size} interface(s))")
                 return NcmUsbBridge(
                     connection,
                     function.bulkOut,

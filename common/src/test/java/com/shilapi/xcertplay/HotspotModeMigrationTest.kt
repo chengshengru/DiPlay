@@ -39,4 +39,21 @@ class HotspotModeMigrationTest {
         prefs.edit().putString("wireless_hotspot_mode", "WIFI_P2P").apply()
         assertEquals(WirelessHotspotMode.WIFI_P2P, AirPlayPersistence.loadWirelessHotspotMode(context))
     }
+
+    /**
+     * android-4.2.2：ExistingWifiManager 依赖 API 21 的 ConnectivityManager.NetworkCallback，
+     * API 17 设备上连类加载都无法完成（NoClassDefFoundError）。旧设置 / 备份恢复出来的
+     * EXISTING_WIFI 必须在加载时自愈为 MANUAL，否则 UI 不呈现该选项、连接时才被拒绝。
+     */
+    @Test @Config(sdk = [17]) fun existingWifiMigratesToCarHotspotOnApi17() {
+        prefs.edit().putString("wireless_hotspot_mode", "EXISTING_WIFI").apply()
+        assertEquals(WirelessHotspotMode.MANUAL, AirPlayPersistence.loadWirelessHotspotMode(context))
+        assertEquals("MANUAL", prefs.getString("wireless_hotspot_mode", null))
+    }
+
+    @Test fun existingWifiStaysSelectedOnModernAndroid() {
+        AirPlayPersistence.saveWirelessHotspotMode(context, WirelessHotspotMode.EXISTING_WIFI)
+        assertEquals(WirelessHotspotMode.EXISTING_WIFI, AirPlayPersistence.loadWirelessHotspotMode(context))
+        assertEquals("EXISTING_WIFI", prefs.getString("wireless_hotspot_mode", null))
+    }
 }

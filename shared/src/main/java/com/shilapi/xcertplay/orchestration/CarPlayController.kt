@@ -2322,6 +2322,7 @@ class CarPlayController(
         )
         val connection = requireUsbManager().openDevice(device)
             ?: throw IphoneUsbException.DeviceUnavailable("Could not open the iPhone NCM connection")
+        connectionDiagnostic("ncm openDevice ok; entering NcmUsbBridge.open control=${function.control.id} data=${function.data.id}")
         return NcmUsbBridge.open(connection, function, onDiagnostic = ::connectionDiagnostic)
     }
 

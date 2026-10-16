@@ -368,7 +368,17 @@ object AirPlayPersistence {
         val stored = prefs.getString(KEY_WIRELESS_HOTSPOT_MODE, null)
         val mode = WirelessHotspotMode.entries.firstOrNull { it.name == stored }
             ?: WirelessHotspotMode.MANUAL
-        val supported = if (mode == WirelessHotspotMode.LOCAL_ONLY_HOTSPOT) WirelessHotspotMode.MANUAL else mode
+        // android-4.2.2：EXISTING_WIFI 依赖 ConnectivityManager.NetworkCallback（API 21），
+        // API 17-20 设备上 ExistingWifiManager 连类加载都无法完成（NoClassDefFoundError）。
+        // 旧设置 / 备份恢复出来的该模式在此回落为 MANUAL（与 LOCAL_ONLY_HOTSPOT 同款自愈），
+        // 否则 UI 不呈现该选项、也不显示为选中，用户看不到当前模式，直到连接时才被
+        // CarPlayController 守卫拒绝（startWirelessHotspot，:2562-2569）。
+        val supported = when (mode) {
+            WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> WirelessHotspotMode.MANUAL
+            WirelessHotspotMode.EXISTING_WIFI ->
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) WirelessHotspotMode.MANUAL else mode
+            else -> mode
+        }
         if (stored != supported.name) saveWirelessHotspotMode(context, supported)
         return supported
     }
