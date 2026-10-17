@@ -20,6 +20,8 @@ import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import com.shilapi.xcertplay.network.WifiP2pChannels
 import com.shilapi.xcertplay.transport.LockdownPairRecord
 import java.io.File
+import java.util.Locale
+import java.util.UUID
 
 /** SharedPreferences persistence for the accessory identity and paired controllers. */
 object AirPlayPersistence {
@@ -39,6 +41,12 @@ object AirPlayPersistence {
     private const val KEY_LOCKDOWN_HOST_CERT = "lockdown_host_cert"
     private const val KEY_LOCKDOWN_ROOT_PRIVATE = "lockdown_root_private"
     private const val KEY_LOCKDOWN_ROOT_CERT = "lockdown_root_cert"
+    // 有线 CarPlay 主机身份（HostID / SystemBUID）稳定键：与完整 Lockdown 配对记录解耦，
+    // 保证每次连接、每次应用启动都复用同一主机身份。若仅依赖配对记录内的 hostId，一旦记录
+    // 因 apply() 异步未落盘或被拒后清除而丢失，下一次会生成全新 HostID，iPhone 会将其视为
+    // 一台新电脑而再次弹出"信任此电脑"——这正是"每次都要信任"的根因之一。
+    private const val KEY_HOST_IDENTITY_HOST_ID = "host_identity_host_id"
+    private const val KEY_HOST_IDENTITY_SYSTEM_BUID = "host_identity_system_buid"
     private const val KEY_DISPLAY_SCALE_TENTHS = "display_scale_tenths"
     private const val KEY_UI_SCALE_PERCENT = "ui_scale_percent"
     private const val KEY_HEVC_ENABLED = "hevc_enabled"
@@ -1370,6 +1378,8 @@ object AirPlayPersistence {
     }
 
     fun saveLockdownRecord(context: Context, record: LockdownPairRecord) {
+        // 使用 commit() 而非 apply()：配对记录必须在连接退出/进程死亡前同步落盘，
+        // 否则下次连接 loadPairRecord() 返回 null，会重新生成 HostID 并再次触发 iPhone 信任弹窗。
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_LOCKDOWN_HOST_ID, record.hostId)
             .putString(KEY_LOCKDOWN_SYSTEM_BUID, record.systemBuid)
@@ -1380,7 +1390,31 @@ object AirPlayPersistence {
             .putString(KEY_LOCKDOWN_HOST_CERT, record.hostCertificatePem.toHex())
             .putString(KEY_LOCKDOWN_ROOT_PRIVATE, record.rootPrivateKeyPem.toHex())
             .putString(KEY_LOCKDOWN_ROOT_CERT, record.rootCertificatePem.toHex())
-            .apply()
+            .commit()
+    }
+
+    /**
+     * 返回稳定的主机身份 HostID：首次生成后持久化，之后所有 CarPlayController 实例、
+     * 所有应用启动都复用同一值。与 [saveLockdownRecord] 解耦，即使完整配对记录丢失，
+     * 主机身份仍保持稳定，避免 iPhone 将本机识别为一台新电脑而反复要求信任。
+     */
+    fun getStableHostId(context: Context): String =
+        getOrCreateStableIdentity(context, KEY_HOST_IDENTITY_HOST_ID)
+
+    /**
+     * 返回稳定的 SystemBUID，语义同 [getStableHostId]。
+     */
+    fun getStableSystemBuid(context: Context): String =
+        getOrCreateStableIdentity(context, KEY_HOST_IDENTITY_SYSTEM_BUID)
+
+    private fun getOrCreateStableIdentity(context: Context, key: String): String {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val existing = prefs.getString(key, null)
+        if (!existing.isNullOrBlank()) return existing
+        val generated = UUID.randomUUID().toString().uppercase(Locale.US)
+        // commit() 保证身份在生成当下即落盘，避免并发/进程退出导致身份漂移。
+        prefs.edit().putString(key, generated).commit()
+        return generated
     }
 
     fun clearLockdownRecord(context: Context) {

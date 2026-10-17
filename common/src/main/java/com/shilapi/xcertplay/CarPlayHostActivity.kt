@@ -5217,6 +5217,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
             loadPairRecord = { AirPlayPersistence.loadLockdownRecord(this) },
             savePairRecord = { record -> AirPlayPersistence.saveLockdownRecord(this, record) },
             clearPairRecord = { AirPlayPersistence.clearLockdownRecord(this) },
+            // 注入跨启动稳定的主机身份：与完整配对记录解耦，即使记录丢失，iPhone 也不会把本机
+            // 识别为「新电脑」而反复要求信任（C140A 真机曾出现每次连接都需重新信任）。
+            provideHostId = { AirPlayPersistence.getStableHostId(this) },
+            provideSystemBuid = { AirPlayPersistence.getStableSystemBuid(this) },
             locationProvider = locationProvider,
             vehicleStatusProvider = if (com.shilapi.xcertplay.hud.BydOutputSettings.batteryToIphoneActive(this)) {
                 com.shilapi.xcertplay.hud.BydNavigationOutputs.batteryStatus(applicationContext)

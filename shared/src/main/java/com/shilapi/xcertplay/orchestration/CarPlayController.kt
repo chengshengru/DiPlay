@@ -172,6 +172,10 @@ class CarPlayController(
     private val clearPairRecord: () -> Unit = {},
     private val locationProvider: Iap2LocationProvider? = null,
     private val vehicleStatusProvider: com.shilapi.xcertplay.transport.VehicleStatusProvider? = null,
+    // 稳定的主机身份由宿主（common 模块）注入，避免 shared 反向依赖 common 的 AirPlayPersistence
+    // 造成循环依赖。默认值维持历史行为（每次随机），仅 CarPlayHostActivity 注入跨启动稳定身份。
+    private val provideHostId: () -> String = { UUID.randomUUID().toString().uppercase(Locale.US) },
+    private val provideSystemBuid: () -> String = { UUID.randomUUID().toString().uppercase(Locale.US) },
 ) : Closeable {
     init {
         require(!config.locationReportingEnabled || locationProvider != null) {
@@ -209,8 +213,10 @@ class CarPlayController(
     private val touchExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val tunnelExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val hostId = UUID.randomUUID().toString().uppercase(Locale.US)
-    private val systemBuid = UUID.randomUUID().toString().uppercase(Locale.US)
+    // 主机身份（HostID / SystemBUID）由宿主注入的稳定值（默认随机，兼容未注入的调用方）。
+    // 跨连接、跨启动稳定可避免配对记录丢失时 iPhone 将本机识别为新电脑而反复要求信任。
+    private val hostId = provideHostId()
+    private val systemBuid = provideSystemBuid()
     private val lifecycleLock = Any()
     @Volatile private var uiListener: AirPlaySessionListener? = listener
     @Volatile private var uiStatusReporter: ((CarPlayStatus) -> Unit)? = reportStatus
@@ -2340,9 +2346,9 @@ class CarPlayController(
             var pairRecord = savedPairRecord ?: pairNewRecord(pairingClient)
             debugLog(
                 if (savedPairRecord != null) {
-                    "wired using saved Lockdown pair record"
+                    "wired using saved Lockdown pair record hostId=${hostId.take(8)}"
                 } else {
-                    "wired created a new Lockdown pair record"
+                    "wired created a new Lockdown pair record hostId=${hostId.take(8)}"
                 },
             )
             onStatus(CarPlayStatus.ConnectingControl)
