@@ -774,6 +774,9 @@
         <string name="settings_ambient_parked_notice">اضبط أثناء الوقوف. دعم تجريبي لبعض واجهات BYD؛ التوافق يختلف حسب الطراز والبرنامج الثابت. المستوى 0 يعني أدنى مستوى للمصنع وليس إطفاء الإضاءة.</string>
         <string name="settings_ambient_checking">جارٍ التحقق…</string>
         <string name="settings_ambient_unavailable">فشل التحقق للقراءة فقط: تفويض ADB الموجود أو واجهة الإضاءة المدعومة غير متاحة. لم تُحفظ الإعدادات. اضبط الوصول بشكل منفصل أثناء الوقوف؛ هذه الميزة لا تفعّل ADB ولا تطلب التفويض.</string>
+        <string name="settings_ambient_car_rhythm">إيقاع الموسيقى الأصلي في السيارة</string>
+        <string name="settings_ambient_car_rhythm_description">أثناء تشغيل موسيقى CarPlay يعمل إيقاع الموسيقى الأصلي للإضاءة المحيطية في السيارة بالألوان والتأثيرات المضبوطة في قائمة الإضاءة في السيارة، ويجب تفعيل إيقاع الموسيقى فيها. لا يتحكم DiPlay بالمصابيح خلال ذلك. يُتحقق منه عند التفعيل. لا يلزم ADB الشبكي للسيارة إلا إذا كانت الوحدة الرئيسية لا تسمح لـ DiPlay بتشغيل الإيقاع بنفسه.</string>
+        <string name="settings_ambient_car_rhythm_unavailable">إيقاع الموسيقى في السيارة غير متاح: لا يستطيع DiPlay تشغيله بنفسه، ولا يتوفر وصول DiPlay إلى ADB الشبكي أو استدعاء خدمة الصوت في الوحدة الرئيسية. لم يُحفظ أي شيء.</string>
     <string name="setup_guide">دليل الإعداد</string>
     <string name="setup_guide_description">اعرف إصدار DiLink، واختر طريقة الاتصال، وفعّل الميزات المناسبة لسيارتك.</string>
     <string name="setup_step_of">الخطوة %1$d من %2$d</string>

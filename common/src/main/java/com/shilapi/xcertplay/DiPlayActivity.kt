@@ -183,6 +183,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var page = "home"
     // main #345：氛围灯支持性只读检查，可在测试中替换（作者：TRAE AI）
     internal var ambientSupportCheck: (Context) -> java.util.concurrent.CompletableFuture<Boolean> = AmbientMusicController::checkSupport
+    // main #695：车机音乐律动支持性只读检查，可在测试中替换（作者：TRAE AI）
+    internal var carRhythmSupportCheck: (Context) -> java.util.concurrent.CompletableFuture<Boolean> =
+        com.shilapi.xcertplay.hud.BydCarMusicRhythm::checkSupport
     private var settingsCategory = SettingsCategory.OVERVIEW
     private var connectionSettingsReturnCategory: SettingsCategory? = null
     private var settingsSectionFilter: Set<SettingsSection>? = null
@@ -2536,6 +2539,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             card.addView(button(ambientConfigurationLabel(AmbientMusicSettings.load(this)), false) {
                 showAmbientConfiguration()
             }, matchButton(0, 60))
+            // main #695：车机音乐律动开关行（作者：TRAE AI）
+            carRhythmControl(card)
         }
         filteredSection(content, SettingsSection.CAR_BUTTON,
             getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card) }
@@ -6287,6 +6292,29 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         parent.addView(result.rowView)
         return result.switch
     }
+    // main #695：车机音乐律动开关：仅当车机音频调用可达（DiPlay 直调或其 ADB 通道）时才保存为开（作者：TRAE AI）。
+    private fun carRhythmControl(card: LinearLayout) {
+        var row: SwitchCompat? = null
+        row = toggle(card, getString(R.string.settings_ambient_car_rhythm),
+            getString(R.string.settings_ambient_car_rhythm_description), AmbientMusicSettings.load(this).carRhythm) { on ->
+            if (!on) {
+                AmbientMusicSettings.save(this, AmbientMusicSettings.load(this).copy(carRhythm = false))
+                return@toggle
+            }
+            carRhythmSupportCheck(applicationContext).whenComplete { supported, _ ->
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (supported == true) {
+                        AmbientMusicSettings.save(this, AmbientMusicSettings.load(this).copy(carRhythm = true))
+                    } else {
+                        toast(getString(R.string.settings_ambient_car_rhythm_unavailable))
+                        row?.isChecked = false
+                    }
+                }
+            }
+        }
+    }
+
     /** main #746：单一传输方式的音乐缓冲区选择；仅当运行中会话属于该传输时才提示重连（作者：TRAE AI）。 */
     private fun musicBufferChoice(card: LinearLayout, wireless: Boolean) {
         val buffer = com.shilapi.xcertplay.media.MediaAudioBuffer
