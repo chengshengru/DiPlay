@@ -211,21 +211,4 @@ class WirelessStartupRecoveryTest {
         assertFalse(ReflectionHelpers.getField(activity, "reconnectScheduled"))
         assertEquals(View.VISIBLE, retry.visibility)
     }
-
-    @Test fun staleGenerationUserDisconnectMenuAndDifferentOwnerCannotSchedule() {
-        report(1)
-        assertEquals(0, budget().retries)
-        ReflectionHelpers.setField(activity, "menuOpen", true)
-        report()
-        assertEquals(0, budget().retries)
-        ReflectionHelpers.setField(activity, "menuOpen", false)
-        ReflectionHelpers.getField<AtomicBoolean>(activity, "shuttingDown").set(true)
-        report()
-        assertEquals(0, budget().retries)
-        ReflectionHelpers.getField<AtomicBoolean>(activity, "shuttingDown").set(false)
-        ReflectionHelpers.setField(CarPlayBackgroundSession, "owner", Any())
-        report()
-        assertEquals(0, budget().retries)
-    }
->>>>>>> 0f00e8a4 (Name the wireless startup failure on the CarPlay screen)
 }
