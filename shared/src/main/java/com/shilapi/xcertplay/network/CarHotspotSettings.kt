@@ -12,6 +12,11 @@ object CarHotspotSettings {
     fun setEnabled(context: Context, enabled: Boolean) =
         prefs(context).edit().putBoolean("auto_enable", enabled).apply()
 
+    fun configWrite(context: Context): Boolean = prefs(context).getBoolean("config_write", false)
+
+    fun setConfigWrite(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("config_write", enabled).apply()
+
     /**
      * Opt-in legacy AP recovery for API 17..22 head units whose already-enabled hotspot loses its
      * network interface. Default off; the recovery itself is a no-op outside API 17..22, so enabling
