@@ -904,6 +904,13 @@
     <string name="black_corner_overlay_off">Выкл.</string>
     <string name="black_corner_overlay_value">%1$d dp</string>
     <string name="iphone_corner_mask_mode">Маска iPhone (экспериментально)</string>
+    <string name="settings_launcher_bubble">Пузырь на главном экране (экспериментально)</string>
+    <string name="settings_launcher_bubble_description">Показывает значок DiPlay в виде пузыря поверх главного экрана: нажмите, чтобы вернуться в CarPlay, и перетаскивайте его куда угодно. Он скрывается при открытии DiPlay и возвращается после выхода. Удерживайте, чтобы закрепить положение, и удерживайте снова, чтобы снять закрепление. Нужно разрешение «показ поверх других приложений».</string>
+    <string name="settings_launcher_bubble_size">Размер пузыря</string>
+    <string name="settings_launcher_bubble_locked">Положение закреплено</string>
+    <string name="settings_launcher_bubble_unlocked">Закрепление снято</string>
+    <string name="settings_launcher_bubble_hold_to_lock">Удерживайте: закрепить</string>
+    <string name="settings_launcher_bubble_hold_to_unlock">Удерживайте: снять</string>
     <string name="wheel_media_play_pause">Кнопка воспроизведения/паузы на руле</string>
     <string name="wheel_media_play_pause_description">Назначьте свободную кнопку руля или клавиатуры для переключения воспроизведения CarPlay. В фоновом режиме нужна служба кнопок руля. Во время звонка или без подключения кнопка сохраняет своё действие. Прошивка может перехватывать некоторые кнопки.</string>
     <string name="wheel_key_role_media_play_pause">Воспроизведение/пауза</string>

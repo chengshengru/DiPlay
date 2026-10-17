@@ -964,6 +964,13 @@
     <string name="black_corner_overlay_off">关闭</string>
     <string name="black_corner_overlay_value">%1$d dp</string>
     <string name="iphone_corner_mask_mode">iPhone 遮罩（实验性）</string>
+    <string name="settings_launcher_bubble">桌面悬浮球（实验性）</string>
+    <string name="settings_launcher_bubble_description">在车机桌面显示一个 DiPlay 悬浮球：点它直接回到 CarPlay，可拖动位置；打开 DiPlay 时自动隐藏，离开后重新出现。长按锁定位置，再次长按解锁。需要“显示在其他应用上层”权限。</string>
+    <string name="settings_launcher_bubble_size">悬浮球大小</string>
+    <string name="settings_launcher_bubble_locked">位置已锁定</string>
+    <string name="settings_launcher_bubble_unlocked">位置已解锁</string>
+    <string name="settings_launcher_bubble_hold_to_lock">长按 锁定</string>
+    <string name="settings_launcher_bubble_hold_to_unlock">长按 解锁</string>
     <string name="wheel_media_play_pause">方向盘播放／暂停按钮</string>
     <string name="wheel_media_play_pause_description">将空闲的方向盘或键盘按键映射为 CarPlay 音乐播放／暂停。CarPlay 连接时可用；后台运行需要启用方向盘按键服务。通话或断开连接时保留车辆原有功能。车机可能拦截部分按键。</string>
     <string name="wheel_key_role_media_play_pause">播放／暂停</string>

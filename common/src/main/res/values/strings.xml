@@ -1003,6 +1003,13 @@
     <string name="black_corner_overlay_off">Off</string>
     <string name="black_corner_overlay_value">%1$d dp</string>
     <string name="iphone_corner_mask_mode">iPhone mask (experimental)</string>
+    <string name="settings_launcher_bubble">Home-screen bubble (experimental)</string>
+    <string name="settings_launcher_bubble_description">Shows the DiPlay icon as a bubble over the head unit\'s home screen: tap it to come back to CarPlay and drag it anywhere. It hides as soon as a DiPlay screen is open and comes back when you leave. Hold it to lock its place, hold it again to unlock. Needs \"display over other apps\".</string>
+    <string name="settings_launcher_bubble_size">Bubble size</string>
+    <string name="settings_launcher_bubble_locked">Place locked</string>
+    <string name="settings_launcher_bubble_unlocked">Place unlocked</string>
+    <string name="settings_launcher_bubble_hold_to_lock">Hold to lock</string>
+    <string name="settings_launcher_bubble_hold_to_unlock">Hold to unlock</string>
     <string name="wheel_media_play_pause">Play/pause key on the wheel</string>
     <string name="wheel_media_play_pause_description">Assign any available steering-wheel or keyboard key to toggle CarPlay music playback. Works while CarPlay runs, including in the background if the wheel-key service is enabled. During calls or when disconnected, the vehicle keeps the key. A key reserved by firmware may not reach DiPlay.</string>
     <string name="wheel_key_role_media_play_pause">Play/pause</string>

@@ -1098,6 +1098,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         mainHandler.removeCallbacks(pollConfiguration)
         mainHandler.post(pollConfiguration)
         CenterMapOverlay.onDiPlayScreenShown()
+        LauncherBubble.attach(this)
+        LauncherBubble.onAppScreenShown()
         homeMonitor?.stop()
         homeScreenVisible = null
         // 在此读取设置，使在设置页中的修改能在回到投屏画面时生效（main #496）。
@@ -1706,7 +1708,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         super.onStop()
         // Off screen there are no system bars to hide, so a launch waiting for focus can go now.
         onClusterLaunchTick()
-        if (!isFinishing && !isChangingConfigurations) CenterMapOverlay.scheduleShow()
+        if (!isFinishing && !isChangingConfigurations) {
+            CenterMapOverlay.scheduleShow()
+            LauncherBubble.scheduleShow()
+        }
     }
 
     /** Shows the dashboard map as a card on the centre screen while DiPlay is in the background. */
