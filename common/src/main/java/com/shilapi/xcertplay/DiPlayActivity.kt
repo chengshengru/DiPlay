@@ -26,8 +26,10 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
@@ -5945,13 +5947,41 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                             }.onFailure { showDiagnosticReport(report) }
                         }.show()
                 } else {
-                    AlertDialog.Builder(this).setTitle(getString(R.string.could_not_save_the_report))
-                        .setMessage(getString(R.string.check_that_storage_is_available_or_choose_another_save_loc))
-                        .setPositiveButton(getString(R.string.choose_location)) { _, _ -> chooseReportDestination() }
-                        .setNegativeButton(getString(R.string.close), null).show()
+                    // API17 适配：导出失败此前被静默吞掉，真机上无从定位根因；
+                    // 现在记录日志（含各存储分区可用空间），并把异常类型/消息附到弹窗里（作者：TRAE AI）。
+                    val error = result.exceptionOrNull()
+                    Log.e("DiPlay-export", "Diagnostic report export failed; ${exportStorageSummary()}", error)
+                    val dialog = AlertDialog.Builder(this)
+                        .setTitle(getString(R.string.could_not_save_the_report))
+                        .setMessage(getString(R.string.check_that_storage_is_available_or_choose_another_save_loc) +
+                            "\n\n${error?.javaClass?.name ?: "unknown error"}: ${error?.message ?: "(no message)"}")
+                    // API 17 适配：Storage Access Framework（ACTION_CREATE_DOCUMENT）是 API 19+；
+                    // 4.2.2 上 launch 会立即抛 ActivityNotFoundException 并回退到同一自动保存逻辑，形成
+                    // “点了选择位置还是这个提示”的死循环。低版本直接移除该按钮，只保留关闭（作者：TRAE AI）。
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                        dialog.setPositiveButton(getString(R.string.choose_location)) { _, _ -> chooseReportDestination() }
+                    }
+                    dialog.setNegativeButton(getString(R.string.close), null).show()
                 }
             }
         }, "diplay-export").start()
+    }
+
+    /** API 17 适配：StatFs.getAvailableBytes 是 API 18+，改用 availableBlocks × blockSize（作者：TRAE AI）。 */
+    @Suppress("DEPRECATION")
+    private fun exportStorageSummary(): String {
+        fun freeMiB(path: File?): String? {
+            if (path == null) return null
+            return runCatching {
+                val stat = StatFs(path.path)
+                val freeMiB = stat.availableBlocks.toLong() * stat.blockSize / (1024L * 1024L)
+                "${path.path}: ${freeMiB} MiB free"
+            }.getOrNull()
+        }
+        val internal = freeMiB(filesDir) ?: "internal storage unavailable"
+        val downloads = freeMiB(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS))
+            ?: "public Downloads unavailable"
+        return "internal=$internal; downloads=$downloads"
     }
 
     /** The text of a diagnostic report. It reads the session logs, so call it off the main thread. */

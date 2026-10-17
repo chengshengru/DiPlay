@@ -65,6 +65,18 @@ internal object DiagnosticExportStore {
         return saveInDirectory(context, File(context.filesDir, "diagnostic-reports"), fileName, report, savedInApp = true)
     }
 
+    /**
+     * Creates [directory] so the report can be written. A previous run or the user may have left a
+     * regular file where the directory should be; `mkdirs()` cannot create a directory over a file,
+     * so the stray entry is removed first. Throws when creation is still impossible (read-only volume,
+     * full disk, or a non-file entry that cannot be removed).
+     */
+    private fun ensureDirectory(directory: File) {
+        if (directory.isDirectory) return
+        if (directory.exists() && !directory.isDirectory) directory.delete()
+        if (!directory.mkdirs() && !directory.isDirectory) throw IOException("Report storage is unavailable")
+    }
+
     private fun saveInDirectory(
         context: Context,
         directory: File,
@@ -72,7 +84,9 @@ internal object DiagnosticExportStore {
         report: String,
         savedInApp: Boolean = false,
     ): SavedReport {
-        if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Report storage is unavailable")
+        // API 17 适配：用户可能删过诊断目录，或在原路径留下同名普通文件；
+        // mkdirs() 无法在文件上建目录，会静默失败。先清掉残留文件再重建（作者：TRAE AI）。
+        ensureDirectory(directory)
         // Each export has a new URI: an earlier share grant cannot read a later report.
         val file = File.createTempFile(fileName.removeSuffix(".txt") + "-", ".txt", directory)
         try {
@@ -107,7 +121,8 @@ internal object DiagnosticExportStore {
 
     internal fun saveToPublicDownloads(context: Context, fileName: String, report: String): SavedReport {
         val directory = publicDownloadsDirectory()
-        if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Downloads/DiPlay is unavailable")
+        // API 17 适配：删除目录/残留同名文件后重建（作者：TRAE AI）。
+        ensureDirectory(directory)
         val base = fileName.removeSuffix(".txt")
         var file = File(directory, fileName)
         var copy = 1

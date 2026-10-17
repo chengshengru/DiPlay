@@ -253,6 +253,10 @@ class ManualHotspotManager(
             null
         } ?: return null
         if (unquote(connectionInfo.ssid) != expectedSsid) return null
+        // WifiInfo.getFrequency() 是 API 21+：API 17 上抛 NoSuchMethodError，而它是 Error、
+        // 会绕过控制器 startWirelessHotspot 的 catch(Exception)，把整次无线启动打成莫名失败。
+        // 信道探测另有 scanResults / apConfiguration 两条路径可替代，此处直接放弃。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return null
         return connectionInfo.frequency.takeIf { it > 0 }
     }
 

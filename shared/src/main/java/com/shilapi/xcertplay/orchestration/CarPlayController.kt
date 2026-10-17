@@ -2073,9 +2073,13 @@ class CarPlayController(
 
     // "iPhone USB device not present" said only that no Apple device was listed. What Android does list shows
     // whether it sees anything on the head unit's port, a USB stick for example, or nothing at all (#763).
-    // Each poll reports only a change.
+    // 每次轮询都打印一次实时总线快照（设备数 + 是否含 Apple VID 05ac + 完整清单），因为无 adb 的环境只能靠
+    // 车机屏幕/诊断报告判断 iPhone 当前是否被枚举；此前只在清单变化时记一次，屏幕 12 行窗口会显示陈旧状态。
     private fun reportIphoneMissing() {
-        val listed = runCatching { iphoneHost.listedDevices().joinToString(", ") }.getOrElse { "unavailable" }
+        val devices = runCatching { iphoneHost.listedDevices() }.getOrElse { emptyList() }
+        val listed = devices.joinToString(", ")
+        val applePresent = devices.any { it.startsWith("05ac", ignoreCase = true) }
+        debugLog("usb bus: count=${devices.size} apple=${if (applePresent) "yes" else "no"} [$listed]")
         if (listed == lastIphoneListing) return
         lastIphoneListing = listed
         debugLog("wired iPhone not listed by Android; USB devices=[$listed]")

@@ -64,6 +64,7 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import androidx.appcompat.widget.SwitchCompat
 import android.widget.TextView
+import android.text.method.ScrollingMovementMethod
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -424,6 +425,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
     private var connectionInstructionsView: TextView? = null
     private var connectionHelpView: TextView? = null
     private var usbDiagView: TextView? = null
+    private var usbDiagScroll: ScrollView? = null
     private val usbDiagLines = ArrayDeque<String>()
     private val usbDiagLock = Any()
     private var resolutionValueView: TextView? = null
@@ -1956,22 +1958,33 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         root.addView(viewport, FrameLayout.LayoutParams(-1, -1))
         // USB 连接实时诊断覆盖层：把最近若干行 xcertplay-usb 日志直接打在车机屏幕上，
         // 便于 API 17 等环境下不接电脑也能看到卡在哪一步（作者：TRAE AI）。
+        // 当前会话完整诊断日志：可滚动面板（不再 maxLines=12 截断），保留全部行，新行自动滚到底部。
         val usbDiag = TextView(this).apply {
             textSize = 11f
             typeface = Typeface.MONOSPACE
             setTextColor(Color.rgb(150, 230, 160))
             setBackgroundColor(Color.argb(160, 0, 0, 0))
-            gravity = Gravity.BOTTOM or Gravity.START
-            maxLines = 12
+            gravity = Gravity.START
+            movementMethod = ScrollingMovementMethod()
+            isVerticalScrollBarEnabled = true
         }
+        val usbDiagScroll = ScrollView(this).apply {
+            isVerticalScrollBarEnabled = true
+            addView(usbDiag, FrameLayout.LayoutParams(-1, -2))
+        }
+        // 面板高度取屏幕 40%，限制在 [160dp, 420dp]，避免遮挡过多又保证可读。
+        val diagHeight = (resources.displayMetrics.heightPixels * 0.4f).toInt()
+            .coerceAtMost(dp(420))
+            .coerceAtLeast(dp(160))
         root.addView(
-            usbDiag,
-            FrameLayout.LayoutParams(-1, -2).apply {
+            usbDiagScroll,
+            FrameLayout.LayoutParams(-1, diagHeight).apply {
                 gravity = Gravity.BOTTOM
                 bottomMargin = dp(8); leftMargin = dp(8); rightMargin = dp(8)
             },
         )
         usbDiagView = usbDiag
+        this.usbDiagScroll = usbDiagScroll
         // Above the video and gesture layer, below the menus.
         sidePanel = buildSidePanel().also { root.addView(it, FrameLayout.LayoutParams(0, 0)) }
         // 侧栏把手小条（main #480），位于视频与手势层之上、菜单之下。
@@ -5253,9 +5266,17 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 val redacted = DiagnosticRedactor.redact(message) ?: return
                 synchronized(usbDiagLock) {
                     usbDiagLines.addLast(redacted)
-                    while (usbDiagLines.size > 12) usbDiagLines.removeFirst()
+                    // 保留当前会话完整日志（不再截断为 12 行）；上限 2000 行防止极端情况下无限增长。
+                    while (usbDiagLines.size > 2000) usbDiagLines.removeFirst()
                     val snapshot = usbDiagLines.joinToString("\n")
-                    usbDiagView?.post { usbDiagView?.text = snapshot }
+                    usbDiagView?.post {
+                        val scroll = usbDiagScroll
+                        usbDiagView?.text = snapshot
+                        // 仅当用户已停留在底部时才自动跟随到最新；用户上滑查看历史时不强行拽回。
+                        if (scroll != null && !scroll.canScrollVertically(1)) {
+                            scroll.fullScroll(View.FOCUS_DOWN)
+                        }
+                    }
                 }
                 if (message.startsWith(CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX + " ")) {
                     // Retain old-controller teardown evidence without accepting its UI/session state.
@@ -6463,7 +6484,7 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         val waitingVisible = activeScreenStreamTypes.isEmpty()
         connectionPanel?.visibility = if (waitingVisible) View.VISIBLE else View.GONE
         // 实验性①：仅当开关打开且处于等待/连接屏时显示 USB 实时诊断日志覆盖层；默认关则不展示。
-        usbDiagView?.visibility = if (waitingVisible && AirPlayPersistence.loadUsbRealtimeLog(this)) View.VISIBLE else View.GONE
+        usbDiagScroll?.visibility = if (waitingVisible && AirPlayPersistence.loadUsbRealtimeLog(this)) View.VISIBLE else View.GONE
     }
 
     // The keywords are English; matching the English text keeps the result the same in every UI language.

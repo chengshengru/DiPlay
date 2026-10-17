@@ -81,7 +81,10 @@ internal object PlatformTetheringStart {
             val label = "${owner.name}.startTethering/${candidate.types.size}"
             val method: Method = try {
                 owner.getMethod("startTethering", *candidate.types)
-            } catch (error: ReflectiveOperationException) {
+            // ReflectiveOperationException 是 API 19+ 类，API 17 验证器解析 catch 类型失败会拒绝整类（VerifyError），
+            // 所以只捕获 API 1 就存在的具体异常。注意 NoSuchMethodException 在 java.lang 包，不 import 才是对的；
+            // java.lang.reflect.NoSuchMethodException 在任何 JDK/Android 上都不存在。
+            } catch (error: NoSuchMethodException) {
                 failures += "$label: ${describe(error)}"
                 continue
             } catch (error: SecurityException) {
@@ -116,7 +119,10 @@ internal object PlatformTetheringStart {
                 .apply { isAccessible = true }.get(manager)
             if (service == null) failures += "ConnectivityManager.mService: empty"
             return service
-        } catch (error: ReflectiveOperationException) {
+        // 同上：NoSuchFieldException / IllegalAccessException 都在 java.lang 包，不是 java.lang.reflect。
+        } catch (error: NoSuchFieldException) {
+            failures += "ConnectivityManager.mService: ${describe(error)}"
+        } catch (error: IllegalAccessException) {
             failures += "ConnectivityManager.mService: ${describe(error)}"
         } catch (error: SecurityException) {
             failures += "ConnectivityManager.mService: ${describe(error)}"

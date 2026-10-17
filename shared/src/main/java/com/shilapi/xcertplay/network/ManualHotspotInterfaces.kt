@@ -3,6 +3,7 @@ package com.shilapi.xcertplay.network
 import android.annotation.SuppressLint
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.TetheringInterface
 import android.net.TetheringManager
@@ -13,6 +14,13 @@ import java.io.File
 import java.net.NetworkInterface
 import java.util.Collections
 
+/**
+ * [ConnectivityManager.getActiveNetwork] 是 API 23+（仓内 `NetworkCompat.isConnected`
+ * 即以 `ApiLevel.M` 守卫同款调用）。旧平台不可观测活动网络：一致性判据必须退化为
+ * 「未观测到变化」，而不是把「观测不到」误判成「发生了变化」。
+ */
+internal fun activeNetworkComparable(sdkInt: Int): Boolean = sdkInt >= Build.VERSION_CODES.M
+
 internal class ManualHotspotInterfaces(
     private val context: Context,
     private val onDiagnostic: (String) -> Unit = {},
@@ -21,9 +29,23 @@ internal class ManualHotspotInterfaces(
     private val publicTethering = if (Build.VERSION.SDK_INT >= 36) PublicTethering(context) else null
     private var lastLegacyDiagnostic: String? = null
 
+    /**
+     * android-4.2.2（API 17）：`getActiveNetwork()` 不存在，`runCatching` 吞掉
+     * `NoSuchMethodError` 后 `isSuccess=false` 会令 `consistent` 恒为 `false`——
+     * 「观测不到」被误判成「网络变了」，热点采样永远被拒（真机日志：
+     * `hotspot sample rejected: network_changed=true apEnabled=true`）。
+     * 旧平台跳过活动网络比对；API 23+ 行为不变。
+     */
+    private fun activeNetworkSample(): Result<Network?> =
+        if (activeNetworkComparable(Build.VERSION.SDK_INT)) {
+            runCatching { connectivity?.activeNetwork }
+        } else {
+            Result.success(null)
+        }
+
     fun sample(): HotspotNetworkSnapshot {
         val ap = publicTethering?.interfaces ?: legacyApInterfaces()
-        val before = runCatching { connectivity?.activeNetwork }
+        val before = activeNetworkSample()
         val upstreams = runCatching {
             checkNotNull(connectivity)
             connectivity.allNetworks.mapNotNull { network ->
@@ -45,7 +67,7 @@ internal class ManualHotspotInterfaces(
                 }.getOrNull()
             }
         }.getOrDefault(emptyList())
-        val after = runCatching { connectivity?.activeNetwork }
+        val after = activeNetworkSample()
         return HotspotNetworkSnapshot(
             interfaces, ap, upstreams, defaultName,
             consistent = before.isSuccess && after.isSuccess && before.getOrNull() == after.getOrNull(),
