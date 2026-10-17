@@ -317,7 +317,8 @@ internal object CarPlayMediaKeys {
         val expectedController = controller ?: return
         val focusDisabled = AirPlayPersistence.loadDisableMediaKeyAudioFocus(context)
         transientFocusInterrupted = false
-        val granted = if (focusDisabled) {
+        val granted: Boolean
+        if (focusDisabled) {
             // 一些 OEM 把物理音量键路由给焦点拥有者。保留活跃 MediaSession 但不长期持有焦点,
             // 让这些按键保持归车机所有(main #615)。
             focusOwner = null
