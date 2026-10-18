@@ -25,6 +25,8 @@ class Iap2UsbMuxHost private constructor(
     private var nextMuxAcknowledgement = 0
     // 波次十 #634：已收到的 usbmux 帧计数（仅前 50 帧写日志）
     private var receivedFrames = 0
+    // 进会话报告的 mux 帧摘要配额（含 TX/RX，只记前若干帧）
+    private var tracedMuxFrames = 0
     private var nextSourcePort = FIRST_SOURCE_PORT
     private lateinit var readerThread: Thread
     private val receiveFrames = UsbMuxFrameBuffer { line ->
@@ -47,12 +49,22 @@ class Iap2UsbMuxHost private constructor(
                 connections[sourcePort] = it
             }
         }
+        val startedNanos = System.nanoTime()
         try {
             connection.beginConnect()
             if (!connection.awaitConnected(timeoutMillis)) {
                 connection.abort()
+                // 这条是"手机没回 SYN-ACK"与"回包被丢在别的路径"的唯一分界线，必须进报告。
+                diagnose(
+                    "usbmux connect port=$destinationPort source=$connection.sourcePort " +
+                        "no SYN-ACK within ${timeoutMillis}ms",
+                )
                 throw IphoneUsbException.TimedOut("USBMUX TCP connection to port $destinationPort timed out")
             }
+            diagnose(
+                "usbmux connect port=$destinationPort source=$connection.sourcePort " +
+                    "established in ${(System.nanoTime() - startedNanos) / 1_000_000}ms",
+            )
             return connection
         } catch (error: IphoneUsbException) {
             removeConnection(connection)
@@ -85,7 +97,8 @@ class Iap2UsbMuxHost private constructor(
         flags: Int,
         payload: ByteArray,
     ) {
-        if (payload.size > 512) Log.i("xcertplay-usb", "usbmux TX source=$sourcePort destination=$destinationPort bytes=${payload.size} seq=$sequence ack=$acknowledgement")
+        traceMux("TX source=$sourcePort destination=$destinationPort bytes=${payload.size} " +
+            "seq=$sequence ack=$acknowledgement flags=${describeTcpFlags(flags)}")
         val tcp = ByteArray(TCP_HEADER_BYTES + payload.size)
         putU16(tcp, 0, sourcePort)
         putU16(tcp, 2, destinationPort)
@@ -255,8 +268,11 @@ class Iap2UsbMuxHost private constructor(
                 if (frame.protocol == PROTOCOL_TCP) dispatchTcp(frame.payload)
             }
         } catch (error: IphoneUsbException) {
+            // 会话为什么断在这里、由谁先断，必须在报告里留一行；否则只剩上游一句包装错误。
+            diagnose("usbmux reader ended: ${error.javaClass.simpleName}: ${error.message}")
             fail(error)
         } catch (error: RuntimeException) {
+            diagnose("usbmux reader failed: ${error.javaClass.simpleName}: ${error.message}")
             fail(IphoneUsbException.DeviceUnavailable("USBMUX reader failed", error))
         }
     }
@@ -272,7 +288,11 @@ class Iap2UsbMuxHost private constructor(
             throw IphoneUsbException.Protocol("Invalid USBMUX TCP header length")
         }
         val destinationPort = readU16(frame, offset + 2)
-        if (length == tcpHeaderBytes) Log.i("xcertplay-usb", "usbmux TCP control destination=$destinationPort flags=${frame[13].toInt() and 0xff} ack=${readU32(frame, 8)} window=${readU16(frame, 14)}")
+        traceMux(
+            "RX destination=$destinationPort source=${readU16(frame, offset)} " +
+                "flags=${describeTcpFlags(frame[offset + 13].toInt() and 0xff)} " +
+                "bytes=${length - tcpHeaderBytes} ack=${readU32(frame, offset + 8)}",
+        )
         val connection = synchronized(stateLock) { connections[destinationPort] } ?: return
         connection.onPacket(
             flags = frame[offset + 13].toInt() and 0xff,
@@ -292,6 +312,36 @@ class Iap2UsbMuxHost private constructor(
         pipe.close()
     }
 
+    /** 低频、必须进会话报告的事件（连接建立/失败、读线程收尾）。 */
+    private fun diagnose(line: String) {
+        Log.i("xcertplay-usb", line)
+        runCatching { onDiagnostic(line) }
+    }
+
+    /**
+     * USBMUX 帧摘要：只含端口、标志、序号与字节数，绝不含载荷内容。
+     *
+     * 前 [LOGGED_MUX_TRACE_FRAMES] 帧进会话报告——"SYN 有没有被 ACK、lockdown 有没有回包"必须
+     * 有这层证据，否则只能在报告里看到上游一句包装错误；之后只留在 logcat，避免 TLS 数据把报告刷爆。
+     */
+    private fun traceMux(line: String) {
+        val index = synchronized(stateLock) { ++tracedMuxFrames }
+        if (index > LOGGED_MUX_TRACE_FRAMES) return
+        if (index == LOGGED_MUX_TRACE_FRAMES) {
+            diagnose("usbmux trace limit reached after $index frames; further frames stay in logcat only")
+            return
+        }
+        diagnose("usbmux $line")
+    }
+
+    private fun describeTcpFlags(flags: Int): String = buildString {
+        if (flags and TCP_FIN != 0) append("FIN|")
+        if (flags and TCP_SYN != 0) append("SYN|")
+        if (flags and TCP_RST != 0) append("RST|")
+        if (flags and TCP_ACK != 0) append("ACK|")
+        if (isEmpty()) append("none")
+    }.trimEnd('|')
+
     private fun allocateSourcePortLocked(): Int {
         repeat(0xffff) {
             val candidate = nextSourcePort
@@ -310,7 +360,13 @@ class Iap2UsbMuxHost private constructor(
         const val LOCKDOWN_PORT = 62078
         // 波次十 #634：写日志的接收帧上限
         private const val LOGGED_RX_FRAMES = 50
+        /** 进会话报告的 mux 帧摘要上限：足够覆盖握手 + 一次 lockdown 往返，又不会淹没报告。 */
+        private const val LOGGED_MUX_TRACE_FRAMES = 64
 
+        private const val TCP_FIN = 0x01
+        private const val TCP_SYN = 0x02
+        private const val TCP_RST = 0x04
+        private const val TCP_ACK = 0x10
         private const val PROTOCOL_VERSION = 0
         private const val PROTOCOL_SETUP = 2
         private const val PROTOCOL_TCP = 6

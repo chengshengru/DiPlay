@@ -6653,7 +6653,9 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
         CarPlayStatus.WaitingForReenumeration -> res.getString(R.string.status_waiting_reenumeration)
         CarPlayStatus.SelectingConfiguration -> res.getString(R.string.selecting_carplay_configuration)
         CarPlayStatus.OpeningDataPaths -> res.getString(R.string.opening_usb_data_paths)
-        CarPlayStatus.Pairing -> res.getString(R.string.pairing_with_iphone)
+        CarPlayStatus.Pairing ->
+            res.getString(R.string.pairing_with_iphone) + "\n" +
+                res.getString(R.string.pairing_with_iphone_trust_hint)
         CarPlayStatus.ConnectingControl -> res.getString(R.string.connecting_iap2_control)
         CarPlayStatus.AttachingNetwork ->
             if (wirelessEnabled) res.getString(R.string.starting_airplay_service) else res.getString(R.string.status_attaching_ncm)

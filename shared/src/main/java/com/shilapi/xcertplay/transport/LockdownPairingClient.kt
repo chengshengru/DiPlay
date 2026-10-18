@@ -14,14 +14,15 @@ import java.security.GeneralSecurityException
  */
 class LockdownPairingClient(
     private val host: Iap2UsbMuxHost,
+    private val onDiagnostic: (String) -> Unit = {},
 ) {
     /**
      * Fetches the two pairing inputs, generates the local record, and sends plaintext Pair.
      *
      * [totalTimeoutMillis] covers the entire operation, including a pending pairing dialog.
      * [isCancelled] is checked between blocking protocol operations and while waiting to retry a
-     * pending dialog; it cannot interrupt an already-blocking plist read, which is bounded to
-     * five seconds. It is intentionally a small synchronous callback rather than a coroutine.
+     * pending dialog; it cannot interrupt an already-blocking plist read, which is bounded by the
+     * pair/step timeouts. It is intentionally a small synchronous callback rather than a coroutine.
      */
     @Throws(IphoneUsbException::class, LockdownPairingException::class, GeneralSecurityException::class)
     fun pair(
@@ -40,46 +41,83 @@ class LockdownPairingClient(
 
         val deadline = Deadline(totalTimeoutMillis)
         var pairRecord: LockdownPairRecord? = null
-        var attempt = 0
+        var transportAttempts = 0
         while (true) {
             checkCancelled(isCancelled)
-            attempt += 1
-            val connection = host.connect(
-                destinationPort = Iap2UsbMuxHost.LOCKDOWN_PORT,
-                timeoutMillis = stepTimeoutMillis(deadline),
-            )
-            var pending = false
-            LockdownPlistChannel(connection).use { channel ->
-                setUntrustedHostBuid(channel, label, systemBuid, deadline, isCancelled)
-                val record = pairRecord ?: generatePairRecord(
-                    channel = channel,
-                    label = label,
-                    hostId = hostId,
-                    systemBuid = systemBuid,
-                    deadline = deadline,
-                    isCancelled = isCancelled,
-                ).also {
-                    pairRecord = it
-                    Log.i(
-                        TAG,
-                        "lockdown pair prepared hostId=uuid systemBuid=uuid " +
-                            "deviceKey=${it.devicePublicKeyPem.size} deviceCert=${it.deviceCertificatePem.size} " +
-                            "hostCert=${it.hostCertificatePem.size} rootCert=${it.rootCertificatePem.size}",
-                    )
-                }
-                Log.i(TAG, "lockdown pair attempt=$attempt")
-                val response = channel.request(pairRequest(label, record), stepTimeoutMillis(deadline))
-                checkCancelled(isCancelled)
-                when (val error = response.errorCodeOrNull()) {
-                    null -> return PairedRecord(record, response.entries["EscrowBag"].asOptionalData())
-                    "PairingDialogResponsePending" -> pending = true
-                    "UserDeniedPairing" -> throw LockdownPairingException.UserDeniedPairing
-                    "PasswordProtected" -> throw LockdownPairingException.PasswordProtected
-                    else -> throw LockdownPairingException.RemoteError(error)
-                }
-            }
-            if (pending) {
-                Log.i(TAG, "lockdown trust pending; reconnecting before retry")
+            transportAttempts += 1
+            val connectStartNanos = System.nanoTime()
+            try {
+                val connection = host.connect(
+                    destinationPort = Iap2UsbMuxHost.LOCKDOWN_PORT,
+                    timeoutMillis = transportStepTimeoutMillis(deadline),
+                )
+                diagnose(
+                    "pair transport attempt=$transportAttempts connected port=${Iap2UsbMuxHost.LOCKDOWN_PORT} " +
+                        "connectMs=${elapsedMillis(connectStartNanos)}",
+                )
+                LockdownPlistChannel(connection, defaultTimeoutMillis = transportStepTimeoutMillis(deadline))
+                    .use { channel ->
+                        setUntrustedHostBuid(channel, label, systemBuid, deadline, isCancelled)
+                        val record = pairRecord ?: generatePairRecord(
+                            channel = channel,
+                            label = label,
+                            hostId = hostId,
+                            systemBuid = systemBuid,
+                            deadline = deadline,
+                            isCancelled = isCancelled,
+                        ).also {
+                            pairRecord = it
+                            Log.i(
+                                TAG,
+                                "lockdown pair prepared hostId=uuid systemBuid=uuid " +
+                                    "deviceKey=${it.devicePublicKeyPem.size} deviceCert=${it.deviceCertificatePem.size} " +
+                                    "hostCert=${it.hostCertificatePem.size} rootCert=${it.rootCertificatePem.size}",
+                            )
+                        }
+                        Log.i(TAG, "lockdown pair attempt=$transportAttempts")
+                        // 信任对话框期间必须留在**同一条** lockdown 连接上反复发 Pair：
+                        // 一旦断开重连，iPhone 侧这次配对会话随之作废，用户点下的"信任"永远回不到我们
+                        // 这里（真机日志即为此签名：弹框→点信任→无下文）。只有传输层真的断了才重连。
+                        var pairRequests = 0
+                        while (true) {
+                            checkCancelled(isCancelled)
+                            pairRequests += 1
+                            val requestStartNanos = System.nanoTime()
+                            val response = channel.request(
+                                pairRequest(label, record),
+                                pairResponseTimeoutMillis(deadline),
+                            )
+                            val elapsed = elapsedMillis(requestStartNanos)
+                            checkCancelled(isCancelled)
+                            when (val error = response.errorCodeOrNull()) {
+                                null -> {
+                                    diagnose(
+                                        "pair accepted attempt=$transportAttempts request=$pairRequests " +
+                                            "elapsedMs=$elapsed",
+                                    )
+                                    return PairedRecord(record, response.entries["EscrowBag"].asOptionalData())
+                                }
+                                "PairingDialogResponsePending" -> {
+                                    diagnose(
+                                        "pair trust dialog pending request=$pairRequests elapsedMs=$elapsed; " +
+                                            "keep waiting on the same connection for the user to tap Trust",
+                                    )
+                                    waitForRetry(deadline, isCancelled)
+                                }
+                                "UserDeniedPairing" -> throw LockdownPairingException.UserDeniedPairing
+                                "PasswordProtected" -> throw LockdownPairingException.PasswordProtected
+                                else -> throw LockdownPairingException.RemoteError(error)
+                            }
+                        }
+                    }
+            } catch (error: IphoneUsbException) {
+                // 传输层错误（连接被拒、plist 帧超时/截断）才值得换一条连接重来；
+                // 用户拒绝、密码保护等协议结论直接上抛。
+                diagnose(
+                    "pair transport attempt=$transportAttempts failed " +
+                        "${error.javaClass.simpleName}: ${error.message}",
+                )
+                if (transportAttempts >= MAXIMUM_TRANSPORT_ATTEMPTS) throw error
                 waitForRetry(deadline, isCancelled)
             }
         }
@@ -139,11 +177,11 @@ class LockdownPairingClient(
                     "Value" to LockdownPlistValue.Text(systemBuid),
                 ),
             ),
-            stepTimeoutMillis(deadline),
+            transportStepTimeoutMillis(deadline),
         )
         checkCancelled(isCancelled)
         response.errorCodeOrNull()?.let { throw LockdownPairingException.RemoteError(it) }
-        Log.i(TAG, "lockdown UntrustedHostBUID set")
+        diagnose("pair UntrustedHostBUID set")
     }
 
     private fun getValue(
@@ -154,6 +192,7 @@ class LockdownPairingClient(
         isCancelled: () -> Boolean,
     ): LockdownPlistValue {
         checkCancelled(isCancelled)
+        val startedNanos = System.nanoTime()
         val response = channel.request(
             LockdownPlistValue.Dictionary(
                 linkedMapOf(
@@ -162,10 +201,11 @@ class LockdownPairingClient(
                     "Key" to LockdownPlistValue.Text(key),
                 ),
             ),
-            stepTimeoutMillis(deadline),
+            transportStepTimeoutMillis(deadline),
         )
         checkCancelled(isCancelled)
         response.errorCodeOrNull()?.let { throw LockdownPairingException.RemoteError(it) }
+        diagnose("pair GetValue $key answered elapsedMs=${elapsedMillis(startedNanos)}")
         return response.entries["Value"]
             ?: throw LockdownPairingException.InvalidResponse("GetValue response omitted Value")
     }
@@ -189,8 +229,29 @@ class LockdownPairingClient(
         if (isCancelled()) throw LockdownPairingException.Cancelled
     }
 
-    private fun stepTimeoutMillis(deadline: Deadline): Long =
-        minOf(MAXIMUM_STEP_TIMEOUT_MILLIS, deadline.remainingMillis())
+    /**
+     * 传输类步骤（TCP 连接、SetValue/GetValue）的超时。
+     *
+     * 5s 对 C140A + iPhone 太紧：手机要先把 lockdown 服务拉起来才回第一帧，实测 3.3-9.3s 的静默很常见，
+     * 一超时就重连反而让手机侧反复复位。
+     */
+    private fun transportStepTimeoutMillis(deadline: Deadline): Long =
+        minOf(TRANSPORT_STEP_TIMEOUT_MILLIS, deadline.remainingMillis())
+
+    /**
+     * Pair 请求的超时：这条请求要等人在 iPhone 上点"信任"，绝不能用秒级超时衡量。
+     * 正常情况下手机几秒内回 `PairingDialogResponsePending`，真正的等待由重发循环承担。
+     */
+    private fun pairResponseTimeoutMillis(deadline: Deadline): Long =
+        minOf(PAIR_RESPONSE_TIMEOUT_MILLIS, deadline.remainingMillis())
+
+    private fun diagnose(message: String) {
+        Log.i(TAG, message)
+        runCatching { onDiagnostic(message) }
+    }
+
+    private fun elapsedMillis(startedNanos: Long): Long =
+        ((System.nanoTime() - startedNanos) / 1_000_000L).coerceAtLeast(0)
 
     private fun waitForRetry(deadline: Deadline, isCancelled: () -> Boolean) {
         var remaining = RETRY_INTERVAL_MILLIS
@@ -222,7 +283,12 @@ class LockdownPairingClient(
         const val RETRY_INTERVAL_MILLIS = 1_000L
         const val RETRY_CHECK_MILLIS = 100L
         const val NANOS_PER_MILLISECOND = 1_000_000L
-        const val MAXIMUM_STEP_TIMEOUT_MILLIS = 5_000L
+        /** TCP 连接与 SetValue/GetValue 这类纯传输步骤的预算。 */
+        const val TRANSPORT_STEP_TIMEOUT_MILLIS = 20_000L
+        /** Pair 请求可能要等人点"信任"，给足一轮弹框反应时间。 */
+        const val PAIR_RESPONSE_TIMEOUT_MILLIS = 120_000L
+        /** 传输层真的断了才换连接重来的次数上限（协议结论不重试）。 */
+        const val MAXIMUM_TRANSPORT_ATTEMPTS = 5
         const val MAXIMUM_TOTAL_TIMEOUT_MILLIS = 5 * 60_000L
     }
 }

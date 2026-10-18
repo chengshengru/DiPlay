@@ -299,6 +299,7 @@
     <string name="pair_your_iphone_with_the_car_s_bluetooth_keep_wi_fi_on_an">iPhoneを車のBluetoothとペアリングし、Wi-Fiをオンにして、iPhone側でCarPlayを許可してください。他の画面投影アプリは終了してください。\n\n以前のWi-Fi Direct接続が残っている場合は、リセットして再接続してください。</string>
     <string name="paired_device">ペアリング済みの端末</string>
     <string name="pairing_with_iphone">iPhoneとペアリングしています</string>
+    <string name="pairing_with_iphone_trust_hint">iPhoneで「信頼」をタップしてCarPlayを許可してください。ケーブルは接続したままにしてください。</string>
     <string name="password_must_be_empty_when_security_is_open">暗号化方式が「オープン」の場合、パスワードは空欄にしてください</string>
     <string name="permissions_and_connection_help">権限と接続のヘルプ</string>
     <string name="physical_length">実寸</string>

@@ -228,11 +228,14 @@ object UsbQueueReplay {
     /** The next completion carries no bytes, as a cancelled read does. */
     var emptyCompletion = false
     var cancels = 0
+    /** 请求对象被 close() 的次数：排队的 URB 未撤销前绝不允许释放。 */
+    var requestCloses = 0
     fun reset() {
         outcomes.clear(); sizes.clear(); buffers.clear(); request = null; buffer = null
         queueException = null; timeout = false; onQueue = null
         transfer = null; transferOffset = 0; completedBytes.clear(); untimedWaits = 0
         timeouts = 0; cancelResult = true; emptyCompletion = false; cancels = 0
+        requestCloses = 0
     }
 }
 
@@ -261,7 +264,7 @@ class CompatibilityUsbRequestShadow {
         UsbQueueReplay.cancels += 1
         return UsbQueueReplay.cancelResult
     }
-    @Implementation fun close() = Unit
+    @Implementation fun close() { UsbQueueReplay.requestCloses += 1 }
 }
 
 @Implements(UsbDeviceConnection::class)

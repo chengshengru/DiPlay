@@ -307,6 +307,7 @@
     <string name="pair_your_iphone_with_the_car_s_bluetooth_keep_wi_fi_on_an">在車機的藍牙設定中配對 iPhone，保持 Wi-Fi 開啟，並在 iPhone 上允許 CarPlay。請關閉其他手機投放 App。\n\n如果先前的投放 App 殘留連線，請先重設下方的 CarPlay Wi-Fi，再重新連線。車機正常的網際網路 Wi-Fi 不受影響。</string>
     <string name="paired_device">已配對裝置</string>
     <string name="pairing_with_iphone">正在與 iPhone 配對</string>
+    <string name="pairing_with_iphone_trust_hint">請在 iPhone 上點「信任」，並保持連接線。</string>
     <string name="password_must_be_empty_when_security_is_open">安全類型為「開放」時，密碼必須留白</string>
     <string name="permissions_and_connection_help">權限與連線說明</string>
     <string name="physical_length">實體長度</string>

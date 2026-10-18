@@ -602,6 +602,9 @@ class Iap2UsbSession internal constructor(
     private var closed = false
     private var failure: IphoneUsbException? = null
     private var pendingRead: UsbRequest? = null
+    private var pendingReadBuffer: ByteBuffer? = null
+    /** 已把 [pendingRead] 提交给内核；为 true 时下一次读只等结果，绝不重复排队。 */
+    private var readQueued = false
     private val readQueuePolicy = UsbReadQueuePolicy.forCurrentPlatform()
     // API 17 迁移：requestWait(long) 重载是 API 26 新增。API 26+ 直接调用；
     // API 17-25 由守护线程调用阻塞式 requestWait()（API 12+），完成的请求经队列交给读者。
@@ -671,76 +674,112 @@ class Iap2UsbSession internal constructor(
         }
     }
 
-    /** Returns null only when no completed USB request arrives before [timeoutMillis]. */
+    /**
+     * Returns null only when no completed USB request arrives before [timeoutMillis].
+     *
+     * 超时**不**取消、**不**关闭排在 usbfs 里的读请求：内核里那条 URB 依然有效，下一次调用继续等它，
+     * 数据一到就原样交回，既不丢字节也不重建请求。旧实现在超时后 cancel()+close()，一旦 cancel
+     * 被厂商内核拒绝，就会释放仍在队列里的 URB/native 缓冲，内核完成回调随后写入已释放内存，真机
+     * 表现是整个进程被 SIGSEGV 打死（应用直接退回 DiPlay 主页，会话日志戛然而止）；
+     * 而 cancel 成功的路径又会把手机侧正常的静默当成会话死刑。NCM 桥早已采用同样的复用模型。
+     */
     fun read(timeoutMillis: Long): ByteArray? = synchronized(readLock) {
         checkOpen()
         require(timeoutMillis > 0) { "timeoutMillis must be positive" }
-        val request = UsbRequest()
-        var initialized = false
-        try {
-            if (!request.initialize(connection, inEndpoint)) {
-                throw IphoneUsbException.DeviceUnavailable(
-                    "Android could not initialize USBMUX read request (${requestDiagnostics(timeoutMillis)})",
-                )
-            }
-            initialized = true
-            val buffer = ByteBuffer.allocateDirect(USBMUX_READ_CHUNK_BYTES)
-            val queueResult = synchronized(stateLock) {
-                checkOpenLocked()
-                pendingRead = request
-                readQueuePolicy.queue(buffer, ::checkOpenLocked) { request.queueRead(it) }
-            }
-            if (!queueResult.queued) {
-                throw IphoneUsbException.DeviceUnavailable(
-                    "Android could not queue USBMUX read request (${requestDiagnostics(timeoutMillis)} " +
-                        "firstBytes=${queueResult.firstBytes} fallbackBytes=${queueResult.fallbackBytes ?: "not_attempted"})",
-                )
-            }
-            // The policy remembers an accepted fallback, so this event occurs once per pipe.
-            if (queueResult.fallbackBytes != null) runCatching {
-                onDiagnostic(
-                    "USBMUX read queue compatibility fallback api=${Build.VERSION.SDK_INT} " +
-                        "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queueResult.firstBytes} " +
-                        "fallbackBytes=${queueResult.fallbackBytes}",
-                )
-            }
-            val timedOut = AtomicBoolean(false)
-            val completed = awaitCompletedRead(timeoutMillis, timedOut)
-            if (completed == null) {
-                // API 17 迁移：超时（legacy 队列 poll 超时或 API 26+ TimeoutException）。
-                // 读可能在超时与 cancel 之间已完成（#610/#301），回读其字节而不是断开会话；
-                // 非超时的 null（队列层无结果）仍按 main 语义断开会话。
-                if (!timedOut.get()) throw failSession("Android returned no USBMUX read request")
-                return@synchronized drainTimedOutRead(request, buffer)
-            }
-            if (completed !== request) {
-                throw failSession("Android completed an unexpected USB request")
-            }
-            return@synchronized ByteArray(buffer.position()).also {
-                buffer.flip()
-                buffer.get(it)
-            }
+        val queuedRead = try {
+            acquireQueuedRead(timeoutMillis)
         } catch (error: IphoneUsbException) {
             throw error
         } catch (error: RuntimeException) {
             throw failSession("USBMUX read failed", error)
-        } finally {
-            synchronized(stateLock) {
-                if (pendingRead === request) pendingRead = null
-            }
-            if (initialized) request.cancel()
-            request.close()
         }
+        // Emit outside stateLock; diagnostic callbacks must not affect queue or close behavior.
+        queuedRead.fallback?.let { queued ->
+            runCatching {
+                onDiagnostic(
+                    "USBMUX read queue compatibility fallback api=${Build.VERSION.SDK_INT} " +
+                        "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queued.firstBytes} " +
+                        "fallbackBytes=${queued.fallbackBytes}",
+                )
+            }
+        }
+        val request = queuedRead.request
+        val buffer = queuedRead.buffer
+        val timedOut = AtomicBoolean(false)
+        val completed = try {
+            awaitCompletedRead(timeoutMillis, timedOut)
+        } catch (error: IphoneUsbException) {
+            throw error
+        } catch (error: RuntimeException) {
+            throw failSession("USBMUX read failed", error)
+        }
+        if (completed == null) {
+            // 非超时的 null 只来自 requestWait() 返回 null（连接已错误/关闭），仍按会话失败处理。
+            if (!timedOut.get()) throw failSession("Android returned no USBMUX read request")
+            // 超时：请求留在队列里，读到的字节为 0，本次按"暂无数据"返回。
+            return null
+        }
+        if (completed !== request) {
+            throw failSession("Android completed an unexpected USB request")
+        }
+        synchronized(stateLock) { readQueued = false }
+        val transferred = buffer.position()
+        if (transferred <= 0) return null
+        if (transferred > buffer.capacity()) {
+            throw failSession("Android reported $transferred USBMUX bytes for a ${buffer.capacity()}-byte buffer")
+        }
+        return ByteArray(transferred).also {
+            buffer.flip()
+            buffer.get(it)
+        }
+    }
+
+    /** 复用仍未完成的读请求；只有确实没有排队时才新建并提交一次。 */
+    private fun acquireQueuedRead(timeoutMillis: Long): QueuedUsbRead = synchronized(stateLock) {
+        checkOpenLocked()
+        val request = pendingRead ?: UsbRequest().also { created ->
+            if (!created.initialize(connection, inEndpoint)) {
+                created.close()
+                throw IphoneUsbException.DeviceUnavailable(
+                    "Android could not initialize USBMUX read request (${requestDiagnostics(timeoutMillis)})",
+                )
+            }
+            pendingRead = created
+            pendingReadBuffer = ByteBuffer.allocateDirect(USBMUX_READ_CHUNK_BYTES)
+        }
+        val buffer = pendingReadBuffer
+            ?: throw failSession("USBMUX read buffer state was lost")
+        var fallback: UsbReadQueueResult? = null
+        if (!readQueued) {
+            buffer.clear()
+            val queued = readQueuePolicy.queue(buffer, ::checkOpenLocked) { request.queueRead(it) }
+            if (!queued.queued) {
+                throw IphoneUsbException.DeviceUnavailable(
+                    "Android could not queue USBMUX read request (${requestDiagnostics(timeoutMillis)} " +
+                        "firstBytes=${queued.firstBytes} fallbackBytes=${queued.fallbackBytes ?: "not_attempted"})",
+                )
+            }
+            readQueued = true
+            if (queued.fallbackBytes != null) fallback = queued
+        }
+        QueuedUsbRead(request, buffer, fallback)
     }
 
     override fun close() {
         val requestToCancel = synchronized(stateLock) {
             if (closed) return
             closed = true
-            pendingRead
+            val queued = pendingRead
+            pendingRead = null
+            pendingReadBuffer = null
+            readQueued = false
+            queued
         }
-        requestToCancel?.cancel()
-        connection.close()
+        // 顺序很关键：先撤销仍在内核队列里的 URB，再关连接（内核据此丢弃残留请求），最后才释放
+        // 请求对象。反过来在 URB 还在队列时 close()，内核完成回调会写到已释放的 native 缓冲。
+        requestToCancel?.let { queued -> runCatching { queued.cancel() } }
+        runCatching { connection.close() }
+        requestToCancel?.let { queued -> runCatching { queued.close() } }
     }
 
     /**
@@ -768,38 +807,7 @@ class Iap2UsbSession internal constructor(
         if (closed) throw IphoneUsbException.DeviceUnavailable("USBMUX session is closed")
     }
 
-    /**
-     * 取消已超时的读并从 Android 收回(移植自 main #625,#610/#301)。
-     * 超时与 cancel 之间完成的读已无法取消:它正在返回途中。这一竞态曾在 Telechips 与
-     * DiLink 5.1 车机上每隔几分钟断开整个会话。无论是否完成都排空该请求,并把它携带的
-     * 字节返回,保持 USBMUX 流完整。
-     */
-    private fun drainTimedOutRead(request: UsbRequest, buffer: ByteBuffer): ByteArray? {
-        val cancelled = request.cancel()
-        // API 17 迁移：经 awaitCompletedRead 统一等待（legacy 队列或 API 26+ 定时重载），
-        // 排空阶段超时一律按 main 文案断开（cancelled 与否区分原因）
-        val completed = if (legacyRequestWait) {
-            awaitCompletedRead(CANCEL_DRAIN_TIMEOUT_MILLIS, AtomicBoolean(false))
-        } else {
-            try {
-                connection.requestWait(CANCEL_DRAIN_TIMEOUT_MILLIS)
-            } catch (_: TimeoutException) {
-                null
-            }
-        } ?: throw failSession(
-            if (cancelled) "Timed out draining cancelled USBMUX read request"
-            else "Android could not cancel timed out USBMUX read request",
-        )
-        if (completed !== request) {
-            throw failSession("Android did not drain the cancelled USBMUX read request")
-        }
-        if (buffer.position() == 0) return null
-        return ByteArray(buffer.position()).also {
-            buffer.flip()
-            buffer.get(it)
-        }
-    }
-
+    /** 记录并返回会话级失败（首次失败即定型，后续包装保持原始原因）。 */
     private fun failSession(message: String, cause: Throwable? = null): IphoneUsbException.DeviceUnavailable {
         val error = IphoneUsbException.DeviceUnavailable(message, cause)
         synchronized(stateLock) {
@@ -814,9 +822,15 @@ class Iap2UsbSession internal constructor(
         append(" timeoutMs=").append(timeoutMillis)
     }
 
+    /** 一次已被内核接受的读请求；请求与缓冲区必须成对存活，直到完成或 [close]。 */
+    private class QueuedUsbRead(
+        val request: UsbRequest,
+        val buffer: ByteBuffer,
+        val fallback: UsbReadQueueResult?,
+    )
+
     private companion object {
         const val USBMUX_READ_CHUNK_BYTES = 65_536
-        const val CANCEL_DRAIN_TIMEOUT_MILLIS = 1_000L
         // 探针：标准 GET_STATUS（recipient=设备），无害且不改变设备状态。
         private const val PROBE_STANDARD_DEVICE_IN = 0x80
         private const val PROBE_GET_STATUS_REQUEST = 0x00
