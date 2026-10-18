@@ -2372,6 +2372,9 @@ class CarPlayController(
         var ncmOwnedLocally = true
         try {
             if (closed) return
+            connectionDiagnostic(
+                "wired USBMUX session probe after NCM open: ${usbSession.probeControlChannel()}",
+            )
             val mux = Iap2UsbMuxHost.open(usbSession, onDiagnostic = ::connectionDiagnostic)
             this.mux = mux
             debugLog("wired USBMUX host opened")

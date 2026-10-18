@@ -1,9 +1,12 @@
 <resources>
     <!-- API 17 基线：Theme.Material 是 API 21+，低版本回退 Holo。
          高版本属性（colorAccent/windowLightStatusBar/navigationBarColor/statusBarColor）
-         放到 values-v21/themes.xml 覆盖。 -->
+         放到 values-v21/themes.xml 覆盖。
+         API 17-20 上禁止在主题里写任何字符串型属性（如 android:fontFamily）：框架的
+         文本选择弹窗（Editor$ActionPopupWindow）会用 App 主题去 inflate 自己的布局，
+         TypedArray.loadStringValueAt 把 App 资源表的字符串索引当成框架布局 XmlBlock
+         的池索引读取，越界抛 ArrayIndexOutOfBoundsException(StringBlock.get)。 -->
     <style name="Theme.Xcertplay" parent="android:Theme.Holo.NoActionBar">
-        <item name="android:fontFamily">sans</item>
         <item name="android:windowBackground">@color/window_background_dark</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
@@ -17,18 +20,15 @@
     <!-- AppDialogs 取色用：API 17 基线走公开的 Holo Dialog（Theme.Holo.Dialog.Alert 为私有资源，
          AAPT2 链接会报 private；按钮排版由 AlertDialog 自身决定，v21 覆盖为 Material Alert） -->
     <style name="Theme.Xcertplay.Dialog.Dark" parent="android:Theme.Holo.Dialog">
-        <item name="android:fontFamily">sans</item>
         <item name="android:windowBackground">@color/dialog_background_dark</item>
     </style>
     <!-- main B8：浅色启动主题，仅用于 API 33+ setSplashScreenTheme 设置的下次启动窗口（作者：TRAE AI）。
          API 17 基线只给背景色，状态栏等高版本属性由 values-v21 覆盖。 -->
     <style name="Theme.Xcertplay.Light" parent="android:Theme.Holo.Light.NoActionBar">
-        <item name="android:fontFamily">sans</item>
         <item name="android:windowBackground">@color/window_background_light</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
     <style name="Theme.Xcertplay.Dialog.Light" parent="android:Theme.Holo.Light.Dialog">
-        <item name="android:fontFamily">sans</item>
         <item name="android:windowBackground">@color/dialog_background_light</item>
     </style>
 </resources>

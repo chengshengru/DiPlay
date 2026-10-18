@@ -107,16 +107,48 @@ class Iap2UsbMuxHost private constructor(
     }
 
     private fun begin() {
+        onDiagnostic(
+            "usbmux handshake begin: writing ${VERSION_MESSAGE_BYTES}-byte version request " +
+                "(timeout=${HANDSHAKE_TIMEOUT_MILLIS}ms)",
+        )
         val version = ByteArray(VERSION_MESSAGE_BYTES)
         putU32(version, 0, PROTOCOL_VERSION)
         putU32(version, 4, VERSION_MESSAGE_BYTES)
         putU32(version, 8, USBMUX_VERSION)
-        pipe.write(version, HANDSHAKE_TIMEOUT_MILLIS.toInt())
+        // 看门狗：部分 API 17 厂商内核的 bulkTransfer 不遵守写超时，USBMUX bulk-OUT 被 iPhone NAK
+        // 或端点 stall 时会无限阻塞。超过阈值仍无写返回就显式报警，避免界面卡死却无日志
+        // （真机卡点正停在这一步：NCM 桥返回后、wired USBMUX host opened 之前）。
+        val writeWatchdog = Thread({
+            try {
+                Thread.sleep(WRITE_WATCHDOG_MILLIS)
+            } catch (_: InterruptedException) {
+                return@Thread
+            }
+            runCatching {
+                onDiagnostic(
+                    "usbmux handshake write still pending after ${WRITE_WATCHDOG_MILLIS}ms; " +
+                        "possible kernel bulkTransfer stall on the USBMUX bulk-OUT endpoint " +
+                        "(dual UsbDeviceConnection conflict on C140A, or iPhone not accepting " +
+                        "USBMUX yet)",
+                )
+            }
+        }, "usbmux-write-watchdog").apply { isDaemon = true; start() }
+        val writeStartNanos = System.nanoTime()
+        try {
+            pipe.write(version, HANDSHAKE_TIMEOUT_MILLIS.toInt())
+        } finally {
+            writeWatchdog.interrupt()
+        }
+        onDiagnostic(
+            "usbmux handshake wrote ${VERSION_MESSAGE_BYTES} bytes in " +
+                "${(System.nanoTime() - writeStartNanos) / 1_000_000}ms",
+        )
         // The phone replies with the same proto=0, length=20, version=2 packet. Protocol 1 is not
         // a distinct "version reply" here; waiting for it discards the valid reply and times out.
         val deadline = System.nanoTime() + HANDSHAKE_TIMEOUT_MILLIS * NANOS_PER_MILLISECOND
         var staleFrames = 0
         var reply: UsbMuxFrame
+        var lastReportNanos = writeStartNanos
         while (true) {
             val remainingNanos = deadline - System.nanoTime()
             if (remainingNanos <= 0) {
@@ -125,6 +157,14 @@ class Iap2UsbMuxHost private constructor(
             val remainingMillis = (remainingNanos + NANOS_PER_MILLISECOND - 1) / NANOS_PER_MILLISECOND
             reply = takeFrame(remainingMillis)
                 ?: throw IphoneUsbException.TimedOut("Timed out waiting for the USBMUX version reply")
+            val nowNanos = System.nanoTime()
+            if (nowNanos - lastReportNanos >= HANDSHAKE_REPORT_INTERVAL_NANOS) {
+                lastReportNanos = nowNanos
+                onDiagnostic(
+                    "usbmux handshake waiting for version reply " +
+                        "elapsed=${(nowNanos - writeStartNanos) / 1_000_000_000}s staleFrames=$staleFrames",
+                )
+            }
             if (
                 reply.protocol == PROTOCOL_VERSION &&
                 reply.length == VERSION_MESSAGE_BYTES &&
@@ -143,7 +183,7 @@ class Iap2UsbMuxHost private constructor(
             }
             Log.i("xcertplay-usb", "discarding stale usbmux TCP frame before version reply")
         }
-        Log.i("xcertplay-usb", "usbmux version accepted: ${reply.word8}")
+        onDiagnostic("usbmux version accepted: ${reply.word8}")
         // Optional reply padding is handled by the incremental framer. Retain a possible
         // fragmented/coalesced next frame instead of discarding the entire remainder.
         sendFrame(PROTOCOL_SETUP, byteArrayOf(SETUP_VALUE.toByte()))
@@ -283,8 +323,15 @@ class Iap2UsbMuxHost private constructor(
         private const val TCP_HEADER_BYTES = 20
         private const val TCP_WINDOW_FIELD = 512
         private const val FIRST_SOURCE_PORT = 1
-        private const val HANDSHAKE_TIMEOUT_MILLIS = 60_000L
+        // 诊断构建：握手写超时从 60s 收紧到 30s，让内核若遵守超时时更快冒出失败日志。
+        // 量产可恢复 60_000L。
+        private const val HANDSHAKE_TIMEOUT_MILLIS = 30_000L
         private const val MAX_STALE_HANDSHAKE_FRAMES = 32
+        // 看门狗：部分 API 17 厂商内核的 bulkTransfer 不遵守写超时，USBMUX bulk-OUT 被 iPhone NAK
+        // 或端点 stall 时会无限阻塞。超过该阈值仍无写返回即显式报警（须早于 HANDSHAKE_TIMEOUT_MILLIS）。
+        private const val WRITE_WATCHDOG_MILLIS = 28_000L
+        // 读循环等待版本回包时，每隔该间隔打印一次存活日志，避免"卡死却无任何日志"。
+        private const val HANDSHAKE_REPORT_INTERVAL_NANOS = 2_000_000_000L
         private const val CONNECT_TIMEOUT_MILLIS = 5_000L
         private const val WRITE_TIMEOUT_MILLIS = 2_000
         private const val CLOSE_JOIN_MARGIN_MILLIS = 100L
@@ -300,6 +347,7 @@ class Iap2UsbMuxHost private constructor(
                 try {
                     it.begin()
                 } catch (error: Throwable) {
+                    runCatching { onDiagnostic("usbmux handshake failed: ${error.message}") }
                     it.close()
                     throw error
                 }

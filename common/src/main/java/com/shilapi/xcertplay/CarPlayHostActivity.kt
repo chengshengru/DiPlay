@@ -5269,6 +5269,10 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
 
             override fun onDebugLog(message: String) {
                 val redacted = DiagnosticRedactor.redact(message) ?: return
+                // 实时日志面板与诊断文件同源：面板上出现的每一行都必须落盘，否则导出的报告会比屏幕少行，
+                // 用户仍得靠截图。菜单展开期间、旧控制器收尾期间的行以前被 generation/menu 门禁静默丢弃——
+                // 那两个判据只决定是否接收 UI/会话状态，不该决定日志是否留存。
+                AsyncDiagnosticLog.append(diagnosticLog ?: sessionLog, redacted)
                 synchronized(usbDiagLock) {
                     usbDiagLines.addLast(redacted)
                     // 保留当前会话完整日志（不再截断为 12 行）；上限 2000 行防止极端情况下无限增长。
@@ -5285,7 +5289,6 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                 }
                 if (message.startsWith(CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX + " ")) {
                     // Retain old-controller teardown evidence without accepting its UI/session state.
-                    AsyncDiagnosticLog.append(diagnosticLog, message)
                     return
                 }
                 runOnUiThread {
@@ -5294,11 +5297,8 @@ class CarPlayHostActivity : ComponentActivity(), AppAppearanceOwner {
                     }
                     DisplayDiagnosticSnapshot.record(this@CarPlayHostActivity, displayDiagnosticAttempt, message)
                     if (menuOpen) return@runOnUiThread
-                    if (message.startsWith(PROTOCOL_TRACE_PREFIX)) {
-                        appendFileLog(message)
-                    } else {
-                        appendLog(message)
-                    }
+                    // 该行已在上面统一落盘，这里不能再写一遍，否则报告里每行都会重复。
+                    if (message.startsWith(PROTOCOL_TRACE_PREFIX)) appendFileLog(message)
                 }
             }
         }

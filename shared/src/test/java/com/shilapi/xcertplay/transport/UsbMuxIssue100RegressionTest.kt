@@ -51,9 +51,16 @@ class UsbMuxIssue100RegressionTest {
             assertEquals(null, failure)
             assertEquals(listOf(20, 17), UsbEvidenceReplay.writes.map { it.size })
             assertTrue(remainder(host).isEmpty())
-            assertEquals(2, diagnostics.size)
-            assertTrue(diagnostics[0].contains("previousProtocol=0 previousLength=20"))
-            assertTrue(diagnostics[1].contains("previousProtocol=6 previousLength=36"))
+            // begin() 现在会额外输出握手阶段诊断，diagnostics 不再恰好为 2 条；
+            // 仅校验帧缓冲诊断（版本回包 / SYN-ACK）确实存在，顺序无关。
+            assertTrue(
+                "frame-buffer diagnostic for version reply must be present",
+                diagnostics.any { it.contains("previousProtocol=0 previousLength=20") },
+            )
+            assertTrue(
+                "frame-buffer diagnostic for SYN/ACK must be present",
+                diagnostics.any { it.contains("previousProtocol=6 previousLength=36") },
+            )
         } finally { host.close() }
     }
 
@@ -165,9 +172,16 @@ class UsbMuxIssue100RegressionTest {
                 ReflectionHelpers.getField<IphoneUsbException?>(host, "failure")
             }
             assertEquals(null, failure)
-            assertEquals(4, diagnostics.size)
-            assertTrue(diagnostics.any { it.contains("previousLength=40") })
-            assertTrue(diagnostics.any { it.contains("previousLength=396") })
+            // begin() 现在会额外输出握手阶段诊断，diagnostics 不再恰好为 4 条；
+            // 仅校验帧缓冲诊断（40 / 396 字节回包）确实存在，顺序无关。
+            assertTrue(
+                "frame-buffer diagnostic for 40-byte reply must be present",
+                diagnostics.any { it.contains("previousLength=40") },
+            )
+            assertTrue(
+                "frame-buffer diagnostic for 396-byte reply must be present",
+                diagnostics.any { it.contains("previousLength=396") },
+            )
         } finally { host.close() }
     }
 

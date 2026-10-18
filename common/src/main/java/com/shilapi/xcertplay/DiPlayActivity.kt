@@ -6183,6 +6183,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     /** The text of a diagnostic report. It reads the session logs, so call it off the main thread. */
     private fun diagnosticReportText(appContext: Context): String = buildString {
+        // 实时日志面板的行经异步队列落盘；导出前做一次有界 flush，否则报告会比屏幕少最后几行。
+        AsyncDiagnosticLog.awaitIdle(DIAGNOSTIC_FLUSH_TIMEOUT_MILLIS)
         appendLine("DiPlay ${version()} · private beta diagnostic report")
         appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
         appendLine("Head unit: ${Build.MANUFACTURER} ${Build.MODEL}")
@@ -6249,8 +6251,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine("Startup settings: openAfterBoot=${AirPlayPersistence.loadAutoStartOnBoot(appContext)} " +
             "connectWhenOpened=${DiPlayPreferences.autoConnect(appContext)}")
         // main #748/#749：诊断报告加入热点控制状态（作者：TRAE AI）。
-        appendLine("Car hotspot control: autoEnable=${CarHotspotSettings.enabled(appContext)} " +
-            "writeSettings=${CarHotspotTethering.permitted(appContext)} " +
+        // 与相邻探测一致包 runCatching：单个探测段异常不得毁掉整份报告（作者：TRAE AI）。
+        appendLine("Car hotspot control: autoEnable=${runCatching { CarHotspotSettings.enabled(appContext) }.getOrNull()} " +
+            "writeSettings=${runCatching { CarHotspotTethering.permitted(appContext) }.getOrNull()} " +
             "bydHeadUnit=${runCatching { CarHotspotSetup.isBydHeadUnit(appContext) }.getOrNull()} " +
             "hotspotOn=${runCatching { com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(appContext) }.getOrNull()}")
         appendLine(WheelKeyService.report(appContext))
@@ -6855,6 +6858,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private val RIPPLE get() = palette.ripple
 
     companion object {
+        /** 导出诊断报告前等待实时日志异步队列落盘的上限；有界失败不阻塞导出（作者：TRAE AI）。 */
+        private const val DIAGNOSTIC_FLUSH_TIMEOUT_MILLIS = 1_000L
+
         /** 波次十 #645：取资源配置里的首选语言；Configuration.locales 是 API 24+，低版本走废弃 locale（作者：TRAE AI）。 */
         private fun firstLanguage(resources: android.content.res.Resources): String =
             if (Build.VERSION.SDK_INT >= 24) resources.configuration.locales[0].language

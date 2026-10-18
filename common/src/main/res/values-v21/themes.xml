@@ -1,5 +1,7 @@
 <resources>
-    <!-- API 21+：使用 Material 主题并恢复高版本属性 -->
+    <!-- API 21+：使用 Material 主题并恢复高版本属性。
+         android:fontFamily 只留在 v21+：API 17-20 主题带字符串型属性会让框架的文本选择
+         弹窗在长按可选文本时崩在 StringBlock.get（见 values/themes.xml 注释）。 -->
     <style name="Theme.Xcertplay" parent="android:Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#A6C8FF</item>

@@ -743,6 +743,22 @@ class Iap2UsbSession internal constructor(
         connection.close()
     }
 
+    /**
+     * 诊断探针：NCM 二次 openDevice 之后，确认 USBMUX 这一路（首个连接）的控制通道是否仍存活。
+     *
+     * C140A API 17 内核双 UsbDeviceConnection 可能导致第二次 open / SET_INTERFACE 重置首个连接的
+     * 端点或接口，使 USBMUX bulk-OUT 握手无限阻塞。这里发一个无害的标准 GET_STATUS（recipient=设备）
+     * 控制传输：返回 2 字节说明首个连接控制通道仍可用；返回 -1/异常/超时则说明它已被破坏 —— 即可
+     * 确证双连接冲突，而非 iPhone 不回版本包。超时 1s 兜底，绝不无限阻塞。
+     */
+    fun probeControlChannel(): String = runCatching {
+        val buffer = ByteArray(2)
+        val transferred = connection.controlTransfer(
+            PROBE_STANDARD_DEVICE_IN, PROBE_GET_STATUS_REQUEST, 0, 0, buffer, buffer.size, 1000,
+        )
+        if (transferred == buffer.size) "ok transferred=$transferred" else "unexpected transferred=$transferred"
+    }.getOrElse { "failed: ${it.message}" }
+
     private fun checkOpen() {
         synchronized(stateLock) { checkOpenLocked() }
     }
@@ -801,6 +817,9 @@ class Iap2UsbSession internal constructor(
     private companion object {
         const val USBMUX_READ_CHUNK_BYTES = 65_536
         const val CANCEL_DRAIN_TIMEOUT_MILLIS = 1_000L
+        // 探针：标准 GET_STATUS（recipient=设备），无害且不改变设备状态。
+        private const val PROBE_STANDARD_DEVICE_IN = 0x80
+        private const val PROBE_GET_STATUS_REQUEST = 0x00
     }
 }
 

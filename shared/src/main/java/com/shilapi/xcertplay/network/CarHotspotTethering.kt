@@ -25,7 +25,12 @@ object CarHotspotTethering {
         CANCELLED("Hotspot startup was cancelled"),
     }
 
-    fun permitted(context: Context): Boolean = Settings.System.canWrite(context)
+    // API 17 适配：Settings.System.canWrite 是 API 23+；Jelly Bean 上 WRITE_SETTINGS 为安装期授予，
+    // 视为已授权（同 CarHotspotSetup.HOTSPOT / CenterMapOverlay 的守卫模式）。
+    // 未守卫时诊断报告（DiPlayActivity 车辆数据探测段）在 4.2.2 上抛 NoSuchMethodError，
+    // 导致整份报告生成失败、保存恒报“无法保存报告”。
+    fun permitted(context: Context): Boolean =
+        android.os.Build.VERSION.SDK_INT < 23 || Settings.System.canWrite(context)
 
     /** main #748：当前 Android 版本是否允许持有 permitted 权限的应用不经 ADB 自行启动热点（8.0–10）。 */
     fun appStartSupported(): Boolean = PlatformTetheringStart.supported()
