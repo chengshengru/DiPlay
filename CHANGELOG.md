@@ -1,3 +1,12 @@
+# DiPlay 0.2.20-api17 (wave 15) — 2026-10-17
+
+Android 4.2.2 (API 17) 移植 `main` @ `1b1ac5f2`（波次十四终点）到 `main` @ `b309eae9` 之间的增量（批次 A–C）；逐项细节、文件级差异与 API 17 守卫见[迁移报告](DiPlay-main分支增量差异迁移报告-0.2.20-next2.md)。版本维持 `0.2.20-api17` / versionCode 39，未改任何构建脚本：
+
+- **BYD 车机音乐律动跟随 CarPlay 音乐**（#695）：氛围灯新增"车机音乐律动"开关（默认关，仅 BYD 支持时显示），CarPlay 播放时反射调用 BYD 隐藏 `IAudioService.startAudioOutput` 驱动车机原生律动灯光，DiPlay 自有氛围灯让位；直调优先、失败降级 ADB helper（`app_process`），启动失败按 2/4/6 s 递增重试（最多 3 次）。同步 `docs/BYD_AMBIENT_LIGHTING.md` 权威全文。
+- **免输入连接车机热点**（#769）：开关打开后经 ADB shell（Android 11+）或应用反射（7.1）读回车机热点 SSID/密码，读到即导入；读不到弹确认对话框，无详情时生成 `DiPlay-XXXX` + 16 位随机密码，写回只改 passphrase、保留车机 SSID/hiddenSSID/apBand，密码走 stdin 不进进程列表，下次启动热点生效。分支将 4.2–7.1 反射路径扩展为实验性（main 未实测），标题带实验性后缀。
+- **主屏回到 CarPlay 悬浮气泡**（#844）：WindowManager 独立 overlay 窗口自绘气泡，点击回到 CarPlay（会话中）或 DiPlay 主页；拖动记忆位置、长按 900 ms 锁定，大小 8/10/12/16% 可调，默认关，归入 Advanced（实验性）。API 17 守卫：`canDrawOverlays` 加 SDK≥23 判定、`getSystemService(Class)` 改字符串服务名、保留 `TYPE_PHONE` 回退。同步 `docs/LAUNCHER_INTEGRATION.md` 权威全文。
+- 跳过：#847（minSdk 25→24）不适用——分支 minSdk 17 本就覆盖 4.2；其 `targetedByBydSettingsWork` 收紧为 `== N_MR1` 对分支语义相反，保持 `<= N_MR1` 不动。`docs/COMPATIBILITY.md`、`docs/CONNECTION_RELIABILITY.md` 属 #847 改动，一并跳过；本轮 main 未写入 `docs/RELEASE-NOTES-NEXT.md`，该文件维持分支现状。
+
 # DiPlay 0.2.20-api17 (wave 14) — 2026-10-17
 
 Android 4.2.2 (API 17) port of the 37-commit increment between `main` @ `969f8714` (the tagged 0.2.20 release, already ported by wave 13) and `main` @ `1b1ac5f2`. Wave 14 ports that increment (batches A–H); see the [migration report](DiPlay-main分支增量差异迁移报告-0.2.20-next.md) for per-feature details, file-level diffs and API 17 guards. The authoritative feature text for this increment is [next release notes](docs/RELEASE-NOTES-NEXT.md):
